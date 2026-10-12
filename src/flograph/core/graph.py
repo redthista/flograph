@@ -751,7 +751,11 @@ class Graph:
         """
         if varlinks.is_vars(node) and spec.name == varlinks.ASSIGNMENTS_PARAM:
             return True
-        if spec.type not in varlinks.SUBSTITUTABLE:
+        if (spec.name == varlinks.VARIABLE_PARAM
+                and node.spec.card == varlinks.CONTROL_CARD):
+            return True     # a control published, renamed or withdrew one
+        if (spec.type not in varlinks.SUBSTITUTABLE
+                and spec.type not in varlinks.BINDABLE):
             return False
         return varlinks.MARKER in f"{previous}{value}"
 

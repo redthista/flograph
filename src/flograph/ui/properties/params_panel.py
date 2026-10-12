@@ -518,7 +518,13 @@ class ParamsPanel(QWidget):
             if not spec.visible_for(node.params):
                 continue
             value = node.params.get(spec.name)
-            widget, setter = self._make_widget(spec, value)
+            if (varlinks.bindable(node, spec)
+                    and varlinks.binding_of(value) is not None):
+                # a spin box or tick box cannot show "${threshold}", so a
+                # bound param gets a chip saying what it is bound to
+                widget, setter = self._make_bound_widget(spec, value)
+            else:
+                widget, setter = self._make_widget(spec, value)
             self._setters[spec.name] = setter
             parent = None
             if spec.section:
@@ -781,6 +787,9 @@ class ParamsPanel(QWidget):
             action = menu.addAction("Reset to Default")
             action.setEnabled(item.font(0).bold() and not node.locked)
             action.triggered.connect(lambda: self.reset_to_defaults([name]))
+            spec = node.spec.param(name)
+            if spec is not None and varlinks.bindable(node, spec):
+                self._add_bind_menu(menu, node, spec)
         if self._sections:
             if not menu.isEmpty():
                 menu.addSeparator()
@@ -794,6 +803,69 @@ class ParamsPanel(QWidget):
             menu.exec(self.tree.viewport().mapToGlobal(pos))
         finally:
             menu_guard.menu_closed()
+
+    def _add_bind_menu(self, menu: QMenu, node, spec: ParamSpec) -> None:
+        """Use Variable ▸ — bind a typed param to a flow variable. The
+        param then holds `${name}` as its whole value and takes the
+        variable's value at each run (core.varlinks.coerce_bound)."""
+        bound = varlinks.binding_of(node.params.get(spec.name))
+        names = [n for n in varlinks.completion_names(self._graph)
+                 if not n.startswith(varlinks.ENV_PREFIX)]
+        sub = menu.addMenu("Use Variable")
+        sub.setEnabled(not node.locked)
+        if not names:
+            hint = sub.addAction("No variables yet — name an input control's "
+                                 "Variable, or add a Variables node")
+            hint.setEnabled(False)
+        for var in names:
+            act = sub.addAction(f"${{{var}}}")
+            act.setCheckable(True)
+            act.setChecked(var == bound)
+            act.triggered.connect(
+                lambda _c=False, v=var: self._commit(
+                    spec.name, f"${{{v}}}", merge=False))
+        if bound is not None:
+            menu.addAction("Stop Using Variable").triggered.connect(
+                lambda: self._commit(spec.name, spec.default, merge=False))
+
+    def _make_bound_widget(self, spec: ParamSpec, value: Any):
+        """A bound param's row: what it is bound to, what that is now, and
+        a ✕ that unbinds it (back to the default)."""
+        name = spec.name
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        label = QLabel()
+        label.setObjectName(f"param_{name}_binding")
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row.addWidget(label, 1)
+        unbind = QToolButton()
+        unbind.setText("✕")
+        unbind.setAutoRaise(True)
+        unbind.setToolTip("Stop using the variable")
+        unbind.clicked.connect(
+            lambda: self._commit(name, spec.default, merge=False))
+        row.addWidget(unbind)
+
+        def show(v) -> None:
+            ref = varlinks.binding_of(v) or ""
+            current = varlinks.declared_values(self._graph).get(ref)
+            source = varlinks.provider_label(self._graph, ref)
+            text = f"${{{ref}}}"
+            if current is not None:
+                text += f"  =  {current}"
+            label.setText(text)
+            label.setToolTip(
+                f"Bound to the flow variable {ref!r}"
+                + (f", set by {source!r}" if source else "")
+                + ". Its value is used here at each run; right-click the row "
+                  "▸ Use Variable to pick another."
+                if current is not None else
+                f"No variable named {ref!r} — this node will not run until "
+                f"one exists.")
+        show(value)
+        return box, show
 
     def reset_to_defaults(self, names: list[str],
                           text: str = "Reset to Default") -> None:
@@ -1874,9 +1946,20 @@ class ParamsPanel(QWidget):
     def _on_param_changed(self, node_id: str, name: str, value: Any) -> None:
         if node_id != self._node_id:
             return
+        node = self._graph.node(node_id)
+        spec = node.spec.param(name)
+        if spec is not None and varlinks.bindable(node, spec):
+            widget = self.tree.itemWidget(self._rows[name], 1) \
+                if name in self._rows else None
+            shows_binding = widget is not None and widget.findChild(
+                QLabel, f"param_{name}_binding") is not None
+            if shows_binding != (varlinks.binding_of(value) is not None):
+                # bound <-> literal swaps the row's widget: rebuild, but
+                # not from inside the signal of the widget being replaced
+                QTimer.singleShot(0, self._rebuild_if_live)
+                return
         if name in self._setters:
             self._setters[name](value)
-        node = self._graph.node(node_id)
         item = self._rows.get(name)
         spec = node.spec.param(name) if item is not None else None
         if spec is not None:

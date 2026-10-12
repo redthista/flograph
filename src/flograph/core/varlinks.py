@@ -23,6 +23,18 @@ cached output at dispatch (see `engine.varsubst`).
 
 `${env:NAME}` is a different animal: it resolves from a .env file, not from
 a node, so it creates no edge. See `core.dotenv`.
+
+**Input controls publish variables too.** Give a Slider a *Variable name*
+of `threshold` and `${threshold}` is its value, with the same edge, the
+same ordering and the same re-runs as a Variables node's. That is what
+makes a dashboard knob reach a param no wire can — a Filter's query, a Read
+CSV's path. A control with several outputs (Between's low/high) publishes
+`name_low` and `name_high`, plus `name` as the list of all of them.
+
+**Typed params can be bound.** A number, tick box, dropdown or date param
+cannot hold `${x}` *inside* other text, but it can hold a reference as its
+whole value — a binding — which is coerced to the param's type at dispatch
+(`coerce_bound`). The properties panel offers it as Use variable ▸.
 """
 from __future__ import annotations
 
@@ -46,6 +58,17 @@ SUBSTITUTABLE = frozenset({
     "password",
 })
 
+# Param types that can be *bound*: their whole value is one reference,
+# `${name}`, resolved and coerced to the type at dispatch. Cosmetic params
+# are left out — a card's own width is read by the canvas, which has no
+# variables to resolve it with.
+BINDABLE = frozenset({"int", "float", "bool", "choice", "date"})
+
+# A control's published name lives here (core.control_apply adds it to
+# every control node).
+VARIABLE_PARAM = "variable"
+CONTROL_CARD = "control"
+
 # Deliberately strict — no whitespace, no dotted paths, no expressions. A
 # reference is a name or it is literal text, and there is no third reading
 # for someone to get wrong. `${...}` is not valid Python or pandas syntax
@@ -55,6 +78,9 @@ PATTERN = re.compile(r"\$\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
 
 MARKER = "${"               # cheap pre-test before running the regex
 
+# A binding: nothing but one reference.
+BINDING = re.compile(r"^\$\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}$")
+
 
 class VariableError(Exception):
     """A `${name}` that cannot be resolved. Fails the node that used it."""
@@ -62,6 +88,123 @@ class VariableError(Exception):
 
 def is_vars(node) -> bool:
     return node.spec.card == VAR_CARD
+
+
+def published_name(node) -> str:
+    """The variable name an input control publishes, or "" — a control
+    with no name (or a name that isn't one) publishes nothing."""
+    if node.spec.card != CONTROL_CARD:
+        return ""
+    name = str(node.params.get(VARIABLE_PARAM) or "").strip()
+    return name if name.isidentifier() else ""
+
+
+def is_provider(node) -> bool:
+    """Does this node supply `${name}` values? A Variables node, or an
+    input control with a Variable name."""
+    return is_vars(node) or bool(published_name(node))
+
+
+def provided_names(node) -> list[str]:
+    """Every name a provider supplies, statically."""
+    if is_vars(node):
+        return declared_names(node)
+    return list(_control_names(node))
+
+
+def _control_names(node) -> dict[str, Any]:
+    """name -> the output port it reads, or a tuple of ports for the
+    list-of-everything name of a multi-output control."""
+    name = published_name(node)
+    if not name:
+        return {}
+    ports = [p.name for p in node.spec.outputs]
+    if len(ports) == 1:
+        return {name: ports[0]}
+    found: dict[str, Any] = {name: tuple(ports)}
+    for port in ports:
+        found[f"{name}_{port}"] = port
+    return found
+
+
+def provided_values(node, outputs: dict) -> dict[str, Any]:
+    """The values a provider supplies, from its cached `outputs`."""
+    if is_vars(node):
+        produced = outputs.get(VAR_PORT)
+        return dict(produced) if hasattr(produced, "items") else {}
+    values: dict[str, Any] = {}
+    for name, port in _control_names(node).items():
+        if isinstance(port, tuple):
+            if all(p in outputs for p in port):
+                values[name] = [outputs[p] for p in port]
+        elif port in outputs:
+            values[name] = outputs[port]
+    return values
+
+
+def binding_of(value: Any) -> Optional[str]:
+    """The reference a bound param holds (`env:` prefix kept), or None."""
+    if not isinstance(value, str):
+        return None
+    match = BINDING.match(value.strip())
+    if match is None:
+        return None
+    return f"{ENV_PREFIX}{match.group(2)}" if match.group(1) else match.group(2)
+
+
+def bindable(node, spec) -> bool:
+    """Can this param be bound to a variable? See BINDABLE."""
+    return (spec.type in BINDABLE and not spec.cosmetic and not spec.hidden
+            and not (node.spec.card == CONTROL_CARD and spec.name == "value"))
+
+
+_TRUE = {"true", "1", "yes", "on", "y", "t"}
+_FALSE = {"false", "0", "no", "off", "n", "f", ""}
+
+
+def coerce_bound(spec, value: Any) -> Any:
+    """A variable's value as a value of a bound param's type, or raise
+    VariableError naming what went wrong — a dashboard should stop and
+    say "threshold is 'abc', not a number" rather than run on nonsense."""
+    kind, name = spec.type, spec.name
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in _TRUE:
+            return True
+        if text in _FALSE:
+            return False
+        raise VariableError(f"{name!r} is a tick box, got {value!r}")
+    if kind in ("int", "float"):
+        if isinstance(value, bool):
+            raise VariableError(f"{name!r} is a number, got {value!r}")
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise VariableError(
+                f"{name!r} is a number, got {value!r}") from None
+        if spec.minimum is not None:
+            number = max(number, float(spec.minimum))
+        if spec.maximum is not None:
+            number = min(number, float(spec.maximum))
+        return int(round(number)) if kind == "int" else number
+    if kind == "date":
+        from .controls import as_iso_date
+        iso = as_iso_date(value)
+        if not iso and str(value or "").strip():
+            raise VariableError(f"{name!r} is a date, got {value!r}")
+        return iso
+    if kind == "choice":
+        text = "" if value is None else str(value)
+        if spec.options and text not in spec.options:
+            allowed = ", ".join(str(o) for o in spec.options)
+            raise VariableError(
+                f"{name!r} has no option {text!r} (has: {allowed})")
+        return text
+    return value
 
 
 def link_id(consumer_id: str, source_id: str) -> str:
@@ -124,10 +267,11 @@ def _param_texts(node):
     """Every substitutable param value on a node, as text. See
     `substitutable` for which params qualify."""
     for spec in node.spec.params:
-        if not substitutable(node, spec):
-            continue
         value = node.params.get(spec.name)
-        if isinstance(value, str) and MARKER in value:
+        if not isinstance(value, str) or MARKER not in value:
+            continue
+        if substitutable(node, spec) or (
+                bindable(node, spec) and binding_of(value) is not None):
             yield spec.name, value
 
 
@@ -184,14 +328,34 @@ def substitute_params(node, values: dict[str, Any],
     text params with no `${`, are passed through untouched."""
     params = dict(node.params)
     for name, text in _param_texts(node):
-        params[name] = substitute(text, values, env)
+        spec = node.spec.param(name)
+        if spec is not None and spec.type in BINDABLE:
+            params[name] = coerce_bound(spec, _bound_value(text, values, env))
+        else:
+            params[name] = substitute(text, values, env)
     return params
+
+
+def _bound_value(text: str, values: dict[str, Any],
+                 env: Optional[dict[str, str]]) -> Any:
+    """A binding's value as the provider made it — a number stays a
+    number, rather than going through str() the way text substitution
+    must."""
+    ref = binding_of(text)
+    if ref is None:
+        return substitute(text, values, env)
+    if ref.startswith(ENV_PREFIX):
+        return substitute(text, values, env)
+    if ref not in values:
+        raise VariableError(f"no variable named {ref!r}")
+    return values[ref]
 
 
 # ------------------------------------------------------------- derivation
 
 def providers(graph: "Graph") -> dict[str, list[str]]:
-    """name -> the ids of the Variables nodes declaring it.
+    """name -> the ids of the providers (Variables nodes and named input
+    controls) declaring it.
 
     A list, not an id: two nodes declaring the same name is a conflict this
     has to be able to *describe*, and refusing to answer at all would leave
@@ -199,20 +363,37 @@ def providers(graph: "Graph") -> dict[str, list[str]]:
     """
     found: dict[str, list[str]] = {}
     for node_id, node in graph.nodes.items():
-        if not is_vars(node):
+        if not is_provider(node):
             continue
-        for name in declared_names(node):
+        for name in provided_names(node):
             found.setdefault(name, []).append(node_id)
     return found
 
 
 def declared_values(graph: "Graph") -> dict[str, str]:
-    """Every variable's *declared* value, across all Variables nodes."""
+    """Every variable's *declared* value, across all providers — a
+    Variables node's text, a control's applied value."""
     values: dict[str, str] = {}
     for node in graph.nodes.values():
         if is_vars(node):
             values.update(parse_assignments(node.params.get(ASSIGNMENTS_PARAM))[0])
+        elif published_name(node):
+            for name, port in _control_names(node).items():
+                values[name] = (str(node.params.get("value", ""))
+                                if not isinstance(port, str)
+                                or len(node.spec.outputs) == 1
+                                else f"{port} of {node.label}")
     return values
+
+
+def provider_label(graph: "Graph", name: str) -> str:
+    """Which node a name comes from, for a tooltip: "" when it is a
+    Variables node (the usual case, which needs no saying)."""
+    for node_id in providers(graph).get(name, ()):
+        node = graph.nodes[node_id]
+        if not is_vars(node):
+            return node.label
+    return ""
 
 
 def completion_names(graph: "Graph") -> list[str]:
@@ -267,9 +448,12 @@ def describe(graph: "Graph", node) -> list[str]:
                      else "missing from the secrets file")
             lines.append(f"${{{ref}}} — {state}")
         elif ref in values:
-            lines.append(f"${{{ref}}} = {values[ref]}")
+            source = provider_label(graph, ref)
+            lines.append(f"${{{ref}}} = {values[ref]}"
+                         + (f" (from {source})" if source else ""))
         else:
-            lines.append(f"${{{ref}}} — not defined by any Variables node")
+            lines.append(f"${{{ref}}} — not defined by any Variables node "
+                         "or input control")
     return lines
 
 
@@ -311,8 +495,13 @@ def resolve_var_links(graph: "Graph") -> dict[str, "Connection"]:
             key = link_id(node_id, src)
             if key in edges:
                 continue            # two names from the same node: one edge
+            # the port is a label only — the edge carries no value (see the
+            # module docstring); a control's names its first output
+            source = graph.nodes[src]
+            src_port = (VAR_PORT if is_vars(source) or not source.spec.outputs
+                        else source.spec.outputs[0].name)
             edges[key] = Connection(
-                id=key, src_node=src, src_port=VAR_PORT,
+                id=key, src_node=src, src_port=src_port,
                 dst_node=node_id, dst_port="",
             )
             adjacency.setdefault(src, set()).add(node_id)
@@ -345,7 +534,7 @@ def var_problem(graph: "Graph", node_id: str) -> Optional[str]:
         if len(sources) > 1:
             labels = ", ".join(sorted(graph.nodes[s].label for s in sources))
             return (f"not configured: {name!r} is defined by more than one "
-                    f"Variables node ({labels})")
+                    f"node ({labels})")
         if link_id(node_id, sources[0]) not in graph.var_links:
             return (f"not configured: reading {name!r} here would create "
                     f"a loop")

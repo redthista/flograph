@@ -42,6 +42,13 @@ The button's **Inputs** setting says which controls it applies:
 
 All of them go on as one undo step and one run.
 
+## Using a control's value anywhere
+
+Type a **Variable name** in a control's Behaviour settings and its value is
+`${name}` everywhere in the flow — a Filter's query, a file path, a chart
+title — and, through **Use Variable**, any number, tick-box, dropdown or
+date setting. See [[Flow Variables]].
+
 ## Resetting
 
 **Reset inputs** on an Action Button puts the same set of controls back to

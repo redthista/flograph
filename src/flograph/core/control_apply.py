@@ -48,6 +48,11 @@ COMMON_PARAMS: list[dict] = [
      "hidden": True, "default": "", "cosmetic": True},
     {"name": "show_reset", "type": "bool", "label": "Show reset button",
      "default": False, "cosmetic": True, "section": _SECTION},
+    # Not cosmetic: naming a variable changes which nodes read this one,
+    # and the graph re-derives those edges itself (core.varlinks).
+    {"name": "variable", "type": "string", "label": "Variable name",
+     "default": "", "section": _SECTION,
+     "placeholder": "e.g. threshold — then write ${threshold} in any box"},
 ]
 
 

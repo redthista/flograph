@@ -21,7 +21,8 @@ from PySide6.QtCore import QCoreApplication
 
 from flograph.core import NodeRegistry, NodeStatus, serialization
 from flograph.core.varlinks import (
-    ASSIGNMENTS_PARAM, is_vars, parse_assignments,
+    ASSIGNMENTS_PARAM, BINDABLE, coerce_bound, is_vars, parse_assignments,
+    published_name,
 )
 from flograph.paths import user_data_dir, user_nodes_dir
 
@@ -76,6 +77,19 @@ def apply_overrides(graph, overrides: dict[str, str]) -> None:
         declared.update(applied)
         graph.set_param(node_id, ASSIGNMENTS_PARAM,
                         "\n".join(f"{k} = {v}" for k, v in declared.items()))
+    # A named input control is set the way moving it would set it: its
+    # value param, in that param's own type — and any held change is
+    # dropped, since a command line has no Apply button to press.
+    for node_id, node in graph.nodes.items():
+        name = published_name(node)
+        if not name or name not in remaining or len(node.spec.outputs) != 1:
+            continue
+        spec = node.spec.param("value")
+        raw = remaining.pop(name)
+        value = coerce_bound(spec, raw) if spec.type in BINDABLE else raw
+        graph.set_param(node_id, "value", value)
+        if node.params.get("draft"):
+            graph.set_param(node_id, "draft", "")
     if remaining:
         names = ", ".join(sorted(remaining))
         raise ValueError(f"no variable named {names} in this project")

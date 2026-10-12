@@ -17,7 +17,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from ..core.varlinks import (
-    VAR_PORT, VariableError, substitute_params, uses_env,
+    VariableError, provided_values, substitute_params, uses_env,
 )
 
 
@@ -33,9 +33,10 @@ def available(graph, node_id: str, cache) -> dict[str, Any]:
     """
     values: dict[str, Any] = {}
     for src in graph.var_sources(node_id):
-        produced = cache.outputs_for(src).get(VAR_PORT)
-        if isinstance(produced, Mapping):
-            values.update(produced)
+        source = graph.nodes.get(src)
+        if source is not None:
+            # a Variables node's dict, or a named control's own outputs
+            values.update(provided_values(source, cache.outputs_for(src)))
     return values
 
 
