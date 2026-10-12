@@ -722,6 +722,39 @@ class TestHowTheBarWasLeftIsSaved:
         assert centre.x() == pytest.approx(300.0, abs=1)
         assert centre.y() == pytest.approx(200.0, abs=1)
 
+    def test_reopening_in_a_fresh_session_puts_every_view_back(
+            self, window, flow, tmp_path):
+        """The test above reopened into a window whose own graph still held
+        what it had just captured, so it passed while a real relaunch —
+        whose graph starts with none of it — opened every canvas framed to
+        its content. The file was right; the open never copied it across."""
+        path, page_id = self._project(window, tmp_path)
+        window.page_bar.select_page(None)
+        window.view.set_zoom(0.4)
+        window.view.centerOn(300.0, 200.0)
+        window.page_bar.select_page(page_id)
+        window.view.set_zoom(1.5)
+        window.view.centerOn(-50.0, 80.0)
+        window.page_bar.set_group_folded("Sales", True)
+        window._capture_view_state()
+        serialization.save(window.graph, path)
+        # what a new launch's window starts with
+        window.graph.canvas_views = {}
+        window.graph.folded_page_groups = set()
+        window._canvas_view_states.clear()
+
+        window.open_path(path, confirm=False)
+        assert window.page_bar.folded_groups() == {"Sales"}
+        assert window.view.zoom == pytest.approx(0.4)
+        centre = window.view.view_state()[1]
+        assert centre.x() == pytest.approx(300.0, abs=1)
+        assert centre.y() == pytest.approx(200.0, abs=1)
+        window.page_bar.select_page(page_id)
+        assert window.view.zoom == pytest.approx(1.5)
+        centre = window.view.view_state()[1]
+        assert centre.x() == pytest.approx(-50.0, abs=1)
+        assert centre.y() == pytest.approx(80.0, abs=1)
+
     def test_saving_and_reopening_over_and_over_does_not_walk(
             self, window, flow, tmp_path):
         """It used to lose one scroll step per cycle — 2.5 scene units at

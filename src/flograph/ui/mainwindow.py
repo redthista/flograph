@@ -6503,6 +6503,18 @@ class MainWindow(QMainWindow):
             self.graph.add_frame(frame)
         # before the pages, so each group's header arrives in its colour
         self.graph.set_page_group_colors(loaded.page_group_colors)
+        # The rest of what the file says about the project as a whole. The
+        # loop above moves items across one by one, so anything the loaded
+        # graph holds outside them is lost unless it is copied here — it
+        # was, for every canvas tab's zoom and place and the bar's folds,
+        # which `_restore_view_state` then read back from an empty graph.
+        # assigned, not set: nothing has run yet for a secret to dirty
+        self.graph.env_path = loaded.env_path
+        self.graph.env = dict(loaded.env)
+        self.graph.env_keys = list(loaded.env_keys)
+        self.graph.folded_page_groups = set(loaded.folded_page_groups)
+        self.graph.canvases_folded = loaded.canvases_folded
+        self.graph.canvas_views = dict(loaded.canvas_views)
         for page in loaded.pages.values():
             self.graph.add_page(page)
         self._restoring_pages = False
