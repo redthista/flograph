@@ -77,8 +77,11 @@ NODE = {
 PARAMS = [
     {"name": "caption", "type": "string", "label": "Caption",
      "default": "", "placeholder": "Shown above the fields"},
+    # "Set Up Fields…" beside it opens the setup wizard (ui/panel_wizard),
+    # which writes these same lines
     {"name": "fields", "type": "text", "label": "Fields", "default": "",
-     "placeholder": "Region = choice region\nPrice = between price\n"
+     "wizard": "panel",
+     "placeholder": "Region = slicer region\nPrice = between price\n"
                     "Ordered = date range order_date"},
     # every field's stored value, as JSON {name: value} — the one value the
     # control host writes, so Apply/Reset/undo work on the whole panel
@@ -93,9 +96,9 @@ PARAMS = [
      "options": ["stacked", "row", "2 columns", "3 columns"],
      "default": "stacked", "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 300, "min": 160, "max": 800, "cosmetic": True},
+     "default": 300, "min": 160, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 320, "min": 80, "max": 600, "cosmetic": True},
+     "default": 320, "min": 80, "max": 4000, "cosmetic": True},
 ]
 
 

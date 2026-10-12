@@ -539,3 +539,131 @@ def blank_required(fields: list[dict], values: dict) -> list[str]:
     return [f["label"] for f in fields
             if _yes(f["opts"].get("required", ""))
             and is_blank(values.get(f["name"]))]
+
+
+# ------------------------------------------------------------- the wizard
+
+#: the word a field line uses for each shape — the reverse of SHAPES
+SHAPE_WORDS = {"choice": "choice", "multi": "multi", "list": "slicer",
+               "slider": "slider", "number": "number", "range": "between",
+               "date": "date", "date_range": "date range", "text": "text",
+               "toggle": "toggle", "time": "time", "datetime": "datetime",
+               "colour": "colour"}
+#: the comparisons a shape can be given, its default first; a shape not
+#: here has one fixed way to filter (a slicer keeps the ticked values)
+SHAPE_COMPARISONS = {
+    "slider": [">=", "<=", ">", "<", "=="],
+    "number": [">=", "<=", ">", "<", "=="],
+    "date": [">=", "<=", ">", "<", "=="],
+    "text": ["contains", "startswith", "=="],
+}
+
+
+def _quoted(text: Any) -> str:
+    """A word for a field line: quoted when it has spaces or quotes in it,
+    so shlex reads it back as one word."""
+    import shlex
+    text = str(text)
+    return text if text and all(c not in text for c in " \t\"'=#") \
+        else shlex.quote(text)
+
+
+def dump_field(field: dict) -> str:
+    """One field as the line `parse_fields` reads back into the same field
+    — what the setup wizard writes. The comparison is left out when it is
+    the shape's default, so a written line reads the way a typed one
+    would."""
+    shape = field["shape"]
+    label = str(field.get("label") or "").replace("=", " ").strip() or "Field"
+    words = [label, "=", SHAPE_WORDS.get(shape, shape)]
+    if field.get("column"):
+        words.append(_quoted(field["column"]))
+    op = field.get("op") or ""
+    if op and op != _DEFAULT_OP.get(shape, ""):
+        words.append(op)
+    for key, value in (field.get("opts") or {}).items():
+        if value in (None, ""):
+            continue
+        words.append(f"{key}={_quoted(value)}")
+    return " ".join(words)
+
+
+def dump_fields(fields: list[dict]) -> str:
+    return "\n".join(dump_field(f) for f in fields)
+
+
+def _nice_step(span: float) -> float:
+    """A round step giving roughly twenty notches across `span` — 5 for a
+    0-100 price, 0.05 for a 0-1 ratio, 1000 for a salary."""
+    import math
+    if span <= 0:
+        return 1.0
+    raw = span / 20
+    power = 10 ** math.floor(math.log10(raw))
+    for mult in (1, 2, 5, 10):
+        if raw <= mult * power:
+            return mult * power
+    return 10 * power
+
+
+def suggest_field(column: Any, series) -> Optional[dict]:
+    """A sensible field for one column, or None for a column not worth
+    filtering on (an id, an empty column).
+
+    True/false is a switch; dates are a date range; numbers are a between
+    with a round step; text with a handful of values is a row of buttons, a
+    few dozen a slicer, and text that is nearly all different a search box.
+    """
+    label = str(column).replace("_", " ").strip().capitalize() or "Field"
+    values = series.dropna()
+    if values.empty:
+        return None
+    unique = values.nunique()
+    base = {"label": label, "column": str(column), "opts": {}}
+    lowered = str(column).lower()
+    looks_like_id = (lowered == "id" or lowered.endswith("_id")
+                     or lowered.endswith(" id"))
+    kind = series.dtype.kind
+    truthy = {"True", "False", "true", "false", "1", "0", "yes", "no",
+              "Yes", "No"}
+    if kind == "b" or (unique <= 2 and kind not in "iuf"
+                       and set(map(str, values.unique())) <= truthy):
+        return {**base, "shape": "toggle", "op": "true"}
+    if kind == "M" or (kind == "O" and _mostly_dates(values)):
+        return {**base, "shape": "date_range", "op": "between"}
+    if kind in "iuf":
+        if looks_like_id or (kind in "iu" and unique == len(values)
+                             and unique > 50):
+            return None
+        span = float(values.max()) - float(values.min())
+        return {**base, "shape": "range", "op": "between",
+                "opts": {"step": f"{_nice_step(span):g}"}}
+    if looks_like_id:
+        return None
+    if unique <= 5:
+        return {**base, "shape": "choice", "op": "==",
+                "opts": {"style": "buttons"}}
+    if unique <= 60 or unique < len(values) * 0.9:
+        return {**base, "shape": "list", "op": "in"}
+    return {**base, "shape": "text", "op": "contains"}
+
+
+def _mostly_dates(values) -> bool:
+    import pandas as pd
+    sample = values.astype(str).head(200)
+    if sample.str.match(r"^\d{4}-\d{2}-\d{2}").mean() < 0.9:
+        return False
+    return pd.to_datetime(sample, errors="coerce").notna().mean() >= 0.9
+
+
+def suggest_fields(data) -> list[dict]:
+    """A field for every column worth one. Slicers and choices first, then
+    dates, then numbers, then switches and search boxes — the order a
+    filter pane usually reads in."""
+    if data is None or not hasattr(data, "columns"):
+        return []
+    order = {"list": 0, "choice": 0, "date_range": 1, "range": 2,
+             "toggle": 3, "text": 4}
+    fields = [f for f in (suggest_field(c, data[c]) for c in data.columns)
+              if f is not None]
+    return sorted(fields, key=lambda f: order.get(f["shape"], 5))

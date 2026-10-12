@@ -120,6 +120,16 @@ Customer = text customer contains
 In stock = toggle in_stock
 ```
 
+**Setting it up.** Wire a table into **data**, run it, then press **Set Up
+Fields…** — on the empty panel's card, under the **Fields** box in
+Properties, or right-click the node. The wizard lists a suggested field for
+every column worth one (text with a few values becomes buttons, a few dozen
+a slicer, numbers a between, dates a date range, true/false a switch); untick
+what you don't want, change a shape or a column, reorder the rows, and choose
+how the fields filter each other and when changes apply. OK writes the
+field lines into **Fields** — the wizard is a way of writing them, so you
+can open it again later, or edit the lines by hand.
+
 Each line is `Label = shape [column] [comparison] [option=value …]`:
 
 - **shape** — `slicer` (a tick list with a search box and the number of rows

@@ -1759,6 +1759,7 @@ class MainWindow(QMainWindow):
         self.scene.slicer_changed.connect(self._on_slicer_changed)
         self.scene.sheet_submitted.connect(self._on_dashboard_sheet_edited)
         self.scene.control_changed.connect(self._on_control_changed)
+        self.scene.panel_setup_requested.connect(self._set_up_panel)
         self.scene.view_changed.connect(self._on_view_changed)
         self.scene.view_error.connect(self._on_view_error)
         self.scene.frame_run_requested.connect(self._on_frame_run_requested)
@@ -2262,6 +2263,7 @@ class MainWindow(QMainWindow):
         widget.scene.page_link_clicked.connect(self._follow_page_link)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
         widget.scene.control_changed.connect(self._on_control_changed)
+        widget.scene.panel_setup_requested.connect(self._set_up_panel)
         widget.scene.view_changed.connect(self._on_view_changed)
         widget.scene.view_error.connect(self._on_view_error)
         widget.scene.sheet_edited.connect(self._on_dashboard_sheet_edited)
@@ -3874,6 +3876,16 @@ class MainWindow(QMainWindow):
             self.show_status(f"{node.label}: no changes waiting", 4000)
         self._rerun_controls(changed)
 
+    def _set_up_panel(self, node_id: str) -> None:
+        """An Input Panel's setup wizard — from its card, its tile or the
+        node menu. The fields it writes change what the panel filters, so
+        the panel and what it feeds re-run straight after."""
+        from .panel_wizard import open_panel_wizard
+        self._flush_pending_edits()
+        if open_panel_wizard(self, self.graph, self.undo_stack,
+                             self.engine.cache, node_id):
+            self._rerun_controls([node_id])
+
     def _rerun_controls(self, ids) -> None:
         """One run over these controls and everything they feed."""
         targets: list[str] = []
@@ -4870,7 +4882,12 @@ class MainWindow(QMainWindow):
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
         control_apply_action = control_discard_action = None
-        control_reset_action = None
+        control_reset_action = panel_setup_action = None
+        if not many and node.spec.control == "panel":
+            panel_setup_action = menu.addAction("Set Up Fields…")
+            panel_setup_action.setToolTip(
+                "Choose the panel's fields from its table's columns — or let "
+                "it suggest them — instead of writing the lines by hand.")
         if not many and card_kind(node) == "control":
             from flograph.core import control_apply as ca
             if ca.has_draft(node):
@@ -5087,6 +5104,8 @@ class MainWindow(QMainWindow):
                 item._open_table_editor()
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
+        elif panel_setup_action is not None and chosen is panel_setup_action:
+            self._set_up_panel(node_id)
         elif chosen is not None and chosen in (
                 control_apply_action, control_discard_action,
                 control_reset_action):

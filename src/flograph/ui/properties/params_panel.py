@@ -1022,6 +1022,8 @@ class ParamsPanel(QWidget):
                     self._silently(text.setPlainText, str(v or ""))
             if spec.wizard == "chart":
                 widget = self._with_rule_wizard(spec, text, "chart")
+            elif spec.wizard == "panel":
+                widget = self._with_panel_wizard(spec, text)
             elif spec.rule_wizard:
                 widget = self._with_rule_wizard(spec, text)
             elif spec.insert_columns:
@@ -1155,6 +1157,29 @@ class ParamsPanel(QWidget):
             lambda: self._open_rule_wizard(spec, text, which))
         col.addWidget(button, 0, Qt.AlignLeft)
         return host
+
+    def _with_panel_wizard(self, spec: ParamSpec,
+                           text: QPlainTextEdit) -> QWidget:
+        """An Input Panel's Fields box with "Set Up Fields…" under it — the
+        setup wizard, which writes the same lines into the box."""
+        host = QWidget()
+        col = QVBoxLayout(host)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
+        col.addWidget(text)
+        button = QPushButton("Set Up Fields…")
+        button.setObjectName(f"param_{spec.name}_wizard")
+        button.clicked.connect(self._open_panel_wizard)
+        col.addWidget(button, 0, Qt.AlignLeft)
+        return host
+
+    def _open_panel_wizard(self) -> None:
+        from ..panel_wizard import open_panel_wizard
+        if self._node_id is None:
+            return
+        self.flush_pending()     # half-typed field lines belong in first
+        open_panel_wizard(self, self._graph, self._undo_stack, self._cache,
+                          self._node_id)
 
     def _wizard_columns(self) -> list:
         """Column names to offer the rule wizard: the table feeding this

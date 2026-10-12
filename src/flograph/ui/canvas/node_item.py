@@ -181,6 +181,11 @@ IMAGE_MIN_H, IMAGE_MAX_H = 60.0, CARD_MAX_H
 # the widget comes from ui.controls, keyed on the node's NODE["control"].
 CONTROL_MIN_W, CONTROL_MAX_W = 120.0, 800.0
 CONTROL_MIN_H, CONTROL_MAX_H = 48.0, 600.0
+# Controls that hold a list or a whole form — an Input Panel, a Checklist,
+# Multi Choice chips — grow like a Slicer does: a filter pane down the side
+# of a dashboard can want the full height of the page.
+TALL_CONTROLS = frozenset({"panel", "list", "multi"})
+TALL_CONTROL_MAX_W, TALL_CONTROL_MAX_H = 1600.0, 4000.0
 
 # Page Links (AB3): an Action Button's behaviour — click to go, right-click
 # to edit — over a strip of buttons wide enough for a page list.
@@ -1050,7 +1055,7 @@ class NodeItem(QGraphicsObject):
             self.width = min(SLICER_MAX_W, max(
                 SLICER_MIN_W, float(node.params.get("width", 200))))
         elif self.control:
-            self.width = min(CONTROL_MAX_W, max(
+            self.width = min(self._control_ceiling()[0], max(
                 CONTROL_MIN_W, float(node.params.get(
                     "width", self._control_default_size()[0]))))
         else:
@@ -1275,7 +1280,7 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             default = self._control_default_size()[1]
             fixed = float(self.node.params.get("height", default) or default)
-            return min(CONTROL_MAX_H, max(CONTROL_MIN_H, fixed))
+            return min(self._control_ceiling()[1], max(CONTROL_MIN_H, fixed))
         if self._square:
             # Fixed, whatever the port count. A square that grew with its
             # ports would be back to the wide box's problem — nodes of
@@ -1472,7 +1477,7 @@ class NodeItem(QGraphicsObject):
             # and the value itself all live there, so any edit re-syncs it
             self.prepareGeometryChange()
             default = self._control_default_size()[0]
-            self.width = min(CONTROL_MAX_W, max(
+            self.width = min(self._control_ceiling()[0], max(
                 CONTROL_MIN_W,
                 float(self.node.params.get("width", default) or default)))
             self.sync_control()
@@ -2685,6 +2690,13 @@ class NodeItem(QGraphicsObject):
         from ..controls import control_size
         return control_size(self.node.spec.control or "")
 
+    def _control_ceiling(self) -> tuple[float, float]:
+        """(max_w, max_h) a control card may be resized to — the node's own
+        width/height PARAMS say the same (test_card_size_limits)."""
+        if self.node.spec.control in TALL_CONTROLS:
+            return TALL_CONTROL_MAX_W, TALL_CONTROL_MAX_H
+        return CONTROL_MAX_W, CONTROL_MAX_H
+
     def _control_proxy_rect(self) -> QRectF:
         height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
         return QRectF(0, HEADER_H, self.width, height)
@@ -2707,7 +2719,9 @@ class NodeItem(QGraphicsObject):
             lambda: getattr(self.scene(), "graph", None),
             lambda: getattr(self.scene(), "undo_stack", None),
             lambda: self.node.id,
-            self._on_control_changed)
+            self._on_control_changed,
+            setup=lambda node_id: self.scene() is not None
+            and self.scene().panel_setup_requested.emit(node_id))
         proxy = self._card_proxy(widget)
         self._control_widget = widget
         self._control_proxy = proxy
@@ -4175,8 +4189,8 @@ class NodeItem(QGraphicsObject):
             return (SLICER_MIN_W, SLICER_MAX_W,
                     self._slicer_min_height(), SLICER_MAX_H)
         if self.control:
-            return (CONTROL_MIN_W, CONTROL_MAX_W,
-                    CONTROL_MIN_H, CONTROL_MAX_H)
+            return (CONTROL_MIN_W, self._control_ceiling()[0],
+                    CONTROL_MIN_H, self._control_ceiling()[1])
         if self.page_links:
             return (PAGE_LINKS_MIN_W, PAGE_LINKS_MAX_W,
                     PAGE_LINKS_MIN_H, PAGE_LINKS_MAX_H)

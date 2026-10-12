@@ -753,7 +753,9 @@ class TileItem(QGraphicsObject):
             lambda: self._graph if self.scene() is not None else None,
             lambda: getattr(self.scene(), "undo_stack", None),
             lambda: getattr(self._node(), "id", None),
-            self._on_control_changed)
+            self._on_control_changed,
+            setup=lambda node_id: self.scene() is not None
+            and self.scene().panel_setup_requested.emit(node_id))
         self._control_widget = widget
         return widget
 

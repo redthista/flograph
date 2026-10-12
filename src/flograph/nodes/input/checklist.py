@@ -36,9 +36,9 @@ PARAMS = [
     {"name": "none_means", "type": "choice", "label": "None ticked means",
      "options": ["all", "nothing"], "default": "all"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 240, "min": 160, "max": 800, "cosmetic": True},
+     "default": 240, "min": 160, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 220, "min": 100, "max": 600, "cosmetic": True},
+     "default": 220, "min": 100, "max": 4000, "cosmetic": True},
 ]
 
 

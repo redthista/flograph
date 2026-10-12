@@ -421,3 +421,23 @@ class TestSlicerField:
         graph.set_param(node.id, "value", '["c"]')
         engine, _failures = run_engine(qtbot, graph)
         assert engine.cache.outputs_for(node.id)["value"] == ["c"]
+
+
+class TestSize:
+    """A filter pane down the side of a dashboard can want the full height
+    of the page (Dan: "its limited to 600 but i might want more"), so a
+    panel, a Checklist and Multi Choice grow like a Slicer; a single-value
+    control keeps its 600."""
+
+    def test_a_panel_can_be_made_tall(self, qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.ui.canvas import NodeGraphScene
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        p = panel(graph, registry, height=2400, width=1200)
+        item = scene.node_items[p.id]
+        _minw, maxw, _minh, maxh = item._resize_bounds()
+        assert (maxw, maxh) == (1600.0, 4000.0)
+        assert item.body_height >= 2400 and item.width == 1200
+        slider = graph.add_node(registry.instantiate("flograph.input.slider"))
+        assert scene.node_items[slider.id]._resize_bounds()[3] == 600.0

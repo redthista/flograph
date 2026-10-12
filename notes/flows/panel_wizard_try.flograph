@@ -1,0 +1,246 @@
+{
+  "flograph_version": "0.1.25",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "wz_sales",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"product\", \"type\": \"text\"}, {\"name\": \"channel\", \"type\": \"text\"}, {\"name\": \"ordered\", \"type\": \"text\"}, {\"name\": \"price\", \"type\": \"number\"}, {\"name\": \"units\", \"type\": \"number\"}, {\"name\": \"in_stock\", \"type\": \"auto\"}], \"rows\": [[\"South\", \"Doohickey\", \"Partner\", \"2026-01-01\", 15.22, 30, true], [\"North\", \"Doohickey\", \"Online\", \"2026-02-06\", 82.16, 16, false], [\"South\", \"Gadget\", \"Partner\", \"2026-03-11\", 44.44, 27, true], [\"West\", \"Thingamajig\", \"Online\", \"2026-04-16\", 23.95, 5, true], [\"West\", \"Thingamajig\", \"Online\", \"2026-05-21\", 61.74, 3, false], [\"North\", \"Gizmo\", \"Online\", \"2026-06-26\", 74.83, 9, true], [\"West\", \"Thingamajig\", \"Store\", \"2026-07-04\", 37.97, 26, true], [\"South\", \"Gizmo\", \"Online\", \"2026-08-09\", 7.09, 16, false], [\"West\", \"Whatsit\", \"Partner\", \"2026-09-14\", 77.55, 14, true], [\"West\", \"Doohickey\", \"Store\", \"2026-01-19\", 49.93, 14, true], [\"East\", \"Thingamajig\", \"Online\", \"2026-02-24\", 77.65, 20, true], [\"South\", \"Thingamajig\", \"Store\", \"2026-03-02\", 86.96, 29, true], [\"North\", \"Thingamajig\", \"Partner\", \"2026-04-07\", 22.16, 27, true], [\"East\", \"Gizmo\", \"Online\", \"2026-05-12\", 9.46, 28, true], [\"West\", \"Widget\", \"Store\", \"2026-06-17\", 72.85, 14, true], [\"North\", \"Gizmo\", \"Store\", \"2026-07-22\", 70.12, 28, false], [\"North\", \"Sprocket\", \"Partner\", \"2026-08-27\", 54.43, 18, true], [\"East\", \"Doohickey\", \"Online\", \"2026-09-05\", 89.87, 10, false], [\"North\", \"Doohickey\", \"Partner\", \"2026-01-10\", 6.7, 7, true], [\"East\", \"Doohickey\", \"Store\", \"2026-02-15\", 17.43, 2, true], [\"East\", \"Gizmo\", \"Store\", \"2026-03-20\", 86.44, 29, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-04-25\", 37.21, 28, true], [\"North\", \"Doohickey\", \"Partner\", \"2026-05-03\", 27.33, 21, true], [\"South\", \"Gizmo\", \"Store\", \"2026-06-08\", 88.09, 17, true], [\"East\", \"Widget\", \"Store\", \"2026-07-13\", 88.92, 11, false], [\"South\", \"Widget\", \"Partner\", \"2026-08-18\", 57.95, 15, true], [\"East\", \"Doohickey\", \"Partner\", \"2026-09-23\", 27.99, 16, false], [\"North\", \"Thingamajig\", \"Online\", \"2026-01-01\", 86.84, 9, true], [\"East\", \"Doohickey\", \"Partner\", \"2026-02-06\", 31.52, 12, false], [\"East\", \"Whatsit\", \"Partner\", \"2026-03-11\", 26.72, 26, true], [\"North\", \"Doohickey\", \"Partner\", \"2026-04-16\", 67.22, 10, true], [\"East\", \"Gadget\", \"Store\", \"2026-05-21\", 20.12, 14, true], [\"North\", \"Widget\", \"Partner\", \"2026-06-26\", 31.69, 11, true], [\"South\", \"Sprocket\", \"Online\", \"2026-07-04\", 10.88, 24, true], [\"West\", \"Gizmo\", \"Online\", \"2026-08-09\", 71.68, 2, true], [\"South\", \"Gizmo\", \"Partner\", \"2026-09-14\", 19.79, 9, true], [\"North\", \"Whatsit\", \"Partner\", \"2026-01-19\", 33.69, 5, true], [\"East\", \"Sprocket\", \"Store\", \"2026-02-24\", 58.54, 10, true], [\"West\", \"Widget\", \"Store\", \"2026-03-02\", 17.42, 1, true], [\"West\", \"Doohickey\", \"Partner\", \"2026-04-07\", 23.1, 24, true], [\"East\", \"Doohickey\", \"Store\", \"2026-05-12\", 80.51, 28, false], [\"East\", \"Widget\", \"Online\", \"2026-06-17\", 7.88, 29, true], [\"South\", \"Sprocket\", \"Partner\", \"2026-07-22\", 8.24, 16, true], [\"South\", \"Doohickey\", \"Store\", \"2026-08-27\", 24.56, 1, true], [\"West\", \"Widget\", \"Partner\", \"2026-09-05\", 13.77, 5, false], [\"West\", \"Whatsit\", \"Online\", \"2026-01-10\", 34.26, 7, false], [\"North\", \"Gadget\", \"Online\", \"2026-02-15\", 72.08, 30, true], [\"South\", \"Whatsit\", \"Online\", \"2026-03-20\", 45.93, 19, true], [\"North\", \"Whatsit\", \"Store\", \"2026-04-25\", 25.35, 20, true], [\"West\", \"Widget\", \"Store\", \"2026-05-03\", 31.79, 27, false], [\"North\", \"Whatsit\", \"Online\", \"2026-06-08\", 7.97, 2, false], [\"North\", \"Whatsit\", \"Partner\", \"2026-07-13\", 11.41, 17, true], [\"South\", \"Gizmo\", \"Online\", \"2026-08-18\", 34.21, 21, true], [\"East\", \"Gizmo\", \"Store\", \"2026-09-23\", 20.43, 11, true], [\"South\", \"Doohickey\", \"Online\", \"2026-01-01\", 65.58, 13, true], [\"South\", \"Widget\", \"Store\", \"2026-02-06\", 43.63, 21, true], [\"West\", \"Thingamajig\", \"Online\", \"2026-03-11\", 57.57, 14, false], [\"West\", \"Whatsit\", \"Partner\", \"2026-04-16\", 31.09, 23, true], [\"North\", \"Gadget\", \"Online\", \"2026-05-21\", 50.08, 23, true], [\"West\", \"Gadget\", \"Store\", \"2026-06-26\", 15.21, 1, true], [\"East\", \"Doohickey\", \"Store\", \"2026-07-04\", 14.44, 23, false], [\"West\", \"Thingamajig\", \"Online\", \"2026-08-09\", 67.1, 19, true], [\"North\", \"Sprocket\", \"Online\", \"2026-09-14\", 24.29, 13, false], [\"North\", \"Doohickey\", \"Online\", \"2026-01-19\", 60.69, 13, false], [\"North\", \"Gizmo\", \"Online\", \"2026-02-24\", 6.19, 4, true], [\"East\", \"Doohickey\", \"Store\", \"2026-03-02\", 72.69, 2, true], [\"South\", \"Widget\", \"Partner\", \"2026-04-07\", 68.41, 30, true], [\"East\", \"Whatsit\", \"Partner\", \"2026-05-12\", 19.52, 3, false], [\"South\", \"Thingamajig\", \"Online\", \"2026-06-17\", 43.06, 23, true], [\"West\", \"Gizmo\", \"Store\", \"2026-07-22\", 55.55, 12, true], [\"North\", \"Sprocket\", \"Partner\", \"2026-08-27\", 24.23, 30, true], [\"South\", \"Sprocket\", \"Partner\", \"2026-09-05\", 52.88, 19, true], [\"West\", \"Gadget\", \"Partner\", \"2026-01-10\", 38.49, 29, false], [\"North\", \"Sprocket\", \"Partner\", \"2026-02-15\", 45.58, 23, true], [\"West\", \"Doohickey\", \"Partner\", \"2026-03-20\", 77.8, 5, false], [\"South\", \"Gadget\", \"Partner\", \"2026-04-25\", 48.34, 30, false], [\"East\", \"Thingamajig\", \"Partner\", \"2026-05-03\", 77.56, 20, true], [\"East\", \"Gadget\", \"Store\", \"2026-06-08\", 5.99, 16, true], [\"South\", \"Gadget\", \"Partner\", \"2026-07-13\", 35.0, 11, true], [\"South\", \"Sprocket\", \"Partner\", \"2026-08-18\", 45.24, 20, false], [\"North\", \"Sprocket\", \"Partner\", \"2026-09-23\", 10.22, 13, true], [\"North\", \"Sprocket\", \"Online\", \"2026-01-01\", 80.63, 21, true], [\"North\", \"Gadget\", \"Store\", \"2026-02-06\", 24.82, 7, true], [\"South\", \"Gadget\", \"Partner\", \"2026-03-11\", 64.61, 28, false], [\"East\", \"Gadget\", \"Online\", \"2026-04-16\", 30.95, 14, false], [\"North\", \"Widget\", \"Online\", \"2026-05-21\", 26.72, 30, false], [\"East\", \"Sprocket\", \"Partner\", \"2026-06-26\", 67.13, 11, false], [\"East\", \"Gizmo\", \"Store\", \"2026-07-04\", 36.65, 3, false], [\"West\", \"Sprocket\", \"Online\", \"2026-08-09\", 50.81, 4, true], [\"North\", \"Thingamajig\", \"Store\", \"2026-09-14\", 13.68, 29, true], [\"East\", \"Widget\", \"Partner\", \"2026-01-19\", 84.95, 12, true], [\"East\", \"Whatsit\", \"Store\", \"2026-02-24\", 29.42, 22, true], [\"East\", \"Widget\", \"Store\", \"2026-03-02\", 61.86, 18, true], [\"West\", \"Doohickey\", \"Store\", \"2026-04-07\", 9.12, 10, true], [\"South\", \"Thingamajig\", \"Partner\", \"2026-05-12\", 66.8, 5, false], [\"West\", \"Widget\", \"Online\", \"2026-06-17\", 84.14, 5, true], [\"West\", \"Doohickey\", \"Store\", \"2026-07-22\", 59.68, 15, true], [\"South\", \"Thingamajig\", \"Online\", \"2026-08-27\", 13.24, 6, true], [\"West\", \"Gizmo\", \"Online\", \"2026-09-05\", 26.86, 13, false], [\"South\", \"Widget\", \"Store\", \"2026-01-10\", 47.41, 8, true], [\"East\", \"Gizmo\", \"Store\", \"2026-02-15\", 42.55, 26, true], [\"East\", \"Sprocket\", \"Online\", \"2026-03-20\", 17.04, 19, false], [\"North\", \"Doohickey\", \"Partner\", \"2026-04-25\", 13.64, 23, false], [\"West\", \"Thingamajig\", \"Partner\", \"2026-05-03\", 37.64, 24, false], [\"South\", \"Whatsit\", \"Store\", \"2026-06-08\", 72.64, 18, true], [\"South\", \"Gadget\", \"Store\", \"2026-07-13\", 35.79, 10, false], [\"West\", \"Sprocket\", \"Store\", \"2026-08-18\", 31.17, 29, true], [\"West\", \"Doohickey\", \"Partner\", \"2026-09-23\", 64.8, 29, true], [\"West\", \"Widget\", \"Partner\", \"2026-01-01\", 20.38, 21, false], [\"South\", \"Sprocket\", \"Online\", \"2026-02-06\", 49.03, 15, false], [\"South\", \"Widget\", \"Partner\", \"2026-03-11\", 83.64, 15, false], [\"East\", \"Thingamajig\", \"Online\", \"2026-04-16\", 15.66, 26, false], [\"North\", \"Widget\", \"Store\", \"2026-05-21\", 57.18, 17, false], [\"North\", \"Gizmo\", \"Store\", \"2026-06-26\", 32.24, 12, true], [\"South\", \"Widget\", \"Partner\", \"2026-07-04\", 70.68, 2, true], [\"East\", \"Whatsit\", \"Online\", \"2026-08-09\", 84.13, 28, false], [\"South\", \"Sprocket\", \"Store\", \"2026-09-14\", 13.38, 2, true], [\"South\", \"Thingamajig\", \"Online\", \"2026-01-19\", 37.67, 16, true], [\"West\", \"Gadget\", \"Partner\", \"2026-02-24\", 46.06, 1, true], [\"West\", \"Sprocket\", \"Online\", \"2026-03-02\", 43.16, 2, true]]}",
+          "apply": "live",
+          "draft": "",
+          "rules": "",
+          "width": 560,
+          "height": 280
+        },
+        "code": null,
+        "label": "Sales",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0,
+        "extra_inputs": []
+      },
+      {
+        "id": "wz_panel",
+        "type": "flograph.input.input_panel",
+        "pos": [
+          680,
+          0
+        ],
+        "params": {
+          "caption": "",
+          "fields": "",
+          "value": "",
+          "cascade": "each other",
+          "publish": true,
+          "layout": "stacked",
+          "width": 340,
+          "height": 640,
+          "apply": "instantly",
+          "draft": "",
+          "show_reset": false,
+          "variable": "",
+          "required": false,
+          "help": "",
+          "accent": ""
+        },
+        "code": null,
+        "label": "Filters",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1,
+        "extra_inputs": []
+      },
+      {
+        "id": "wz_view",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1100,
+          0
+        ],
+        "params": {
+          "mode": "table",
+          "group_by": "",
+          "groups_start": "open",
+          "subtotals": "on the group row",
+          "matrix_rows": "",
+          "matrix_columns": "",
+          "matrix_values": "",
+          "matrix_agg": "sum",
+          "matrix_order": "as they appear",
+          "matrix_headings": "nested",
+          "totals": "off",
+          "totals_at": "bottom",
+          "total_label": "Total",
+          "totals_out": false,
+          "on_click": "nothing",
+          "select_by": "cell",
+          "selected": "",
+          "format_rules": "",
+          "show": "",
+          "hide": "",
+          "sort": "",
+          "sort_dir": "ascending",
+          "row_index": false,
+          "missing": "NaN",
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Rows that pass",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2,
+        "extra_inputs": []
+      },
+      {
+        "id": "wz_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          360
+        ],
+        "params": {
+          "text": "## Try the setup wizard\n\n1. **Run All** (F5) so the panel can see the Sales columns.\n2. Press **Set Up Fields\u2026** on the empty **Filters** card (or right-click it \u25b8 *Set Up Fields\u2026*).\n3. Untick what you don't want, change shapes, choose *Changes apply \u25b8 When Apply on the panel is pressed*, then **OK**.\n4. Use the panel \u2014 **Rows that pass** follows it.\n",
+          "width": 560,
+          "height": 0
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 3,
+        "extra_inputs": []
+      }
+    ],
+    "connections": [
+      {
+        "id": "4c631740dff14b9f997cf33730083edc",
+        "src": [
+          "wz_sales",
+          "table"
+        ],
+        "dst": [
+          "wz_panel",
+          "data"
+        ]
+      },
+      {
+        "id": "47176846851443dc98bdc0194a3eab84",
+        "src": [
+          "wz_panel",
+          "filtered"
+        ],
+        "dst": [
+          "wz_view",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "shapes": [],
+    "pages": [
+      {
+        "id": "wz_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "body": "",
+        "color": null,
+        "maximized_tile": null,
+        "view_mode": false,
+        "fit_to_window": false,
+        "setup": {},
+        "preview_mode": "pages",
+        "tiles": [
+          {
+            "id": "t_p",
+            "node": "wz_panel",
+            "port": null,
+            "rect": [
+              40,
+              40,
+              320,
+              640
+            ],
+            "z": 0
+          },
+          {
+            "id": "t_v",
+            "node": "wz_view",
+            "port": "table",
+            "rect": [
+              380,
+              40,
+              760,
+              640
+            ],
+            "z": 1
+          }
+        ]
+      }
+    ],
+    "env_path": ""
+  }
+}

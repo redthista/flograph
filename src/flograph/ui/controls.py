@@ -327,6 +327,8 @@ class ControlWidget(QWidget):
     # (ui.control_binding), the widget only says they were pressed
     apply_requested = Signal()
     reset_requested = Signal()
+    # an Input Panel's "Set Up Fields…": the host opens the wizard
+    setup_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1963,10 +1965,24 @@ class PanelControl(ControlWidget):
         self._problem.setStyleSheet(f"color: {INVALID.name()};")
         self._problem.hide()
         self._layout.addWidget(self._problem)
-        self._hint = QLabel("Write one field per line in Properties ▸ "
-                            "Fields — e.g.  Region = choice region")
-        self._hint.setObjectName("bound")
-        self._hint.setWordWrap(True)
+        # an empty panel says what to do, and offers to do it
+        from PySide6.QtWidgets import QPushButton
+        self._hint = QWidget()
+        self._hint.setObjectName("readout_row")
+        hint = QVBoxLayout(self._hint)
+        hint.setContentsMargins(0, 6, 0, 0)
+        hint.setSpacing(6)
+        words = QLabel("No fields yet. Wire a table into data, run it, then "
+                       "set the panel up — or write one field per line in "
+                       "Properties ▸ Fields.")
+        words.setObjectName("bound")
+        words.setWordWrap(True)
+        self._setup = QPushButton("Set Up Fields…")
+        self._setup.setObjectName("panel_apply")
+        self._setup.setCursor(Qt.PointingHandCursor)
+        self._setup.clicked.connect(self.setup_requested)
+        hint.addWidget(words)
+        hint.addWidget(self._setup, 0, Qt.AlignLeft)
         self._layout.addWidget(self._hint)
         self._scroll = QScrollArea()
         self._scroll.setObjectName("control_panel_scroll")
@@ -2154,7 +2170,7 @@ def host_control(node, parent=None) -> Optional[ControlWidget]:
 
 
 def connect_control(widget: ControlWidget, graph_of, stack_of, node_id_of,
-                    changed) -> None:
+                    changed, setup=None) -> None:
     """Wire a hosted control's three signals through ui.control_binding.
 
     The host passes callables rather than objects because a card or tile
@@ -2179,3 +2195,7 @@ def connect_control(widget: ControlWidget, graph_of, stack_of, node_id_of,
     widget.apply_requested.connect(
         lambda: run(lambda g, s, n: cb.apply(g, s, n) or True))
     widget.reset_requested.connect(lambda: run(cb.reset))
+    if setup is not None:
+        # an Input Panel's Set Up Fields…: the window owns the dialog
+        widget.setup_requested.connect(
+            lambda: node_id_of() is not None and setup(node_id_of()))
