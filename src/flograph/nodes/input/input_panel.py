@@ -1,23 +1,25 @@
 """Input Panel
 
-Several input fields in one card — a filter panel for a dashboard, built by
-writing one line per field. Wire a table into "data" and each field can
-filter it on a column: the panel's "filtered" output is the rows every
-field lets through.
+A whole page of filters in one card — slicers, sliders, a date window, tick
+boxes — that all talk to each other, the way the slicers on a Power BI page
+do. Wire a table into "data"; each field filters it on a column; the
+"filtered" output is the rows every field lets through, ready for charts,
+cards and tables.
 
-    Region   = choice region
-    City     = choice city
+    Region   = slicer region
+    Product  = slicer product
+    Channel  = choice channel style=buttons
     Price    = between price step=5
     Ordered  = date range order_date
     Customer = text customer contains
     In stock = toggle in_stock
-    Top N    = number min=1 max=50 default=10
 
 Each line is `Label = shape [column] [comparison] [option=value …]`:
 
-* **shape** — choice, multi, slider, number, between, date, date range,
-  text, toggle, time, datetime or colour: the same controls the Input
-  category has, drawn the same way.
+* **shape** — slicer (a tick list with search and row counts), choice,
+  multi, slider, number, between, date, date range, text, toggle, time,
+  datetime or colour: the same controls the Input category has, drawn the
+  same way.
 * **column** — the column of "data" the field filters on. Leave it out and
   the field is just a value (read it from "values", or as a variable).
 * **comparison** — how it filters: `>=` `<=` `>` `<` `=` for a number or a
@@ -34,9 +36,20 @@ starts on "(All)", a multi with nothing ticked, a slider and a date at the
 end of their column's range, a between and a date range on the whole range.
 Each field narrows the table only once someone uses it.
 
-**One field narrows the next** — with "Cascade" on (the default), each
-field's options come from the rows the fields above it left, so City only
-offers the picked Region's cities. A field's bounds follow its column too.
+**Fields filter each other.** "Cascade" says how:
+
+* **each other** (the default) — every slicer, choice and multi offers the
+  values the *other* fields leave, with counts to match: pick North and the
+  Product slicer shows North's products; pick Gadget and Region shows only
+  the regions that sell it. Sliders and date windows keep their column's
+  whole span, so nothing you set is moved under you.
+* **top to bottom** — each field sees only what the fields above it left,
+  ranges included.
+* **off** — every field sees the whole table.
+
+**Apply on the panel.** Set Behaviour ▸ Apply changes to "with ✓ on the
+control" and the panel gets Apply and Reset buttons along its bottom: set
+every field, press Apply, and the flow runs once.
 
 **Using the picks elsewhere.**
 * "values" is a dict of every field's value, keyed by name — the label made
@@ -54,7 +67,7 @@ changes), so a reader can set five fields and run once.
 NODE = {
     "label": "Input Panel",
     "category": "Input",
-    "version": "1.0",
+    "version": "1.1",
     "card": "control",
     "control": "panel",
     "inputs": [("data", "dataframe", {"optional": True})],
@@ -71,7 +84,9 @@ PARAMS = [
     # control host writes, so Apply/Reset/undo work on the whole panel
     {"name": "value", "type": "text", "label": "Values", "default": "",
      "hidden": True},
-    {"name": "cascade", "type": "bool", "label": "Cascade", "default": True},
+    {"name": "cascade", "type": "choice", "label": "Fields filter",
+     "options": ["each other", "top to bottom", "off"],
+     "default": "each other"},
     {"name": "publish", "type": "bool", "label": "Fields are variables",
      "default": True},
     {"name": "layout", "type": "choice", "label": "Layout",
@@ -93,7 +108,7 @@ def run(ctx, data=None):
         raise ValueError("; ".join(problems))
     stored = parse_values(ctx.params.get("value"))
     filtered, values, filters, _contexts = run_panel(
-        fields, stored, data, bool(ctx.params.get("cascade", True)))
+        fields, stored, data, ctx.params.get("cascade", "each other"))
     missing = blank_required(fields, values)
     if missing:
         raise ValueError(f"not configured: {', '.join(missing)} "

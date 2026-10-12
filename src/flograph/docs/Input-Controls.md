@@ -18,6 +18,7 @@ other follows.
 | **Toggle** | True or False, as a tick box or a switch |
 | **Choice** | one of a set, as a dropdown, buttons or radio buttons |
 | **Multi Choice** | a list of any number of a set, as chips |
+| **Checklist** | a list of any number of a set, as a scrolling tick list with search |
 | **Colour** | a colour, `#rrggbb`, with optional preset swatches |
 | **File** | the path of a file or folder the person chooses |
 | **Input Panel** | several of the above in one card, filtering a table — see below |
@@ -69,7 +70,7 @@ you wrote yourself from the **Control Template**:
 | Setting | What happens when you move the control |
 |---|---|
 | **instantly** | Everything downstream re-runs straight away. The default, and how controls have always behaved. |
-| **with ✓ on the control** | The new value waits. An amber dot and a **✓ Apply** button appear on the control's caption row; press it and the flow re-runs once. |
+| **with ✓ on the control** | The control carries its own **✓ Apply** button. A new value waits (an amber dot, and Apply lit amber) until you press it; pressing Apply re-runs the control and everything after it, change or no change. |
 | **with an Apply button** | The new value waits, with only the amber dot. An **Action Button** set to **Apply inputs** sends it on, together with every other waiting control it reaches. |
 
 A waiting change is shown on the control but not used by the flow: a run
@@ -101,27 +102,31 @@ Type a **Variable name** in a control's Behaviour settings and its value is
 title — and, through **Use Variable**, any number, tick-box, dropdown or
 date setting. See [[Flow Variables]].
 
-## Input Panel — several fields in one card
+## Input Panel — a page of filters in one card
 
-An **Input Panel** is a filter panel built by writing one line per field.
-Wire a table into its **data** input and each field can filter it on a
-column; the **filtered** output is the rows every field lets through.
+An **Input Panel** is a whole page of filters in one node — slicers, sliders,
+a date window, tick boxes — that all talk to each other, the way the slicers
+on a Power BI page do. Wire a table into its **data** input; each field
+filters it on a column; the **filtered** output is the rows every field lets
+through, ready for cards, charts and tables.
 
 ```
-Region   = choice region
-City     = choice city
+Region   = slicer region
+Product  = slicer product
+Channel  = choice channel style=buttons
 Price    = between price step=5
 Ordered  = date range order_date
 Customer = text customer contains
 In stock = toggle in_stock
-Top N    = number min=1 max=50 default=10
 ```
 
 Each line is `Label = shape [column] [comparison] [option=value …]`:
 
-- **shape** — `choice`, `multi`, `slider`, `number`, `between`, `date`,
-  `date range`, `text`, `toggle`, `time`, `datetime` or `colour`. Each is
-  drawn with the same widget as the control of that name.
+- **shape** — `slicer` (a tick list with a search box and the number of rows
+  behind each value), `choice`, `multi`, `slider`, `number`, `between`,
+  `date`, `date range`, `text`, `toggle`, `time`, `datetime` or `colour`.
+  Each is drawn with the same widget as the control of that name (a slicer
+  is the **Checklist** control).
 - **column** — the column of **data** the field filters. Leave it out and
   the field is just a value. Put a name with spaces in quotes:
   `"unit price"`.
@@ -142,9 +147,24 @@ starts on "(All)", a slider and a date at the end of their column's range, a
 between and a date range on the whole range — and each field narrows the
 table only once someone uses it.
 
-**Cascade** (on by default) makes each field's options come from the rows
-the fields above it left: City only offers the picked Region's cities, and
-Price spans their prices.
+**Fields filter each other.** The **Fields filter** setting says how:
+
+- **each other** (the default) — every slicer, choice and multi offers the
+  values the *other* fields leave, with counts to match. Tick **South** and
+  the Product slicer shows only South's products; tick **Sprocket** and the
+  Region slicer shows only the regions that sell it. A value you ticked
+  that the others have filtered away stays ticked, with a count of 0.
+  Sliders and date windows keep their column's whole span, so a value you
+  set is never moved under you.
+- **top to bottom** — each field sees only the rows the fields above it
+  left, ranges included.
+- **off** — every field sees the whole table.
+
+**Apply and Reset on the panel.** Set *Behaviour ▸ Apply changes* to **with
+✓ on the control** and the panel gets **✓ Apply** and **↺ Reset** buttons
+along its bottom: set as many fields as you like, press Apply, and the flow
+runs once. Apply is lit amber while something is waiting; Reset clears
+every field and applies at once.
 
 **Using the picks elsewhere:**
 

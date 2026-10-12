@@ -132,6 +132,7 @@ CONTROL_KINDS = frozenset({
     "colour",    # a swatch + picker -> "#rrggbb"
     "file",      # pick a file -> its path
     "panel",     # several of the above in one card (core.input_panel)
+    "list",      # a slicer: tick list with search and counts -> a list
 })
 
 

@@ -118,18 +118,49 @@ class TestRules:
         fields, _ = parse_fields("Region = choice region\n"
                                  "Price = slider price >=\n")
         rows, values, filters, ctx = run_panel(
-            fields, {"region": "North", "price": 20}, SALES)
+            fields, {"region": "North", "price": 20}, SALES, "top to bottom")
         assert list(rows["city"]) == ["York"]
         assert [f["column"] for f in filters] == ["region", "price"]
-        # the slider's range is the North rows' prices: cascade
+        # top to bottom: the slider's range is the North rows' prices
         assert ctx["price"][0] == {"minimum": 10.0, "maximum": 40.0}
+        # each other: a range keeps its whole column, so a value set on it
+        # is never clamped under the person who set it
+        _rows, _v, _f, ctx = run_panel(
+            fields, {"region": "North", "price": 20}, SALES, "each other")
+        assert ctx["price"][0] == {"minimum": 10.0, "maximum": 70.0}
+
+    def test_slicers_filter_each_other(self):
+        """Power BI's page of slicers: each list offers what the *others*
+        leave, with counts to match — and keeps its own options whole."""
+        fields, _ = parse_fields("Region = slicer region\n"
+                                 "City = slicer city\n"
+                                 "Stocked = toggle stock\n")
+        _rows, _v, filters, ctx = run_panel(
+            fields, {"city": '["Bath", "Ely"]'}, SALES)
+        # Region shows only the regions Bath and Ely are in...
+        assert ctx["region"][0]["options"] == ["East", "South"]
+        assert ctx["region"][0]["counts"] == {"South": 1, "East": 1}
+        # ...and City, filtered by nothing else, still lists every city
+        assert len(ctx["city"][0]["options"]) == 5
+        rows, _v, _f, ctx = run_panel(
+            fields, {"city": '["Bath", "Ely"]', "stocked": True}, SALES)
+        assert list(rows["city"]) == ["Bath"]
+        assert ctx["region"][0]["options"] == ["South"]
+        # the stock filter narrows City's list too
+        assert ctx["city"][0]["options"] == ["Bath", "Leeds", "Truro"]
+
+    def test_legacy_tick_box_cascade(self):
+        from flograph.core.input_panel import cascade_mode
+        assert cascade_mode(True) == "top to bottom"
+        assert cascade_mode(False) == "off"
+        assert cascade_mode(None) == "each other"
 
     def test_cascade_narrows_the_next_options(self):
         fields, _ = parse_fields(FIELDS)
         _rows, _v, _f, ctx = run_panel(fields, {"region": "South"}, SALES)
         assert ctx["city"][0]["options"] == ["Bath", "Truro"]
         _rows, _v, _f, ctx = run_panel(fields, {"region": "South"}, SALES,
-                                       cascade=False)
+                                       cascade="off")
         assert len(ctx["city"][0]["options"]) == 5
 
     def test_each_kind_filters(self):
@@ -307,3 +338,86 @@ class TestCard:
         widget = host_control(p)
         qtbot.addWidget(widget)
         assert "not a field shape" in widget._problem.text()
+
+
+class TestApplyOnTheNode:
+    """Apply and Reset on the node itself: a control set to "with ✓ on the
+    control" always shows its Apply, lit only while a change waits; an
+    Input Panel gets real Apply / Reset buttons along its bottom."""
+
+    def test_a_single_control_always_shows_apply(self, qtbot, registry):
+        from flograph.ui.controls import host_control
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.input.slider"))
+        graph.set_param(node.id, "apply", ca.BUTTON)
+        widget = host_control(node)
+        qtbot.addWidget(widget)
+        assert not widget._apply_button.isHidden()
+        assert not widget._apply_button.property("pending")
+        graph.set_param(node.id, "draft", ca.encode(70))
+        widget.sync(node.params)
+        assert widget._apply_button.property("pending") is True
+
+    def test_pressing_apply_with_nothing_waiting_still_runs(self, qtbot,
+                                                            registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.ui.controls import connect_control, host_control
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.input.slider"))
+        graph.set_param(node.id, "apply", ca.BUTTON)
+        widget = host_control(node)
+        qtbot.addWidget(widget)
+        stack = QUndoStack()
+        runs = []
+        connect_control(widget, lambda: graph, lambda: stack,
+                        lambda: node.id, runs.append)
+        widget._apply_button.click()
+        assert runs == [node.id]
+
+    def test_the_panel_has_a_footer_and_reset_applies(self, qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.ui.controls import connect_control, host_control
+        graph = Graph()
+        p = panel(graph, registry, apply=ca.BUTTON)
+        widget = host_control(p)
+        qtbot.addWidget(widget)
+        stack = QUndoStack()
+        runs = []
+        connect_control(widget, lambda: graph, lambda: stack,
+                        lambda: p.id, runs.append)
+        assert not widget._footer.isHidden()
+        assert widget._apply_button.isHidden()      # the footer's, not this
+        graph.set_param(p.id, "value", json.dumps({"region": "North"}))
+        widget.sync(p.params)
+        widget._panel_reset.click()
+        assert p.params["value"] == "" and not ca.has_draft(p)
+        assert runs and runs[-1] == p.id
+
+
+class TestSlicerField:
+    def test_list_with_counts_search_and_ticks(self, qtbot, registry):
+        from PySide6.QtCore import Qt
+        from flograph.ui.controls import ListControl, host_control
+        graph = Graph()
+        p = panel(graph, registry, fields="Region = slicer region\n"
+                                           "City = slicer city\n")
+        widget = host_control(p)
+        qtbot.addWidget(widget)
+        widget.set_upstream({"data": SALES})
+        region = widget.field_widget("region")
+        assert isinstance(region, ListControl)
+        labels = [region._list.item(r).text()
+                  for r in range(region._list.count())]
+        assert labels == ["East   1", "North   2", "South   2"]
+        seen = []
+        widget.value_committed.connect(seen.append)
+        region._list.item(1).setCheckState(Qt.Checked)
+        assert json.loads(seen[-1]) == {"region": '["North"]'}
+
+    def test_the_checklist_node(self, qtbot, registry):
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.input.checklist"))
+        graph.set_param(node.id, "items", "a\nb\nc")
+        graph.set_param(node.id, "value", '["c"]')
+        engine, _failures = run_engine(qtbot, graph)
+        assert engine.cache.outputs_for(node.id)["value"] == ["c"]

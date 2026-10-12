@@ -11,12 +11,12 @@
           0
         ],
         "params": {
-          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"city\", \"type\": \"text\"}, {\"name\": \"ordered\", \"type\": \"text\"}, {\"name\": \"price\", \"type\": \"number\"}, {\"name\": \"in_stock\", \"type\": \"auto\"}], \"rows\": [[\"North\", \"Hull\", \"2026-01-01\", 64.89, true], [\"North\", \"Hull\", \"2026-02-08\", 93.54, true], [\"North\", \"Hull\", \"2026-03-15\", 46.12, true], [\"West\", \"Gloucester\", \"2026-04-22\", 44.95, true], [\"North\", \"Leeds\", \"2026-05-02\", 42.18, true], [\"East\", \"Norwich\", \"2026-06-09\", 79.42, true], [\"North\", \"Hull\", \"2026-07-16\", 60.75, true], [\"North\", \"Leeds\", \"2026-08-23\", 5.68, true], [\"East\", \"Ely\", \"2026-09-03\", 68.64, false], [\"East\", \"Norwich\", \"2026-01-10\", 52.48, true], [\"North\", \"Hull\", \"2026-02-17\", 6.22, true], [\"East\", \"Ely\", \"2026-03-24\", 50.96, true], [\"North\", \"York\", \"2026-04-04\", 29.53, false], [\"South\", \"Bath\", \"2026-05-11\", 28.97, true], [\"West\", \"Gloucester\", \"2026-06-18\", 14.45, true], [\"East\", \"Ely\", \"2026-07-25\", 12.94, true], [\"East\", \"Norwich\", \"2026-08-05\", 7.65, true], [\"North\", \"Hull\", \"2026-09-12\", 19.07, true], [\"South\", \"Exeter\", \"2026-01-19\", 30.97, false], [\"South\", \"Exeter\", \"2026-02-26\", 84.03, false], [\"North\", \"Hull\", \"2026-03-06\", 19.93, true], [\"North\", \"York\", \"2026-04-13\", 29.96, true], [\"North\", \"Leeds\", \"2026-05-20\", 72.86, true], [\"East\", \"Ely\", \"2026-06-27\", 22.5, true], [\"North\", \"Leeds\", \"2026-07-07\", 78.93, true], [\"West\", \"Gloucester\", \"2026-08-14\", 72.97, false], [\"North\", \"Hull\", \"2026-09-21\", 65.61, false], [\"East\", \"Ely\", \"2026-01-01\", 90.62, true], [\"North\", \"York\", \"2026-02-08\", 58.26, true], [\"East\", \"Norwich\", \"2026-03-15\", 91.88, true], [\"East\", \"Ely\", \"2026-04-22\", 81.49, true], [\"North\", \"York\", \"2026-05-02\", 59.3, true], [\"South\", \"Exeter\", \"2026-06-09\", 76.57, true], [\"East\", \"Norwich\", \"2026-07-16\", 8.33, false], [\"North\", \"Hull\", \"2026-08-23\", 70.95, true], [\"North\", \"York\", \"2026-09-03\", 71.52, false], [\"East\", \"Ely\", \"2026-01-10\", 19.89, false], [\"East\", \"Ely\", \"2026-02-17\", 20.26, true], [\"North\", \"York\", \"2026-03-24\", 48.02, false], [\"North\", \"York\", \"2026-04-04\", 54.42, true], [\"South\", \"Truro\", \"2026-05-11\", 83.82, true], [\"North\", \"Hull\", \"2026-06-18\", 54.18, true], [\"South\", \"Truro\", \"2026-07-25\", 27.45, true], [\"North\", \"York\", \"2026-08-05\", 78.79, true], [\"South\", \"Exeter\", \"2026-09-12\", 57.24, true], [\"South\", \"Bath\", \"2026-01-19\", 18.71, true], [\"West\", \"Gloucester\", \"2026-02-26\", 27.1, false], [\"South\", \"Exeter\", \"2026-03-06\", 79.28, false]]}",
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"product\", \"type\": \"text\"}, {\"name\": \"channel\", \"type\": \"text\"}, {\"name\": \"ordered\", \"type\": \"text\"}, {\"name\": \"price\", \"type\": \"number\"}, {\"name\": \"units\", \"type\": \"number\"}, {\"name\": \"revenue\", \"type\": \"number\"}, {\"name\": \"in_stock\", \"type\": \"auto\"}], \"rows\": [[\"North\", \"Gizmo\", \"Online\", \"2026-01-01\", 53.74, 21, 1128.54, true], [\"North\", \"Gizmo\", \"Partner\", \"2026-02-12\", 50.78, 20, 1015.6, true], [\"West\", \"Sprocket\", \"Online\", \"2026-03-23\", 7.05, 2, 14.1, false], [\"East\", \"Gizmo\", \"Partner\", \"2026-04-07\", 47.11, 19, 895.09, true], [\"North\", \"Gizmo\", \"Online\", \"2026-05-18\", 44.82, 17, 761.94, false], [\"East\", \"Gadget\", \"Online\", \"2026-06-02\", 28.9, 1, 28.9, true], [\"North\", \"Gizmo\", \"Online\", \"2026-07-13\", 49.84, 7, 348.88, true], [\"South\", \"Doohickey\", \"Online\", \"2026-08-24\", 56.72, 10, 567.2, false], [\"South\", \"Widget\", \"Store\", \"2026-09-08\", 12.87, 20, 257.4, true], [\"North\", \"Gizmo\", \"Online\", \"2026-01-19\", 48.46, 9, 436.14, false], [\"South\", \"Doohickey\", \"Store\", \"2026-02-03\", 53.06, 1, 53.06, false], [\"South\", \"Widget\", \"Store\", \"2026-03-14\", 10.31, 16, 164.96, false], [\"East\", \"Gadget\", \"Online\", \"2026-04-25\", 32.79, 4, 131.16, true], [\"North\", \"Gadget\", \"Store\", \"2026-05-09\", 31.42, 3, 94.26, false], [\"South\", \"Doohickey\", \"Partner\", \"2026-06-20\", 52.42, 11, 576.62, false], [\"East\", \"Gadget\", \"Online\", \"2026-07-04\", 32.9, 8, 263.2, true], [\"West\", \"Sprocket\", \"Store\", \"2026-08-15\", 6.91, 20, 138.2, true], [\"South\", \"Doohickey\", \"Online\", \"2026-09-26\", 63.17, 9, 568.53, true], [\"East\", \"Sprocket\", \"Partner\", \"2026-01-10\", 7.73, 8, 61.84, true], [\"East\", \"Gadget\", \"Store\", \"2026-02-21\", 34.42, 4, 137.68, true], [\"North\", \"Gadget\", \"Online\", \"2026-03-05\", 33.85, 21, 710.85, true], [\"East\", \"Sprocket\", \"Store\", \"2026-04-16\", 8.18, 2, 16.36, true], [\"East\", \"Gizmo\", \"Online\", \"2026-05-27\", 49.89, 16, 798.24, false], [\"East\", \"Sprocket\", \"Online\", \"2026-06-11\", 7.24, 6, 43.44, true], [\"North\", \"Widget\", \"Online\", \"2026-07-22\", 12.21, 9, 109.89, false], [\"North\", \"Gadget\", \"Online\", \"2026-08-06\", 27.14, 24, 651.36, true], [\"West\", \"Doohickey\", \"Online\", \"2026-09-17\", 62.47, 22, 1374.34, true], [\"South\", \"Doohickey\", \"Online\", \"2026-01-01\", 65.15, 19, 1237.85, false], [\"West\", \"Sprocket\", \"Online\", \"2026-02-12\", 8.43, 17, 143.31, true], [\"South\", \"Widget\", \"Online\", \"2026-03-23\", 12.28, 8, 98.24, true], [\"South\", \"Widget\", \"Online\", \"2026-04-07\", 12.66, 5, 63.3, true], [\"East\", \"Sprocket\", \"Partner\", \"2026-05-18\", 7.25, 11, 79.75, false], [\"South\", \"Doohickey\", \"Online\", \"2026-06-02\", 51.6, 3, 154.8, true], [\"North\", \"Gizmo\", \"Online\", \"2026-07-13\", 42.25, 19, 802.75, true], [\"South\", \"Widget\", \"Partner\", \"2026-08-24\", 11.7, 10, 117.0, true], [\"West\", \"Doohickey\", \"Partner\", \"2026-09-08\", 59.38, 21, 1246.98, true], [\"North\", \"Gizmo\", \"Online\", \"2026-01-19\", 46.08, 11, 506.88, true], [\"North\", \"Gizmo\", \"Partner\", \"2026-02-03\", 40.9, 3, 122.7, true], [\"West\", \"Sprocket\", \"Store\", \"2026-03-14\", 8.09, 5, 40.45, true], [\"South\", \"Doohickey\", \"Partner\", \"2026-04-25\", 66.7, 23, 1534.1, true], [\"West\", \"Doohickey\", \"Online\", \"2026-05-09\", 68.91, 8, 551.28, false], [\"East\", \"Sprocket\", \"Online\", \"2026-06-20\", 8.43, 2, 16.86, false], [\"North\", \"Gizmo\", \"Partner\", \"2026-07-04\", 44.16, 9, 397.44, false], [\"South\", \"Widget\", \"Partner\", \"2026-08-15\", 13.57, 6, 81.42, true], [\"East\", \"Gizmo\", \"Store\", \"2026-09-26\", 49.69, 20, 993.8, true], [\"East\", \"Sprocket\", \"Online\", \"2026-01-10\", 9.14, 18, 164.52, true], [\"East\", \"Sprocket\", \"Store\", \"2026-02-21\", 8.62, 3, 25.86, false], [\"West\", \"Doohickey\", \"Partner\", \"2026-03-05\", 67.73, 25, 1693.25, true], [\"South\", \"Widget\", \"Online\", \"2026-04-16\", 13.25, 17, 225.25, true], [\"North\", \"Widget\", \"Online\", \"2026-05-27\", 12.56, 16, 200.96, true], [\"West\", \"Sprocket\", \"Online\", \"2026-06-11\", 8.6, 1, 8.6, true], [\"East\", \"Gizmo\", \"Store\", \"2026-07-22\", 51.81, 6, 310.86, true], [\"South\", \"Doohickey\", \"Partner\", \"2026-08-06\", 65.13, 19, 1237.47, true], [\"West\", \"Sprocket\", \"Online\", \"2026-09-17\", 9.48, 4, 37.92, false], [\"North\", \"Gizmo\", \"Online\", \"2026-01-01\", 53.72, 10, 537.2, true], [\"North\", \"Widget\", \"Online\", \"2026-02-12\", 11.12, 10, 111.2, true], [\"West\", \"Sprocket\", \"Online\", \"2026-03-23\", 9.52, 17, 161.84, true], [\"West\", \"Widget\", \"Online\", \"2026-04-07\", 13.2, 8, 105.6, false], [\"East\", \"Gizmo\", \"Online\", \"2026-05-18\", 47.89, 25, 1197.25, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-06-02\", 9.58, 17, 162.86, true], [\"East\", \"Sprocket\", \"Partner\", \"2026-07-13\", 7.52, 16, 120.32, true], [\"North\", \"Gadget\", \"Online\", \"2026-08-24\", 34.08, 24, 817.92, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-09-08\", 7.31, 10, 73.1, false], [\"North\", \"Gizmo\", \"Store\", \"2026-01-19\", 38.62, 22, 849.64, true], [\"West\", \"Doohickey\", \"Store\", \"2026-02-03\", 64.03, 14, 896.42, false], [\"West\", \"Sprocket\", \"Online\", \"2026-03-14\", 9.27, 15, 139.05, true], [\"West\", \"Widget\", \"Partner\", \"2026-04-25\", 10.55, 12, 126.6, false], [\"South\", \"Doohickey\", \"Store\", \"2026-05-09\", 54.94, 25, 1373.5, true], [\"East\", \"Sprocket\", \"Store\", \"2026-06-20\", 9.02, 14, 126.28, true], [\"North\", \"Widget\", \"Online\", \"2026-07-04\", 11.21, 15, 168.15, true], [\"South\", \"Widget\", \"Online\", \"2026-08-15\", 11.82, 8, 94.56, true], [\"East\", \"Gadget\", \"Partner\", \"2026-09-26\", 29.01, 19, 551.19, true], [\"East\", \"Gadget\", \"Online\", \"2026-01-10\", 32.04, 18, 576.72, true], [\"East\", \"Gadget\", \"Store\", \"2026-02-21\", 34.67, 5, 173.35, true], [\"East\", \"Sprocket\", \"Partner\", \"2026-03-05\", 7.72, 9, 69.48, true], [\"West\", \"Doohickey\", \"Partner\", \"2026-04-16\", 55.2, 21, 1159.2, true], [\"North\", \"Gadget\", \"Partner\", \"2026-05-27\", 28.56, 7, 199.92, true], [\"North\", \"Gizmo\", \"Store\", \"2026-06-11\", 49.54, 5, 247.7, true], [\"North\", \"Widget\", \"Partner\", \"2026-07-22\", 11.02, 17, 187.34, false], [\"West\", \"Doohickey\", \"Online\", \"2026-08-06\", 69.31, 3, 207.93, true], [\"East\", \"Gizmo\", \"Partner\", \"2026-09-17\", 49.35, 5, 246.75, true], [\"North\", \"Gadget\", \"Partner\", \"2026-01-01\", 29.56, 3, 88.68, true], [\"West\", \"Sprocket\", \"Store\", \"2026-02-12\", 9.53, 10, 95.3, true], [\"East\", \"Gadget\", \"Store\", \"2026-03-23\", 35.03, 17, 595.51, true], [\"South\", \"Doohickey\", \"Store\", \"2026-04-07\", 65.57, 22, 1442.54, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-05-18\", 8.5, 17, 144.5, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-06-02\", 8.02, 17, 136.34, true], [\"North\", \"Widget\", \"Store\", \"2026-07-13\", 12.96, 11, 142.56, true], [\"North\", \"Widget\", \"Online\", \"2026-08-24\", 13.41, 8, 107.28, true], [\"East\", \"Gizmo\", \"Online\", \"2026-09-08\", 52.4, 19, 995.6, false], [\"South\", \"Widget\", \"Store\", \"2026-01-19\", 12.38, 14, 173.32, false], [\"West\", \"Sprocket\", \"Online\", \"2026-02-03\", 7.58, 12, 90.96, true], [\"West\", \"Doohickey\", \"Online\", \"2026-03-14\", 65.26, 15, 978.9, true], [\"North\", \"Gadget\", \"Online\", \"2026-04-25\", 30.25, 18, 544.5, false], [\"North\", \"Gizmo\", \"Online\", \"2026-05-09\", 43.38, 21, 910.98, true], [\"South\", \"Widget\", \"Online\", \"2026-06-20\", 12.89, 14, 180.46, true], [\"South\", \"Doohickey\", \"Online\", \"2026-07-04\", 66.54, 7, 465.78, true], [\"North\", \"Gizmo\", \"Online\", \"2026-08-15\", 43.81, 8, 350.48, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-09-26\", 9.47, 21, 198.87, true], [\"East\", \"Gizmo\", \"Online\", \"2026-01-10\", 43.75, 14, 612.5, false], [\"North\", \"Gadget\", \"Partner\", \"2026-02-21\", 26.56, 8, 212.48, true], [\"East\", \"Sprocket\", \"Online\", \"2026-03-05\", 9.59, 5, 47.95, true], [\"North\", \"Gizmo\", \"Store\", \"2026-04-16\", 46.46, 11, 511.06, false], [\"South\", \"Widget\", \"Online\", \"2026-05-27\", 13.76, 5, 68.8, true], [\"East\", \"Sprocket\", \"Online\", \"2026-06-11\", 7.14, 11, 78.54, true], [\"North\", \"Gadget\", \"Online\", \"2026-07-22\", 28.07, 2, 56.14, true], [\"South\", \"Widget\", \"Online\", \"2026-08-06\", 11.03, 15, 165.45, true], [\"West\", \"Sprocket\", \"Partner\", \"2026-09-17\", 7.76, 2, 15.52, true], [\"North\", \"Widget\", \"Partner\", \"2026-01-01\", 12.67, 23, 291.41, true], [\"East\", \"Gizmo\", \"Partner\", \"2026-02-12\", 51.71, 10, 517.1, true], [\"North\", \"Gadget\", \"Store\", \"2026-03-23\", 35.69, 14, 499.66, true], [\"East\", \"Sprocket\", \"Online\", \"2026-04-07\", 9.56, 11, 105.16, true], [\"North\", \"Gadget\", \"Online\", \"2026-05-18\", 25.5, 7, 178.5, true], [\"North\", \"Gadget\", \"Store\", \"2026-06-02\", 26.6, 14, 372.4, true], [\"North\", \"Gizmo\", \"Store\", \"2026-07-13\", 47.42, 4, 189.68, true], [\"South\", \"Doohickey\", \"Online\", \"2026-08-24\", 59.47, 14, 832.58, true], [\"East\", \"Gizmo\", \"Store\", \"2026-09-08\", 39.83, 16, 637.28, true], [\"West\", \"Widget\", \"Store\", \"2026-01-19\", 12.89, 12, 154.68, true], [\"North\", \"Widget\", \"Partner\", \"2026-02-03\", 12.34, 16, 197.44, false], [\"West\", \"Widget\", \"Partner\", \"2026-03-14\", 13.32, 2, 26.64, false], [\"South\", \"Doohickey\", \"Online\", \"2026-04-25\", 57.49, 10, 574.9, true], [\"East\", \"Sprocket\", \"Store\", \"2026-05-09\", 7.85, 10, 78.5, true], [\"West\", \"Widget\", \"Online\", \"2026-06-20\", 11.15, 21, 234.15, false], [\"South\", \"Doohickey\", \"Online\", \"2026-07-04\", 63.41, 9, 570.69, false], [\"East\", \"Gizmo\", \"Store\", \"2026-08-15\", 42.23, 9, 380.07, true], [\"West\", \"Sprocket\", \"Online\", \"2026-09-26\", 9.08, 15, 136.2, true], [\"East\", \"Gizmo\", \"Store\", \"2026-01-10\", 48.87, 11, 537.57, true], [\"North\", \"Widget\", \"Online\", \"2026-02-21\", 12.3, 2, 24.6, true], [\"East\", \"Gizmo\", \"Store\", \"2026-03-05\", 38.52, 12, 462.24, false], [\"East\", \"Gadget\", \"Partner\", \"2026-04-16\", 28.94, 1, 28.94, false], [\"West\", \"Widget\", \"Online\", \"2026-05-27\", 14.05, 6, 84.3, false], [\"West\", \"Widget\", \"Online\", \"2026-06-11\", 13.83, 14, 193.62, false], [\"East\", \"Gizmo\", \"Online\", \"2026-07-22\", 52.06, 5, 260.3, true], [\"South\", \"Widget\", \"Online\", \"2026-08-06\", 12.74, 7, 89.18, false], [\"South\", \"Widget\", \"Online\", \"2026-09-17\", 12.67, 7, 88.69, true], [\"South\", \"Widget\", \"Online\", \"2026-01-01\", 12.08, 13, 157.04, true], [\"North\", \"Gizmo\", \"Online\", \"2026-02-12\", 49.86, 5, 249.3, true], [\"North\", \"Widget\", \"Store\", \"2026-03-23\", 13.51, 5, 67.55, true], [\"North\", \"Gadget\", \"Online\", \"2026-04-07\", 27.89, 3, 83.67, true], [\"North\", \"Gadget\", \"Online\", \"2026-05-18\", 34.75, 14, 486.5, true], [\"East\", \"Sprocket\", \"Online\", \"2026-06-02\", 9.07, 24, 217.68, true], [\"North\", \"Gizmo\", \"Online\", \"2026-07-13\", 53.15, 21, 1116.15, false], [\"East\", \"Gizmo\", \"Store\", \"2026-08-24\", 51.03, 24, 1224.72, false], [\"East\", \"Sprocket\", \"Store\", \"2026-09-08\", 8.8, 7, 61.6, false], [\"East\", \"Gizmo\", \"Online\", \"2026-01-19\", 40.8, 22, 897.6, true], [\"West\", \"Widget\", \"Store\", \"2026-02-03\", 10.48, 7, 73.36, true], [\"East\", \"Gizmo\", \"Online\", \"2026-03-14\", 42.54, 5, 212.7, false], [\"East\", \"Gizmo\", \"Online\", \"2026-04-25\", 41.61, 4, 166.44, true], [\"South\", \"Doohickey\", \"Online\", \"2026-05-09\", 70.69, 4, 282.76, true], [\"North\", \"Widget\", \"Partner\", \"2026-06-20\", 12.66, 18, 227.88, false], [\"South\", \"Widget\", \"Partner\", \"2026-07-04\", 13.33, 1, 13.33, true], [\"South\", \"Doohickey\", \"Online\", \"2026-08-15\", 68.8, 17, 1169.6, true], [\"South\", \"Doohickey\", \"Partner\", \"2026-09-26\", 58.88, 21, 1236.48, true], [\"East\", \"Sprocket\", \"Store\", \"2026-01-10\", 8.33, 10, 83.3, true], [\"South\", \"Widget\", \"Online\", \"2026-02-21\", 11.43, 10, 114.3, false], [\"South\", \"Widget\", \"Online\", \"2026-03-05\", 14.14, 9, 127.26, false], [\"North\", \"Widget\", \"Store\", \"2026-04-16\", 12.41, 15, 186.15, true], [\"East\", \"Gizmo\", \"Online\", \"2026-05-27\", 40.29, 14, 564.06, true], [\"West\", \"Doohickey\", \"Partner\", \"2026-06-11\", 59.63, 11, 655.93, false], [\"East\", \"Gizmo\", \"Partner\", \"2026-07-22\", 45.36, 9, 408.24, true]]}",
           "apply": "live",
           "draft": "",
           "rules": "",
-          "width": 520,
-          "height": 260
+          "width": 560,
+          "height": 280
         },
         "code": null,
         "label": "Sales",
@@ -40,58 +40,22 @@
         "extra_inputs": []
       },
       {
-        "id": "ip_orders",
-        "type": "flograph.io.table",
-        "pos": [
-          0,
-          900
-        ],
-        "params": {
-          "data": "{\"version\": 2, \"columns\": [{\"name\": \"sales_region\", \"type\": \"text\"}, {\"name\": \"product\", \"type\": \"text\"}, {\"name\": \"qty\", \"type\": \"number\"}], \"rows\": [[\"West\", \"Gadget\", 11], [\"South\", \"Widget\", 37], [\"West\", \"Widget\", 6], [\"North\", \"Gizmo\", 9], [\"North\", \"Gizmo\", 16], [\"East\", \"Gizmo\", 17], [\"South\", \"Widget\", 32], [\"East\", \"Gadget\", 26], [\"West\", \"Gizmo\", 32], [\"West\", \"Gizmo\", 33], [\"North\", \"Gizmo\", 40], [\"South\", \"Gadget\", 32], [\"East\", \"Gizmo\", 36], [\"North\", \"Gizmo\", 28], [\"North\", \"Widget\", 32], [\"West\", \"Gizmo\", 26], [\"East\", \"Gadget\", 10], [\"West\", \"Widget\", 15], [\"West\", \"Gizmo\", 29], [\"South\", \"Gadget\", 7], [\"West\", \"Gizmo\", 4], [\"South\", \"Widget\", 6], [\"East\", \"Gizmo\", 4], [\"North\", \"Gizmo\", 18], [\"South\", \"Widget\", 39], [\"West\", \"Gadget\", 25], [\"East\", \"Widget\", 36], [\"South\", \"Gizmo\", 6], [\"West\", \"Widget\", 21], [\"West\", \"Widget\", 23]]}",
-          "apply": "live",
-          "draft": "",
-          "rules": "",
-          "width": 420,
-          "height": 240
-        },
-        "code": null,
-        "label": "Orders",
-        "description": "",
-        "active": true,
-        "locked": false,
-        "frozen": false,
-        "manual": false,
-        "frozen_fingerprint": null,
-        "exclusive": null,
-        "preview": true,
-        "port_labels": null,
-        "flow_pins": null,
-        "ports_collapsed": false,
-        "color": null,
-        "compact_view": null,
-        "mark": "",
-        "mark_text": "",
-        "mark_image": "",
-        "z": 1,
-        "extra_inputs": []
-      },
-      {
         "id": "ip_panel",
         "type": "flograph.input.input_panel",
         "pos": [
-          640,
+          680,
           0
         ],
         "params": {
-          "caption": "Filter the sales",
-          "fields": "Region = choice region style=buttons\nCity = choice city\nPrice = between price step=5\nOrdered = date range ordered\nIn stock = toggle in_stock help=\"Only rows with stock on hand\"\n",
+          "caption": "Filters",
+          "fields": "Region = slicer region\nProduct = slicer product\nChannel = choice channel style=buttons\nPrice = between price step=5\nOrdered = date range ordered\nIn stock = toggle in_stock help=\"Only rows with stock on hand\"\n",
           "value": "",
-          "cascade": true,
+          "cascade": "each other",
           "publish": true,
           "layout": "stacked",
           "width": 340,
-          "height": 430,
-          "apply": "with an Apply button",
+          "height": 640,
+          "apply": "with \u2713 on the control",
           "draft": "",
           "show_reset": false,
           "variable": "",
@@ -117,31 +81,62 @@
         "mark": "",
         "mark_text": "",
         "mark_image": "",
+        "z": 1,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_revenue",
+        "type": "flograph.viz.card",
+        "pos": [
+          1100,
+          0
+        ],
+        "params": {
+          "column": "revenue",
+          "aggregation": "Sum",
+          "label": "Revenue",
+          "format": ",.0f",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": "Revenue",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
         "z": 2,
         "extra_inputs": []
       },
       {
-        "id": "ip_apply",
-        "type": "flograph.util.action_button",
+        "id": "ip_units",
+        "type": "flograph.viz.card",
         "pos": [
-          640,
-          470
+          1400,
+          0
         ],
         "params": {
-          "action": "Apply inputs",
-          "clear_cache": true,
-          "downstream": false,
-          "frame_title": "",
-          "targets": "",
-          "message": "",
-          "inputs_scope": "on this page",
-          "input_names": "",
-          "page": "",
-          "width": 150,
-          "height": 50
+          "column": "units",
+          "aggregation": "Sum",
+          "label": "Units sold",
+          "format": ",.0f",
+          "width": 220,
+          "height": 120
         },
         "code": null,
-        "label": "Apply filters",
+        "label": "Units",
         "description": "",
         "active": true,
         "locked": false,
@@ -162,27 +157,171 @@
         "extra_inputs": []
       },
       {
-        "id": "ip_reset",
-        "type": "flograph.util.action_button",
+        "id": "ip_chart",
+        "type": "flograph.viz.show_plotly",
         "pos": [
-          820,
-          470
+          1100,
+          200
         ],
         "params": {
-          "action": "Reset inputs",
-          "clear_cache": true,
-          "downstream": false,
-          "frame_title": "",
-          "targets": "",
-          "message": "",
-          "inputs_scope": "on this page",
-          "input_names": "",
-          "page": "",
-          "width": 150,
-          "height": 50
+          "kind": "bar",
+          "more": false,
+          "styling": false,
+          "x": "product",
+          "y": "revenue",
+          "summarise": "sum",
+          "empty": "gap",
+          "z": "",
+          "x_start": "",
+          "x_end": "",
+          "names": "",
+          "values": "",
+          "path": "",
+          "dimensions": "",
+          "r": "",
+          "theta": "",
+          "a": "",
+          "b": "",
+          "c": "",
+          "color": "region",
+          "color_map_column": "",
+          "size": "",
+          "facet_row": "",
+          "facet_col": "",
+          "facet_col_wrap": 0,
+          "orientation": "auto",
+          "barmode": "group",
+          "barnorm": "none",
+          "groupnorm": "none",
+          "boxmode": "group",
+          "violinmode": "group",
+          "stripmode": "group",
+          "histfunc": "count",
+          "histnorm": "none",
+          "nbins": 0,
+          "nbinsx": 0,
+          "nbinsy": 0,
+          "cumulative": false,
+          "points": "outliers",
+          "notched": false,
+          "box": false,
+          "ecdfnorm": "probability",
+          "ecdfmode": "standard",
+          "lines": true,
+          "markers": false,
+          "line_shape": "auto",
+          "line_close": false,
+          "hole": 0.0,
+          "branchvalues": "remainder",
+          "maxdepth": 0,
+          "dimensions_max_cardinality": 0,
+          "base": "",
+          "polar_direction": "counterclockwise",
+          "start_angle": 90,
+          "render_mode": "auto",
+          "title": "Revenue by product",
+          "subtitle": "",
+          "title_align": "keep",
+          "x_title": "",
+          "y_title": "",
+          "axis_titles": "keep",
+          "labels": "",
+          "chart_rules": "",
+          "on_click": "nothing",
+          "selected": "",
+          "view_range": "",
+          "log_x": false,
+          "log_y": false,
+          "log_z": false,
+          "log_r": false,
+          "min_x": "",
+          "max_x": "",
+          "min_y": "",
+          "max_y": "",
+          "min_z": "",
+          "max_z": "",
+          "min_r": "",
+          "max_r": "",
+          "min_theta": "",
+          "max_theta": "",
+          "hide_axis": "keep",
+          "tick_labels": "keep",
+          "grid_x": "keep",
+          "grid_y": "keep",
+          "x_format": "",
+          "y_format": "",
+          "tick_angle": "",
+          "category_order": "keep",
+          "range_slider": false,
+          "template": "default",
+          "color_sequence": "default",
+          "color_map_json": "",
+          "color_scale": "default",
+          "color_min": "",
+          "color_max": "",
+          "color_midpoint": "",
+          "opacity": 1.0,
+          "text": "",
+          "text_auto": false,
+          "hover_name": "",
+          "hover_data": "",
+          "hovermode": "keep",
+          "symbol": "",
+          "size_max": 0,
+          "line_dash": "",
+          "pattern_shape": "",
+          "line_group": "",
+          "trendline": "none",
+          "trendline_scope": "trace",
+          "trendline_window": 0,
+          "marginal": "none",
+          "marginal_x": "none",
+          "marginal_y": "none",
+          "error_y": "",
+          "error_y_minus": "",
+          "error_x": "",
+          "error_x_minus": "",
+          "error_z": "",
+          "animation_frame": "",
+          "animation_group": "",
+          "legend": "keep",
+          "legend_title": "",
+          "hide_legend_title": false,
+          "legend_pos": "keep",
+          "legend_orientation": "keep",
+          "legend_click": "keep",
+          "legend_x": "",
+          "legend_y": "",
+          "legend_order": "keep",
+          "legend_item_size": "keep",
+          "legend_font_size": 0,
+          "legend_bg": "",
+          "legend_border": "",
+          "legend_border_width": 0,
+          "colorbar_title": "",
+          "hide_colorbar": false,
+          "line_at": "",
+          "line_axis": "y",
+          "line_label": "",
+          "line_color": "",
+          "ref_dash": "dash",
+          "note": "",
+          "note_pos": "top left",
+          "font_family": "",
+          "font_size": 0,
+          "font_color": "",
+          "plot_color": "",
+          "paper_color": "",
+          "margin": "",
+          "layout_json": "",
+          "traces_json": "",
+          "config_json": "",
+          "width": 420,
+          "height": 320,
+          "scale": 100
         },
         "code": null,
-        "label": "Reset filters",
+        "label": "Revenue by product",
         "description": "",
         "active": true,
         "locked": false,
@@ -206,8 +345,8 @@
         "id": "ip_view",
         "type": "flograph.viz.show_table",
         "pos": [
-          1060,
-          0
+          1100,
+          640
         ],
         "params": {
           "mode": "table",
@@ -260,10 +399,46 @@
         "extra_inputs": []
       },
       {
+        "id": "ip_orders",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          900
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"sales_region\", \"type\": \"text\"}, {\"name\": \"channel\", \"type\": \"text\"}, {\"name\": \"qty\", \"type\": \"number\"}], \"rows\": [[\"West\", \"Partner\", 4], [\"East\", \"Online\", 9], [\"East\", \"Online\", 19], [\"South\", \"Partner\", 16], [\"North\", \"Partner\", 28], [\"North\", \"Partner\", 4], [\"South\", \"Online\", 7], [\"East\", \"Online\", 7], [\"South\", \"Partner\", 35], [\"East\", \"Store\", 6], [\"South\", \"Online\", 25], [\"West\", \"Online\", 6], [\"West\", \"Online\", 7], [\"North\", \"Online\", 27], [\"East\", \"Partner\", 12], [\"East\", \"Store\", 34], [\"North\", \"Online\", 1], [\"West\", \"Online\", 30], [\"South\", \"Online\", 23], [\"North\", \"Online\", 27], [\"South\", \"Partner\", 40], [\"East\", \"Partner\", 17], [\"West\", \"Store\", 4], [\"East\", \"Store\", 36], [\"North\", \"Partner\", 17], [\"South\", \"Store\", 17], [\"West\", \"Store\", 10], [\"South\", \"Store\", 31], [\"North\", \"Store\", 9], [\"South\", \"Partner\", 29], [\"West\", \"Partner\", 40], [\"South\", \"Partner\", 1], [\"West\", \"Store\", 5], [\"North\", \"Online\", 23], [\"South\", \"Online\", 5], [\"North\", \"Online\", 34], [\"East\", \"Store\", 35], [\"West\", \"Online\", 3], [\"East\", \"Partner\", 2], [\"East\", \"Partner\", 26]]}",
+          "apply": "live",
+          "draft": "",
+          "rules": "",
+          "width": 420,
+          "height": 240
+        },
+        "code": null,
+        "label": "Open orders",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 6,
+        "extra_inputs": []
+      },
+      {
         "id": "ip_also",
         "type": "flograph.transform.apply_filters",
         "pos": [
-          640,
+          680,
           900
         ],
         "params": {
@@ -288,97 +463,14 @@
         "mark": "",
         "mark_text": "",
         "mark_image": "",
-        "z": 6,
-        "extra_inputs": []
-      },
-      {
-        "id": "ip_minqty",
-        "type": "flograph.input.slider",
-        "pos": [
-          640,
-          1120
-        ],
-        "params": {
-          "caption": "Smallest order to show",
-          "value": 5,
-          "minimum": 0,
-          "maximum": 40,
-          "step": 1.0,
-          "decimals": 0,
-          "width": 240,
-          "height": 96,
-          "apply": "instantly",
-          "draft": "",
-          "show_reset": true,
-          "variable": "min_qty",
-          "required": false,
-          "help": "",
-          "accent": ""
-        },
-        "code": null,
-        "label": "Min quantity",
-        "description": "",
-        "active": true,
-        "locked": false,
-        "frozen": false,
-        "manual": false,
-        "frozen_fingerprint": null,
-        "exclusive": null,
-        "preview": true,
-        "port_labels": null,
-        "flow_pins": null,
-        "ports_collapsed": false,
-        "color": null,
-        "compact_view": null,
-        "mark": "",
-        "mark_text": "",
-        "mark_image": "",
         "z": 7,
-        "extra_inputs": []
-      },
-      {
-        "id": "ip_big",
-        "type": "flograph.transform.filter_rows",
-        "pos": [
-          1060,
-          900
-        ],
-        "params": {
-          "column": "",
-          "match": "contains",
-          "value": "",
-          "value_to": "",
-          "case_sensitive": false,
-          "keep_rejected": true,
-          "conditions": "",
-          "query": "qty >= ${min_qty}"
-        },
-        "code": null,
-        "label": "Big orders",
-        "description": "",
-        "active": true,
-        "locked": false,
-        "frozen": false,
-        "manual": false,
-        "frozen_fingerprint": null,
-        "exclusive": null,
-        "preview": true,
-        "port_labels": null,
-        "flow_pins": null,
-        "ports_collapsed": false,
-        "color": null,
-        "compact_view": null,
-        "mark": "",
-        "mark_text": "",
-        "mark_image": "",
-        "z": 8,
         "extra_inputs": []
       },
       {
         "id": "ip_orders_view",
         "type": "flograph.viz.show_table",
         "pos": [
-          1400,
+          1100,
           900
         ],
         "params": {
@@ -411,7 +503,7 @@
           "scale": 100
         },
         "code": null,
-        "label": "Orders in view",
+        "label": "Open orders in view",
         "description": "",
         "active": true,
         "locked": false,
@@ -428,7 +520,7 @@
         "mark": "",
         "mark_text": "",
         "mark_image": "",
-        "z": 9,
+        "z": 8,
         "extra_inputs": []
       },
       {
@@ -436,11 +528,11 @@
         "type": "flograph.util.note",
         "pos": [
           -40,
-          340
+          360
         ],
         "params": {
-          "text": "## One panel, many filters\n\n**Filters** is an *Input Panel*: each line of its **Fields** setting is a field, and a field with a column filters **Sales** on it:\n\n```\nRegion = choice region style=buttons\nCity = choice city\nPrice = between price step=5\nOrdered = date range ordered\nIn stock = toggle in_stock\n```\n\n- **Cascade** \u2014 City only offers the picked Region's cities, and Price spans their prices.\n- **Apply** \u2014 the panel's *Apply changes* is *with an Apply button*, so set every field, then press **Apply filters**: one run. **Reset filters** puts them back.\n- **Same picks, second table** \u2014 the panel's **filters** output feeds **Same filters on orders**, which maps `region` to the orders table's `sales_region`.\n- **A control as a variable** \u2014 **Min quantity** publishes `${min_qty}`, and **Big orders** filters with `qty >= ${min_qty}`. No wire.\n",
-          "width": 560,
+          "text": "## A page of filters that talk to each other\n\n**Filters** is one *Input Panel*. Each line of its **Fields** setting is a field that filters **Sales** on a column:\n\n```\nRegion = slicer region\nProduct = slicer product\nChannel = choice channel style=buttons\nPrice = between price step=5\nOrdered = date range ordered\nIn stock = toggle in_stock\n```\n\n- **They filter each other** (*Fields filter \u25b8 each other*), like slicers on a Power BI page: tick **South** and **Product** shows only South's products, with their row counts; tick **Sprocket** and **Region** shows only the regions that sell it.\n- **Apply on the panel** \u2014 set as many fields as you like, then press **\u2713 Apply** at the bottom of the panel: one run updates the cards, the chart and the table. **\u21ba Reset** clears every field.\n- **Same picks, second table** \u2014 the panel's **filters** output feeds **Same filters on orders**, which maps `region` to the orders table's `sales_region`; its channel filter applies as it is.\n- Every field is also a variable: `${region}`, `${price}`, `${in_stock}`\u2026\n",
+          "width": 600,
           "height": 0
         },
         "code": null,
@@ -461,13 +553,13 @@
         "mark": "",
         "mark_text": "",
         "mark_image": "",
-        "z": 10,
+        "z": 9,
         "extra_inputs": []
       }
     ],
     "connections": [
       {
-        "id": "ef5bb17ad06844b3a787ae38507208c2",
+        "id": "e368e25adc89475983057591740439a7",
         "src": [
           "ip_sales",
           "table"
@@ -478,7 +570,40 @@
         ]
       },
       {
-        "id": "38ecef63fc574a29b8aa4b8c99df0215",
+        "id": "5585eb309a7642ef89f15be436cf043e",
+        "src": [
+          "ip_panel",
+          "filtered"
+        ],
+        "dst": [
+          "ip_revenue",
+          "table"
+        ]
+      },
+      {
+        "id": "2e517548dbca474498780081be7cb5cb",
+        "src": [
+          "ip_panel",
+          "filtered"
+        ],
+        "dst": [
+          "ip_units",
+          "table"
+        ]
+      },
+      {
+        "id": "3bac39da5a4c47579e8eeb6ca3834b94",
+        "src": [
+          "ip_panel",
+          "filtered"
+        ],
+        "dst": [
+          "ip_chart",
+          "table"
+        ]
+      },
+      {
+        "id": "bda60b24062240648beae9fb8f788f95",
         "src": [
           "ip_panel",
           "filtered"
@@ -489,7 +614,7 @@
         ]
       },
       {
-        "id": "7c0da83041aa46e68d7a98db84224adc",
+        "id": "97eba7a71d6e4e338048f07f985f4c9b",
         "src": [
           "ip_orders",
           "table"
@@ -500,7 +625,7 @@
         ]
       },
       {
-        "id": "a3ea09f6cded4a269517cee257256c7f",
+        "id": "7400a50bfcd143da8763fb61aa114403",
         "src": [
           "ip_panel",
           "filters"
@@ -511,20 +636,9 @@
         ]
       },
       {
-        "id": "740e96e6cdc54c81ad85c7340a6d4a05",
+        "id": "84c8a413271f48ffbfac5c738e94d514",
         "src": [
           "ip_also",
-          "filtered"
-        ],
-        "dst": [
-          "ip_big",
-          "table"
-        ]
-      },
-      {
-        "id": "3c0c793461f64205a6388ba8a0d2e995",
-        "src": [
-          "ip_big",
           "filtered"
         ],
         "dst": [
@@ -540,8 +654,8 @@
         "rect": [
           -80,
           -80,
-          1900,
-          1420
+          1980,
+          1320
         ],
         "color": "#2f4a3a",
         "z": 0,
@@ -576,56 +690,56 @@
             "rect": [
               40,
               40,
-              340,
-              470
+              320,
+              640
             ],
             "z": 0
           },
           {
-            "id": "t_apply",
-            "node": "ip_apply",
-            "port": null,
+            "id": "t_revenue",
+            "node": "ip_revenue",
+            "port": "value",
             "rect": [
+              380,
               40,
-              530,
-              160,
-              50
+              300,
+              120
             ],
             "z": 1
           },
           {
-            "id": "t_reset",
-            "node": "ip_reset",
-            "port": null,
+            "id": "t_units",
+            "node": "ip_units",
+            "port": "value",
             "rect": [
-              220,
-              530,
-              160,
-              50
+              700,
+              40,
+              300,
+              120
             ],
             "z": 2
+          },
+          {
+            "id": "t_chart",
+            "node": "ip_chart",
+            "port": "figure",
+            "rect": [
+              380,
+              180,
+              920,
+              380
+            ],
+            "z": 3
           },
           {
             "id": "t_view",
             "node": "ip_view",
             "port": "table",
             "rect": [
-              400,
-              40,
-              640,
-              300
-            ],
-            "z": 3
-          },
-          {
-            "id": "t_qty",
-            "node": "ip_minqty",
-            "port": null,
-            "rect": [
-              400,
-              360,
-              300,
-              110
+              380,
+              580,
+              600,
+              320
             ],
             "z": 4
           },
@@ -634,10 +748,10 @@
             "node": "ip_orders_view",
             "port": "table",
             "rect": [
-              720,
-              360,
-              320,
-              220
+              1000,
+              580,
+              300,
+              320
             ],
             "z": 5
           }

@@ -42,6 +42,7 @@ from typing import Any, Optional
 SHAPES = {
     "choice": "choice", "dropdown": "choice",
     "multi": "multi", "multichoice": "multi", "chips": "multi",
+    "slicer": "list", "list": "list", "checklist": "list",
     "slider": "slider",
     "number": "number",
     "between": "range", "range": "range",
@@ -57,7 +58,8 @@ SHAPES = {
 COMPARISONS = {">=", "<=", ">", "<", "=", "==", "contains", "startswith",
                "equals"}
 _DEFAULT_OP = {
-    "choice": "==", "multi": "in", "slider": ">=", "number": ">=",
+    "choice": "==", "multi": "in", "list": "in",
+    "slider": ">=", "number": ">=",
     "range": "between", "date": ">=", "date_range": "between",
     "text": "contains", "toggle": "true",
 }
@@ -118,7 +120,8 @@ def parse_fields(text: Any) -> tuple[list[dict], list[str]]:
             shape_word += words.pop(0).lower()
         shape = SHAPES.get(shape_word)
         if shape is None:
-            known = ", ".join(sorted({"choice", "multi", "slider", "number",
+            known = ", ".join(sorted({"choice", "multi", "slicer", "slider",
+                                      "number",
                                       "between", "date", "date range",
                                       "text", "toggle", "time", "datetime",
                                       "colour"}))
@@ -209,8 +212,13 @@ def context(field: dict, data) -> dict:
             found["options"] = [o for o in
                                 str(field["opts"]["options"]).split("|") if o]
         return found
-    if shape in ("choice", "multi"):
+    if shape in ("choice", "multi", "list"):
         found["options"] = values_from_source(series) or []
+        if shape == "list":
+            # rows behind each value, beside it in the slicer — of the rows
+            # this field sees, so a cross-filtered count is the honest one
+            counts = series.dropna().astype(str).value_counts()
+            found["counts"] = {str(k): int(v) for k, v in counts.items()}
     elif shape in ("slider", "number", "range"):
         numeric = _as_numeric(series)
         low = reduce_bound(numeric, high=False)
@@ -288,8 +296,10 @@ def widget_params(field: dict, stored: Any, ctx: dict) -> dict:
         params["all_option"] = _yes(opts.get("all", "yes" if field["column"]
                                              else "no"))
         params["items"] = "\n".join(ctx.get("options", []))
-    if shape == "multi":
+    if shape in ("multi", "list"):
         params["items"] = "\n".join(ctx.get("options", []))
+    if shape == "list":
+        params["counts"] = ctx.get("counts", {})
     if shape == "toggle":
         params.setdefault("text", "")
         params["style"] = opts.get("style", "switch")
@@ -347,7 +357,7 @@ def emitted(field: dict, params: dict) -> Any:
     if shape == "choice":
         options = c.lines_to_values(params.get("items"))
         return c.choice_value(value, options, bool(params.get("all_option")))
-    if shape == "multi":
+    if shape in ("multi", "list"):
         return c.selected_values(value)
     if shape == "toggle":
         return bool(value)
@@ -371,13 +381,13 @@ def filter_of(field: dict, value: Any, params: dict) -> Optional[dict]:
     kind = "number"
     if shape in ("date", "date_range"):
         kind = "date"
-    elif shape in ("choice", "multi", "text"):
+    elif shape in ("choice", "multi", "list", "text"):
         kind = "text"
     elif shape == "toggle":
         kind = "bool"
     if shape == "choice" and value in ("", None):
         return None
-    if shape == "multi" and not value:
+    if shape in ("multi", "list") and not value:
         return None
     if shape == "text" and not str(value or "").strip():
         return None
@@ -393,7 +403,7 @@ def filter_of(field: dict, value: Any, params: dict) -> Optional[dict]:
         if list(value) == [low, high]:
             return None
         op = "between"
-    if shape == "multi":
+    if shape in ("multi", "list"):
         op = "in"
     return {"field": field["name"], "column": column, "op": op,
             "value": value, "kind": kind}
@@ -456,18 +466,48 @@ def _compare(series, op: str, value, whole_day: bool = False):
             "==": series == value}.get(op, series == value)
 
 
+#: How a panel's fields affect one another (the "Cascade" setting).
+EACH_OTHER = "each other"       # Power BI's slicers: every list reflects the rest
+TOP_DOWN = "top to bottom"      # each field narrowed by the ones above it
+OFF = "off"                     # every field sees the whole table
+CASCADE_MODES = [EACH_OTHER, TOP_DOWN, OFF]
+
+# the shapes whose options a cross-filter narrows
+_LISTS = ("choice", "multi", "list")
+
+
+def cascade_mode(raw: Any) -> str:
+    """The Cascade setting as one of CASCADE_MODES — a panel saved while
+    it was a tick box reads True as "top to bottom" (what it meant then)."""
+    if raw is True:
+        return TOP_DOWN
+    if raw is False:
+        return OFF
+    return raw if raw in CASCADE_MODES else EACH_OTHER
+
+
 def run_panel(fields: list[dict], stored: dict, data,
-              cascade: bool = True) -> tuple:
-    """Work the panel through, top to bottom:
-    `(filtered, values, filters, contexts)` — the rows left, each field's
-    value, the filters applied (for Apply Filters), and each field's
-    options/bounds (what its widget offers)."""
+              cascade: Any = EACH_OTHER) -> tuple:
+    """Work the panel out: `(filtered, values, filters, contexts)` — the
+    rows left, each field's value, the filters applied (for Apply
+    Filters), and each field's (context, widget params), which is what its
+    widget offers and shows.
+
+    **each other** — every list (choice, multi, slicer) offers the values
+    the *other* fields leave, with their row counts, the way slicers on a
+    Power BI page filter one another. A range (slider, number, between,
+    date) keeps its whole column's span: narrowing it would clamp a value
+    someone set, and the card would then show a number the flow isn't
+    using. **top to bottom** — each field sees only the rows the fields
+    above it left, ranges included. **off** — every field sees the table.
+    """
+    mode = cascade_mode(cascade)
     rows = data
     values: dict = {}
-    filters: list[dict] = []
+    filters: dict = {}          # field name -> filter, in field order
     contexts: dict = {}
     for field in fields:
-        seen = rows if cascade else data
+        seen = rows if mode == TOP_DOWN else data
         ctx = context(field, seen)
         params = widget_params(field, stored.get(field["name"]), ctx)
         contexts[field["name"]] = (ctx, params)
@@ -476,9 +516,21 @@ def run_panel(fields: list[dict], stored: dict, data,
         flt = filter_of(field, value, params)
         if flt is not None and rows is not None \
                 and _column(rows, field["column"]) is not None:
-            filters.append(flt)
+            filters[field["name"]] = flt
             rows = apply_filter(rows, flt)
-    return rows, values, filters, contexts
+    if mode == EACH_OTHER and data is not None and len(filters) > 0:
+        for field in fields:
+            if field["shape"] not in _LISTS or not field["column"]:
+                continue
+            # every filter but this field's own
+            seen = data
+            for name, flt in filters.items():
+                if name != field["name"]:
+                    seen = apply_filter(seen, flt)
+            ctx = context(field, seen)
+            params = widget_params(field, stored.get(field["name"]), ctx)
+            contexts[field["name"]] = (ctx, params)
+    return rows, values, list(filters.values()), contexts
 
 
 def blank_required(fields: list[dict], values: dict) -> list[str]:

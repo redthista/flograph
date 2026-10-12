@@ -97,6 +97,7 @@ CONTROL_SIZES: dict[str, tuple[float, float]] = {
     "colour": (200.0, 104.0),
     "file": (260.0, 84.0),
     "panel": (300.0, 320.0),
+    "list": (240.0, 220.0),
 }
 DEFAULT_CONTROL_SIZE = (220.0, 90.0)
 
@@ -228,10 +229,34 @@ def _stylesheet(accent: Optional[QColor] = None) -> str:
         f" color: {theme.NODE_TEXT.name()}; background: transparent;"
         f" border: 1px solid {theme.NODE_BORDER.name()};"
         f" border-radius: 3px; padding: 0px 5px; font-size: 8pt; }}"
-        f"QToolButton#control_apply {{ border-color: {PENDING.name()};"
+        # always there in "with ✓" mode; lit only while a change waits
+        f"QToolButton#control_apply[pending=\"true\"],"
+        f" QPushButton#panel_apply[pending=\"true\"]"
+        f" {{ border-color: {PENDING.name()};"
         f" color: {PENDING.name()}; font-weight: bold; }}"
         f"QToolButton#control_apply:hover, QToolButton#control_reset:hover"
         f" {{ background: {theme.NODE_HEADER.name()}; }}"
+        # the Input Panel's own Apply / Reset, full size along its bottom
+        f"QPushButton#panel_apply, QPushButton#panel_reset {{"
+        f" color: {theme.NODE_TEXT.name()};"
+        f" background: {theme.NODE_HEADER.name()};"
+        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" border-radius: 4px; padding: 4px 10px; font-size: 9pt; }}"
+        f"QPushButton#panel_apply:hover, QPushButton#panel_reset:hover"
+        f" {{ border-color: {on}; }}"
+        # a slicer field: a tick list on the card's own colours
+        f"QListWidget#control_list {{ background: {theme.NODE_BODY.name()};"
+        f" color: {theme.NODE_TEXT.name()};"
+        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" border-radius: 3px; font-size: 9pt; outline: none; }}"
+        f"QListWidget#control_list::item {{ padding: 1px 2px; }}"
+        f"QListWidget#control_list::item:hover"
+        f" {{ background: {theme.NODE_HEADER.name()}; }}"
+        f"QListWidget#control_list::indicator {{ width: 12px; height: 12px;"
+        f" border-radius: 3px; border: 1px solid {theme.NODE_SUBTEXT.name()};"
+        f" background: {theme.NODE_HEADER.name()}; }}"
+        f"QListWidget#control_list::indicator:checked {{ background: {on};"
+        f" border-color: {on}; }}"
         f"QLabel#control_pending {{ color: {PENDING.name()};"
         f" font-size: 9pt; }}"
     )
@@ -273,6 +298,17 @@ class _TickBox(QCheckBox):
 
 
 _NO_DEFAULT = object()
+
+
+def _set_pending(button: QWidget, pending: bool) -> None:
+    """Light an Apply button while a change waits for it. A dynamic
+    property selector only re-applies on a re-polish."""
+    if bool(button.property("pending")) != pending:
+        button.setProperty("pending", pending)
+        button.style().unpolish(button)
+        button.style().polish(button)
+    button.setToolTip("Send the waiting change on to the flow" if pending
+                      else "Run this control and what follows")
 
 
 class ControlWidget(QWidget):
@@ -495,8 +531,11 @@ class ControlWidget(QWidget):
         pending = bool(ca.draft_text(self._params))
         self._pending.setVisible(pending)
         # "wait" leaves applying to a page's Apply button, so the field
-        # stays a field; "button" puts the ✓ on the control itself
-        self._apply_button.setVisible(pending and mode == ca.BUTTON)
+        # stays a field; "button" puts the ✓ on the control itself — always
+        # there, so it can be pressed to run the node too, and lit amber
+        # while a change is waiting for it
+        self._apply_button.setVisible(mode == ca.BUTTON)
+        _set_pending(self._apply_button, pending)
         self._reset_button.setVisible(
             bool(self._params.get("show_reset"))
             and self.value_default is not _NO_DEFAULT
@@ -1760,6 +1799,148 @@ class FileControl(ControlWidget):
         self._button.setFocus()
 
 
+class ListControl(ControlWidget):
+    """A slicer: a tick list of a column's values, each with the number of
+    rows behind it, a search box once the list is long enough to need one,
+    and All / None. Ticked values travel as a JSON list, like a Multi
+    Choice's; nothing ticked filters nothing.
+
+    A QListWidget on a card scrolls inside its proxy like any table does;
+    there is no popup, so none of a dropdown's card troubles apply.
+    """
+
+    SEARCH_FROM = 7     # options before a search box is worth its row
+
+    def _build(self) -> None:
+        from PySide6.QtWidgets import QListWidget
+
+        tools = QHBoxLayout()
+        tools.setContentsMargins(0, 0, 0, 0)
+        tools.setSpacing(4)
+        self._search = QLineEdit()
+        self._search.setObjectName("control_list_search")
+        self._search.setPlaceholderText("Search…")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._narrow)
+        self._summary = QLabel("")
+        self._summary.setObjectName("bound")
+        self._all = QToolButton()
+        self._all.setText("All")
+        self._none = QToolButton()
+        self._none.setText("None")
+        for button in (self._all, self._none):
+            button.setObjectName("control_reset")
+            button.setFocusPolicy(Qt.NoFocus)
+        self._all.clicked.connect(lambda: self._set_all(True))
+        self._none.clicked.connect(lambda: self._set_all(False))
+        tools.addWidget(self._search, 1)
+        tools.addWidget(self._summary)
+        tools.addWidget(self._all)
+        tools.addWidget(self._none)
+        self._layout.addLayout(tools)
+        self._list = QListWidget()
+        self._list.setObjectName("control_list")
+        self._list.setUniformItemSizes(True)
+        self._list.setMinimumHeight(60)
+        self._list.itemChanged.connect(self._ticked)
+        self._layout.addWidget(self._list, 1)
+        self._entries: tuple = ()
+        self._filling = False
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.controls import selected_values
+
+        self._layout.setStretch(self._layout.count() - 1, 0)
+        options = self._upstream.get("options")
+        if options is None:
+            options = option_list(params.get("items"))
+        options = [str(o) for o in options]
+        counts = params.get("counts") or {}
+        picked = selected_values(params.get("value"))
+        # a ticked value the other fields have filtered away stays on show,
+        # ticked, with a count of 0 — dropping it would untick it silently
+        entries = tuple(options + [p for p in picked if p not in options])
+        labels = tuple(f"{v}   {counts[v]:,}" if v in counts
+                       else (f"{v}   0" if counts else v) for v in entries)
+        self._filling = True
+        try:
+            if (entries, labels) != self._entries:
+                self._list.clear()
+                for value, label in zip(entries, labels):
+                    from PySide6.QtWidgets import QListWidgetItem
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.UserRole, value)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Unchecked)
+                    self._list.addItem(item)
+                self._entries = (entries, labels)
+            for row in range(self._list.count()):
+                item = self._list.item(row)
+                want = Qt.Checked if item.data(Qt.UserRole) in picked \
+                    else Qt.Unchecked
+                if item.checkState() != want:
+                    item.setCheckState(want)
+        finally:
+            self._filling = False
+        self._search.setVisible(len(entries) >= self.SEARCH_FROM)
+        self._narrow(self._search.text())
+        self._update_summary()
+        if self.compact:
+            # in a panel the list is as tall as its rows (up to COMPACT_ROWS)
+            # so the fields under it, and the panel's Apply, stay in view
+            rows = max(1, min(len(entries), self.COMPACT_ROWS))
+            row = max(16, self._list.sizeHintForRow(0))
+            self._list.setFixedHeight(rows * row + 2 * self._list.frameWidth()
+                                      + 4)
+
+    #: set by an Input Panel on its slicer fields; a Checklist node's own
+    #: card leaves it off, and the list fills the card
+    compact = False
+    COMPACT_ROWS = 8
+
+    def _narrow(self, text: str) -> None:
+        needle = str(text or "").casefold()
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            item.setHidden(needle not in str(item.data(Qt.UserRole)).casefold())
+
+    def _ticked(self, *_args) -> None:
+        if self._filling:
+            return
+        self._update_summary()
+        self._commit()
+
+    def _set_all(self, on: bool) -> None:
+        """All ticks the values on show — so search, then All, picks what
+        the search found — and None clears every tick."""
+        self._filling = True
+        try:
+            for row in range(self._list.count()):
+                item = self._list.item(row)
+                if on and item.isHidden():
+                    continue
+                item.setCheckState(Qt.Checked if on else Qt.Unchecked)
+        finally:
+            self._filling = False
+        self._update_summary()
+        self._commit()
+
+    def _update_summary(self) -> None:
+        ticked = sum(1 for r in range(self._list.count())
+                     if self._list.item(r).checkState() == Qt.Checked)
+        self._summary.setText(f"{ticked} of {self._list.count()}" if ticked
+                              else "all")
+
+    def _read(self):
+        import json
+        return json.dumps([self._list.item(r).data(Qt.UserRole)
+                           for r in range(self._list.count())
+                           if self._list.item(r).checkState() == Qt.Checked])
+
+    def focus_editor(self) -> None:
+        self._list.setFocus()
+
+
 class PanelControl(ControlWidget):
     """An Input Panel: one card of fields, each drawn by the widget its
     shape's own control uses — build_control("slider") for a slider field —
@@ -1796,6 +1977,33 @@ class PanelControl(ControlWidget):
             "QScrollArea, QScrollArea > QWidget > QWidget"
             " { background: transparent; }")
         self._layout.addWidget(self._scroll, 1)
+        # Apply and Reset as real buttons along the bottom: a panel is a
+        # form, and a form's buttons belong under it, not tucked into the
+        # caption row the way a single slider's are
+        from PySide6.QtWidgets import QPushButton
+        self._footer = QWidget()
+        self._footer.setObjectName("readout_row")
+        footer = QHBoxLayout(self._footer)
+        footer.setContentsMargins(0, 4, 0, 0)
+        footer.setSpacing(6)
+        self._panel_reset = QPushButton("↺  Reset")
+        self._panel_reset.setObjectName("panel_reset")
+        self._panel_reset.setToolTip("Put every field back to where it started")
+        # reset *and* apply: clearing a form is one intent, and a cleared
+        # form that still needs Apply pressed reads as a button that failed
+        self._panel_reset.clicked.connect(
+            lambda: (self.reset_requested.emit(), self.apply_requested.emit()))
+        self._panel_apply = QPushButton("✓  Apply")
+        self._panel_apply.setObjectName("panel_apply")
+        self._panel_apply.clicked.connect(self.apply_requested)
+        for button in (self._panel_reset, self._panel_apply):
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setCursor(Qt.PointingHandCursor)
+        footer.addStretch(1)
+        footer.addWidget(self._panel_reset)
+        footer.addWidget(self._panel_apply)
+        self._footer.hide()
+        self._layout.addWidget(self._footer)
         self._fields: list[dict] = []
         self._subs: dict[str, ControlWidget] = {}
         self._stored: dict = {}
@@ -1822,7 +2030,7 @@ class PanelControl(ControlWidget):
         try:
             _rows, _values, _filters, contexts = run_panel(
                 fields, self._stored, self._upstream.get("data"),
-                bool(params.get("cascade", True)))
+                params.get("cascade", "each other"))
         except Exception as exc:    # a column of odd types: say so, draw on
             self._problem.setText(f"{type(exc).__name__}: {exc}")
             self._problem.show()
@@ -1854,6 +2062,8 @@ class PanelControl(ControlWidget):
             sub = build_control(field["shape"])
             if sub is None:
                 continue
+            if isinstance(sub, ListControl):
+                sub.compact = True
             sub.value_committed.connect(
                 lambda value, name=field["name"]: self._field_committed(
                     name, value))
@@ -1865,6 +2075,23 @@ class PanelControl(ControlWidget):
         if isinstance(grid, QVBoxLayout):
             grid.addStretch(1)
         self._scroll.setWidget(body)
+
+    def _sync_buttons(self, shown: dict) -> None:
+        """A panel's Apply and Reset are the footer's; the caption row
+        keeps only the pending dot (and the ↺ if Show reset button is on
+        and the panel is not showing its own)."""
+        from flograph.core import control_apply as ca
+
+        super()._sync_buttons(shown)
+        held = self._params.get("apply") == ca.BUTTON
+        self._apply_button.hide()
+        self._footer.setVisible(held)
+        if held:
+            self._reset_button.hide()
+        _set_pending(self._panel_apply, bool(ca.draft_text(self._params)))
+        self._caption_row.setVisible(
+            not self._caption.isHidden() or not self._pending.isHidden()
+            or not self._reset_button.isHidden())
 
     def _field_committed(self, name: str, value) -> None:
         if self._syncing:
@@ -1888,6 +2115,7 @@ class PanelControl(ControlWidget):
 
 _CONTROLS = {
     "panel": PanelControl,
+    "list": ListControl,
     "slider": SliderControl,
     "range": RangeControl,
     "number": NumberControl,
@@ -1945,5 +2173,9 @@ def connect_control(widget: ControlWidget, graph_of, stack_of, node_id_of,
             changed(node_id)
 
     widget.value_committed.connect(lambda value: run(cb.commit_value, value))
-    widget.apply_requested.connect(lambda: run(cb.apply))
+    # Apply re-runs from here whether or not a change was waiting: pressing
+    # a node's own Apply is asking it to run, and request_run on a clean
+    # subgraph costs nothing
+    widget.apply_requested.connect(
+        lambda: run(lambda g, s, n: cb.apply(g, s, n) or True))
     widget.reset_requested.connect(lambda: run(cb.reset))
