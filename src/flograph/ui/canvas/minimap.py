@@ -256,9 +256,10 @@ class Minimap(QWidget):
             painter.setPen(Qt.NoPen)
             painter.setBrush(fill)
             painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 3, 3)
-        colour = QColor(theme.NODE_TEXT)
-        if not self._toggle_hover:
-            colour.setAlphaF(0.7)
+        # the border's colour at rest, so the button sits quietly in the
+        # frame; it brightens only when the pointer is on it
+        colour = QColor(theme.NODE_TEXT if self._toggle_hover
+                        else theme.GRID_COARSE)
         pen = QPen(colour, 1.4)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
