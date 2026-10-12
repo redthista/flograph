@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QUndoCommand, QUndoStack
+from PySide6.QtGui import QKeySequence, QShortcut, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
 
 from .. import theme
@@ -110,6 +110,12 @@ class SheetEditorDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
+        # A QDialog gets no maximize button from Qt, only a close; a grid is
+        # work that wants the whole screen. Added to the flags the platform
+        # gave the dialog, never replacing them (see text_popout.py).
+        self.setWindowFlags(self.windowFlags()
+                            | Qt.WindowMaximizeButtonHint)
+        self.setSizeGripEnabled(True)
 
         self.model = SheetModel(sheet, self)
         self.view = SpreadsheetView(self)
@@ -181,6 +187,8 @@ class SheetEditorDialog(QDialog):
         redo_action.setShortcut(QKeySequence.Redo)
         self.addAction(undo_action)
         self.addAction(redo_action)
+        QShortcut(QKeySequence("F11"), self, self.toggle_maximized).setContext(
+            Qt.WidgetWithChildrenShortcut)
         self.view.actions.refresh()
 
         self.resize(900, 600)
@@ -190,6 +198,15 @@ class SheetEditorDialog(QDialog):
         self._sync_formula_bar(self.view.currentIndex())
 
     # ------------------------------------------------------------- layout
+
+    def toggle_maximized(self) -> None:
+        """F11, and the title bar's button by another route. Maximized
+        rather than full screen proper: a modal window with no title bar
+        leaves no obvious way back."""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     def _sync_formula_bar(self, current=None, _previous=None) -> None:
         self._formula_bar.sync(current)

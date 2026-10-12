@@ -23,6 +23,8 @@ Hover any button for what it does, in a sentence, and its shortcut. Under the ri
 canvas card the ribbon is one line of icons to leave the grid room; in the
 full editor (**View ▸ Full Editor**, or the card's expand button) and on a
 wide dashboard tile each group has labelled buttons and its name underneath.
+The full editor is a window of its own: maximize it from its title bar, or
+press **F11** to fill the screen and again to come back.
 Double-click a tab to fold the ribbon down to its tabs; click a tab to open
 it again.
 

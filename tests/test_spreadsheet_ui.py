@@ -622,6 +622,19 @@ class TestSheetEditorDialog:
         assert dialog._formula_bar.cell_label.text() == "B1"
         assert dialog._formula_bar.edit.text() == "=A1*3"
 
+    def test_dialog_can_maximize(self, qtbot):
+        # a QDialog gets only a close button unless it asks for more
+        dialog = SheetEditorDialog(sheet_to_json(make_model().sheet), title="t")
+        qtbot.addWidget(dialog)
+        assert dialog.windowFlags() & Qt.WindowMaximizeButtonHint
+        assert dialog.windowFlags() & Qt.Dialog   # still a dialog
+        dialog.show()
+        dialog.toggle_maximized()
+        assert dialog.isMaximized()
+        dialog.toggle_maximized()
+        assert not dialog.isMaximized()
+        dialog.close()
+
     def test_fx_button_shows_formula_reference(self, qtbot):
         dialog = SheetEditorDialog(sheet_to_json(make_model().sheet), title="t")
         qtbot.addWidget(dialog)
