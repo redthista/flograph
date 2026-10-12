@@ -5,6 +5,7 @@
 | Category | Change | Details |
 | --- | --- | --- |
 | Fix | **Live charts keep their height in a themed report** | A live chart in a report's web page (`![[Chart\|height=150\|live]]`) ignored `height=` and `ratio=` whenever the page used a starter theme — every theme gives all charts one shape, and that won. A chart whose embed asks for a shape now keeps it, in a ```` ```columns ```` block too; a chart that asks for none still takes the theme's, and full screen still fills the screen. |
+| UI | **Save shows it is saving** | While a workflow is being written, the title bar's **Save Changes** button reads **Saving Changes…** with a spinner in place of the disk, and goes back (or away, once nothing is left unsaved) when the save lands. It shows for a save made with nothing unsaved too, so Ctrl+S always visibly does something. A save with no cached results is instant and doesn't show it. |
 
 ## 0.1.26
 
