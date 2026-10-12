@@ -221,6 +221,8 @@ class SheetEditorDialog(QDialog):
     def _on_stack_moved(self, _index: int) -> None:
         self._last_dict = self.model.sheet_dict()
         self._sync_formula_bar(self.view.currentIndex())
+        # the sheet changed under the grid: what applies changed with it
+        self.view.actions.refresh()
         self.refresh_host()
 
     def _apply(self) -> None:

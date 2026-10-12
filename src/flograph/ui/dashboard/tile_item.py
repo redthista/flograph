@@ -24,6 +24,7 @@ from flograph.core.tile_style import (CARD_LOOK, NOTE_LOOK, TRANSPARENT,
 
 from .. import theme
 from ..data_table import DataTableView
+from ..proxy_cache import UNCACHED_KINDS, cache_proxy
 from ..canvas.grid import (
     EDGE_MARGIN, grid_step, snap, snap_point, snapping_active,
 )
@@ -732,6 +733,9 @@ class TileItem(QGraphicsObject):
             return None
         widget.hide()
         self._host_layout.addWidget(widget, 1)
+        # one content widget per tile, for good: what it is decides whether
+        # the tile pans and drags from a picture (see ui/proxy_cache.py)
+        cache_proxy(self._proxy, kind not in UNCACHED_KINDS)
         return widget
 
     # ------------------------------------------------------- input controls

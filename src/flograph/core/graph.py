@@ -1348,17 +1348,30 @@ class Graph:
         page = self.page(page_id)
         page.body = body or ""
         self.events.page_body_changed.emit(page)
-        self._report_changed(page_id)
+        self._report_changed(page_id, embeds=reportlinks.embed_refs(page.body))
         return page
 
-    def _report_changed(self, page_id: str) -> None:
+    def _report_changed(self, page_id: str,
+                        embeds: Optional[frozenset] = None) -> None:
         """A report page's content moved: whatever renders it is stale, and
         its embeds may have moved its edges. Nothing to do — and nothing
-        scanned beyond the node list — when no node renders a report."""
+        scanned beyond the node list — when no node renders a report.
+
+        `embeds` (the body's embed set, from typing) skips re-deriving every
+        derived edge in the graph when it is the set the edges were last
+        derived from: the text arrives keystroke by keystroke, and only a
+        keystroke that adds, drops or retypes an `![[embed]]` can move an
+        edge. Renames and new nodes refresh the links on their own paths."""
         readers = reportlinks.readers_of(self, page_id)
         if not readers:
             return
-        self._refresh_links()
+        seen = getattr(self, "_report_embeds_seen", None)
+        if seen is None:
+            seen = self._report_embeds_seen = {}
+        if embeds is None or seen.get(page_id) != embeds:
+            self._refresh_links()
+            if embeds is not None:
+                seen[page_id] = embeds
         for node_id in readers:
             if node_id in self.nodes:
                 self.mark_dirty(node_id)

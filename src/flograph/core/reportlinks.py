@@ -68,6 +68,15 @@ def readers_of(graph: "Graph", page_id: str) -> list[str]:
             if str(n.params.get(n.spec.reads_report) or "") == page_id]
 
 
+def embed_refs(body: str) -> frozenset:
+    """What a page's text can make edges from: the labels its saved form
+    embeds. Two bodies with the same set give the same report edges, so a
+    keystroke that leaves it alone — almost every one — need not re-derive
+    them across the whole graph."""
+    saved = app_only_lines(body or "", in_app=False)
+    return frozenset(e.ref.strip().casefold() for e in find_embeds(saved))
+
+
 def embedded_nodes(graph: "Graph", body: str) -> list[str]:
     """Every node a page's text embeds, by label, in first-seen order. A
     label two nodes share names both: the page shows a warning for it, and
@@ -76,8 +85,7 @@ def embedded_nodes(graph: "Graph", body: str) -> list[str]:
     What a saved report shows, that is: an `apponly::` line never reaches
     the file, and an Action Button is drawn only in the app's preview, so
     neither is something a saver has to wait for or be dirtied by."""
-    saved = app_only_lines(body or "", in_app=False)
-    wanted = {e.ref.strip().casefold() for e in find_embeds(saved)}
+    wanted = embed_refs(body)
     if not wanted:
         return []
     return [node_id for node_id, node in graph.nodes.items()

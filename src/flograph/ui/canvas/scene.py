@@ -393,6 +393,11 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self._queue_rect_fit()
         # cards on the canvas now shown may have been skipped while hidden
         self.resume_deferred()
+        # no graph event says "other items are drawn now": tell the maps
+        for view in self.views():
+            minimap = getattr(view, "minimap", None)
+            if minimap is not None:
+                minimap.mark_stale()
 
     def place_here(self, *objects):
         """Stamp new nodes, frames or shapes onto the canvas being shown, so

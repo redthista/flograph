@@ -1015,16 +1015,7 @@ class SheetActions(QObject):
 
     def refresh(self) -> None:
         """Re-read which commands apply right now."""
-        stack = self._stack()
-        if stack is not self._watched_stack:
-            if self._watched_stack is not None:
-                try:
-                    self._watched_stack.indexChanged.disconnect(self._on_stack)
-                except (RuntimeError, TypeError):
-                    pass
-            self._watched_stack = stack
-            if stack is not None:
-                stack.indexChanged.connect(self._on_stack)
+        self._watch_stack()
         for name, rule in self._rules.items():
             try:
                 self._actions[name].setEnabled(bool(rule()))
@@ -1078,8 +1069,40 @@ class SheetActions(QObject):
                 action.changed.emit()
         self.changed_hook()
 
-    def _on_stack(self, _index: int) -> None:
-        self.refresh()
+    def _watch_stack(self) -> None:
+        """Follow the host's undo stack for the two commands that read it.
+
+        Only canUndoChanged/canRedoChanged, and only Undo and Redo re-read:
+        on a card the stack is the *app's*, so indexChanged fires for every
+        keystroke in a report, every node dragged, every param typed —
+        anywhere. Re-reading every command on each of those, once per Table
+        card in the project, was most of a keystroke's cost with a handful
+        of Tables about (0.1.25). The table's own edits reach refresh()
+        through the view — selection, data, Submit — not through here."""
+        stack = self._stack()
+        if stack is self._watched_stack:
+            return
+        if self._watched_stack is not None:
+            for signal in (self._watched_stack.canUndoChanged,
+                           self._watched_stack.canRedoChanged):
+                try:
+                    signal.disconnect(self._sync_undo)
+                except (RuntimeError, TypeError):
+                    pass
+        self._watched_stack = stack
+        if stack is not None:
+            stack.canUndoChanged.connect(self._sync_undo)
+            stack.canRedoChanged.connect(self._sync_undo)
+
+    def _sync_undo(self, *_args) -> None:
+        # a stack being destroyed says so through these same signals, and
+        # can no longer be asked anything — refresh()'s rules guard alike
+        for name in ("undo", "redo"):
+            try:
+                can = self._stack_can(name)
+            except RuntimeError:
+                can = False
+            self._actions[name].setEnabled(can)
 
     def changed_hook(self) -> None:
         """Replaced by a ribbon that wants to hear about a refresh."""

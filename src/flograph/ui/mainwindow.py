@@ -102,6 +102,8 @@ _CLIPBOARD_KEY = "flograph_clipboard"
 class MainWindow(QMainWindow):
     def __init__(self, registry: NodeRegistry) -> None:
         super().__init__()
+        from .proxy_cache import size_pixmap_cache
+        size_pixmap_cache()
         self.registry = registry
         self.graph = Graph()
         # The canvas you get on launch is a project like any other, so it

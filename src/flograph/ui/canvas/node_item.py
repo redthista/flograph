@@ -25,6 +25,7 @@ from flograph.core.node import NodeStatus
 from flograph.core.ports import FLOW_INPUT, FLOW_OUTPUT, is_flow
 
 from .. import theme
+from ..proxy_cache import cache_proxy
 from ..data_table import DataTableView
 from ..slicer_list import SlicerPanel
 from ..web_links import WEB_LINK_SCHEMES, open_web_link
@@ -1018,6 +1019,7 @@ class NodeItem(QGraphicsObject):
         # built outside a scene (tests, previews) looks like the real thing.
         self._square = self.plain
         self._name_cache: tuple[str, ...] | None = None  # wrapped label
+        self._name_width_cache: tuple | None = None   # (lines, widest)
         if self.link_card:
             self.width = self._link_card_width()
         elif self.compact:
@@ -1888,7 +1890,8 @@ class NodeItem(QGraphicsObject):
             pct = 100.0
         return min(CARD_SCALE_MAX, max(CARD_SCALE_MIN, pct)) / 100.0
 
-    def _card_proxy(self, widget: QWidget) -> QGraphicsProxyWidget:
+    def _card_proxy(self, widget: QWidget,
+                    cache: bool = True) -> QGraphicsProxyWidget:
         """A proxy that keeps its widget inside the card. Embedded views
         (a table, a list, a web view) won't shrink past their own minimum
         size, so on a card dragged short the last rows would otherwise paint
@@ -1901,6 +1904,8 @@ class NodeItem(QGraphicsObject):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(widget)
         proxy.setFlag(QGraphicsItem.ItemClipsToShape, True)
+        if cache:
+            cache_proxy(proxy)
         return proxy
 
     def _scale_proxy_into(self, proxy: QGraphicsProxyWidget,
@@ -2020,7 +2025,9 @@ class NodeItem(QGraphicsObject):
         self._plotly_widget = widget
         self._figure_placeholder = widget.placeholder
 
-        proxy = self._card_proxy(widget)
+        # a web view: no paint cache until one is proven to keep up with
+        # what Chromium draws into it (see ui/proxy_cache.py)
+        proxy = self._card_proxy(widget, cache=False)
         self._figure_proxy = proxy  # reuses the figure card's resize plumbing
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_figure_proxy()
@@ -2884,8 +2891,13 @@ class NodeItem(QGraphicsObject):
         if not self._square:
             return None
         lines = self._name_layout()
-        metrics = QFontMetrics(self._name_font())
-        width = max(metrics.horizontalAdvance(line) for line in lines)
+        # measured once per wrap, beside it: boundingRect lands here, and Qt
+        # asks for that several times per node per frame
+        if self._name_width_cache is None or self._name_width_cache[0] is not lines:
+            metrics = QFontMetrics(self._name_font())
+            self._name_width_cache = (
+                lines, max(metrics.horizontalAdvance(line) for line in lines))
+        width = self._name_width_cache[1]
         height = COMPACT_NAME_H * len(lines)
         return QRectF(self.width / 2 - width / 2,
                       -COMPACT_NAME_GAP - height, width, height)
