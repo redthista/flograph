@@ -6617,11 +6617,17 @@ class MainWindow(QMainWindow):
         self._save_bar.setRange(0, max(1, len(plan.blobs)))
         self._save_bar.setValue(0)
         self._save_bar.show()
+        self._set_titlebar_saving(True)
         self.show_status(f"Saving {Path(path).name}…")
         QThreadPool.globalInstance().start(
             CacheSaveRunnable(path, plan, signals,
                               compress=self.cache_compression_enabled,
                               prev_path=carry_from))
+
+    def _set_titlebar_saving(self, saving: bool) -> None:
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_saving(saving)
 
     def _on_cache_save_progress(self, done: int, total: int) -> None:
         self._save_bar.setRange(0, max(1, total))
@@ -6632,6 +6638,7 @@ class MainWindow(QMainWindow):
     def _on_cache_save_finished(self, error: str) -> None:
         signals, self._cache_save_signals = self._cache_save_signals, None
         self._save_bar.hide()
+        self._set_titlebar_saving(False)
         if signals is not None:
             signals.progressed.disconnect()
             signals.skipped.disconnect()

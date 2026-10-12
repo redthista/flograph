@@ -275,7 +275,10 @@ _SWITCHER_GAP = 5
 
 
 def frame_icon(kind: str, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
-    fn = _GLYPHS[kind]
+    return _glyph_icon(_GLYPHS[kind], color, pt)
+
+
+def _glyph_icon(fn, color: QColor, pt: int) -> QIcon:
     icon = QIcon()
     for ratio in (1, 2, 3):
         pm = QPixmap(pt * ratio, pt * ratio)
@@ -287,6 +290,19 @@ def frame_icon(kind: str, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
         p.end()
         icon.addPixmap(pm)
     return icon
+
+
+def spinner_icon(angle: int, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
+    """A busy spinner frame: a three-quarter arc turned by `angle` degrees.
+    Not in _GLYPHS — it takes an angle, and is redrawn every tick."""
+    def draw(p: QPainter, r: QRectF, c: QColor) -> None:
+        w = r.width()
+        p.setPen(_pen(c, max(1.5, w * 0.11)))
+        p.setBrush(Qt.NoBrush)
+        arc = r.adjusted(w * 0.2, w * 0.2, -w * 0.2, -w * 0.2)
+        # Qt arcs are in 1/16 degree, counter-clockwise; turn clockwise
+        p.drawArc(arc, (90 - angle) * 16, -270 * 16)
+    return _glyph_icon(draw, color, pt)
 
 
 def paint_app_mark(p: QPainter, r: QRectF) -> None:
@@ -851,6 +867,13 @@ class TitleBar(QWidget):
         self._save_btn.setToolTip("Save the workflow  (Ctrl+S)")
         self._save_btn.clicked.connect(window._save)
         self._save_btn.hide()
+        # While a save is being written the same button says so, with a
+        # turning arc in place of the disk (see set_saving).
+        self._saving = False
+        self._spin_angle = 0
+        self._spin_timer = QTimer(self)
+        self._spin_timer.setInterval(80)
+        self._spin_timer.timeout.connect(self._spin)
         row.addSpacing(4)
         row.addWidget(self._save_btn)
 
@@ -1041,7 +1064,34 @@ class TitleBar(QWidget):
         name = project_display_name(path)
         self._project_btn.setText(name)
         self._project_btn.setIcon(initials_icon(name, pad_right=_SWITCHER_GAP))
-        self._save_btn.setVisible(not self._window.undo_stack.isClean())
+        self._save_btn.setVisible(
+            self._saving or not self._window.undo_stack.isClean())
+
+    def set_saving(self, saving: bool) -> None:
+        """"Saving Changes…" with a spinner while a save is being written;
+        back to "Save Changes" (or gone, if that save left nothing unsaved)
+        once it lands. Shown even for a save made with nothing unsaved, so
+        Ctrl+S always visibly does something."""
+        saving = bool(saving)
+        if saving == self._saving:
+            return
+        self._saving = saving
+        if saving:
+            self._spin_angle = 0
+            self._save_btn.setIcon(spinner_icon(0, _UNSAVED))
+            self._save_btn.setText("Saving Changes…")
+            self._save_btn.setToolTip("Saving the workflow…")
+            self._spin_timer.start()
+        else:
+            self._spin_timer.stop()
+            self._save_btn.setIcon(frame_icon("save", _UNSAVED))
+            self._save_btn.setText("Save Changes")
+            self._save_btn.setToolTip("Save the workflow  (Ctrl+S)")
+        self.refresh_title()
+
+    def _spin(self) -> None:
+        self._spin_angle = (self._spin_angle + 30) % 360
+        self._save_btn.setIcon(spinner_icon(self._spin_angle, _UNSAVED))
 
     def _rebuild_project_menu(self) -> None:
         m = self._project_menu

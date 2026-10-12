@@ -405,6 +405,34 @@ def test_save_button_hidden_until_dirty(frame_window):
     assert tb._save_btn.text() == "Save Changes"
 
 
+def test_save_button_spins_while_saving(frame_window):
+    tb = frame_window._title_bar
+    frame_window.undo_stack.push(QUndoCommand("edit"))
+    frame_window._update_title()
+    frame_window._set_titlebar_saving(True)
+    assert tb._save_btn.isVisibleTo(tb)
+    assert tb._save_btn.text() == "Saving Changes…"
+    assert tb._spin_timer.isActive()
+    before = tb._save_btn.icon().cacheKey()
+    tb._spin()
+    assert tb._save_btn.icon().cacheKey() != before
+
+    # the background writer lands with nothing edited since the snapshot
+    frame_window._save_clean_index = frame_window.undo_stack.index()
+    frame_window._on_cache_save_finished("")
+    assert not tb._spin_timer.isActive()
+    assert tb._save_btn.text() == "Save Changes"
+    assert not tb._save_btn.isVisibleTo(tb)
+
+
+def test_save_button_shows_while_saving_a_clean_flow(frame_window):
+    tb = frame_window._title_bar
+    frame_window._set_titlebar_saving(True)
+    assert tb._save_btn.isVisibleTo(tb)
+    frame_window._set_titlebar_saving(False)
+    assert not tb._save_btn.isVisibleTo(tb)
+
+
 # -- compact ---------------------------------------------------
 
 def test_compact_setting_drops_button_text(frame_window):
