@@ -204,3 +204,104 @@ class TestReportTypingStaysLocal:
         rescans = _count(monkeypatch, Graph, "_refresh_links")
         graph.set_page_body("r1", "# Weekly\n\n![[Filter Rows]]\n")
         assert len(rescans) == 1
+
+
+class TestSelectingIsOnePass:
+    """Qt says selectionChanged once per item, and every listener reads the
+    whole selection: selecting n items one by one cost n x n. Ctrl+A on 400
+    nodes was a million calls."""
+
+    @pytest.fixture
+    def nodes(self, env, registry):
+        graph, stack, scene = env
+        return [graph.add_node(registry.instantiate(
+            FILTER, pos=((n % 10) * 300, (n // 10) * 250))) for n in range(60)]
+
+    def test_a_batch_is_announced_once(self, env, nodes):
+        graph, stack, scene = env
+        heard = []
+        scene.selectionChanged.connect(lambda: heard.append(1))
+        scene.select_items(scene.node_items.values())
+        assert len(heard) == 1
+        assert len(scene.selected_node_items()) == len(nodes)
+
+    def test_nothing_new_is_not_announced(self, env, nodes):
+        graph, stack, scene = env
+        scene.select_items(scene.node_items.values())
+        heard = []
+        scene.selectionChanged.connect(lambda: heard.append(1))
+        scene.select_items(scene.node_items.values())
+        assert heard == []
+
+    def test_unlinked_cards_are_not_touched(self, env, nodes, monkeypatch):
+        graph, stack, scene = env
+        from flograph.ui.canvas.node_item import NodeItem
+        glows = _count(monkeypatch, NodeItem, "set_link_highlight")
+        scene.select_items(scene.node_items.values())
+        scene.clearSelection()
+        assert glows == []
+
+
+class TestTheScrollSpanAsksNoNode:
+    """With the scroll bars on, the span is refitted after edits and while
+    anything repaints. Measuring it through itemsBoundingRect asked every
+    pin, label and wire for its bounds in Python — ~34k calls at 400 nodes,
+    every 250 ms of a run."""
+
+    @pytest.fixture
+    def fitted(self, env, registry, monkeypatch):
+        graph, stack, scene = env
+        from flograph.ui.canvas.node_item import NodeItem
+        # counted before the items exist: PySide resolves the override
+        # when an item is made
+        asked = _count(monkeypatch, NodeItem, "boundingRect")
+        for n in range(40):
+            graph.add_node(registry.instantiate(
+                FILTER, pos=((n % 8) * 300, (n // 8) * 250)))
+        scene.set_rect_fitted(True)
+        return scene, asked
+
+    def test_a_refit_asks_no_node(self, fitted):
+        scene, asked = fitted
+        asked.clear()
+        scene.flush_rect_fit()
+        assert asked == []
+
+    def test_the_span_still_holds_every_node(self, fitted):
+        scene, _asked = fitted
+        scene.flush_rect_fit()
+        span = scene.sceneRect()
+        for item in scene.node_items.values():
+            assert span.contains(item.sceneBoundingRect())
+
+    def test_a_change_inside_the_flow_queues_nothing(self, fitted):
+        scene, _asked = fitted
+        scene.flush_rect_fit()
+        middle = list(scene.node_items.values())[8 * 2 + 3]
+        scene._queue_rect_fit([middle.sceneBoundingRect()])
+        assert not scene._rect_timer.isActive()
+        scene._queue_rect_fit([])     # Qt's "something repainted"
+        assert scene._rect_timer.isActive()
+
+
+class TestAFailureCostsWhatItReaches:
+    """Each failure in a run looked at every node still pending, and
+    gathered every edge in the graph: a run where many nodes fail cost the
+    flow squared, on the window's thread."""
+
+    def test_no_pending_node_is_asked_about_saving(self, qtbot, registry,
+                                                   monkeypatch):
+        from flograph.engine import ExecutionEngine
+        from flograph.engine import scheduler
+        graph = Graph()
+        for n in range(60):       # unwired: each fails on its own
+            graph.add_node(registry.instantiate(FILTER))
+        asked = []
+        original = scheduler.saves_anyway
+        monkeypatch.setattr(scheduler, "saves_anyway",
+                            lambda node: asked.append(node) or original(node))
+        engine = ExecutionEngine(graph)
+        with qtbot.waitSignal(engine.run_finished, timeout=15000) as blocker:
+            engine.run_all()
+        assert blocker.args[0] is False
+        assert asked == []

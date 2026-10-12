@@ -75,7 +75,15 @@ class ContentFittedSceneRect:
         self._rect_timer.setSingleShot(True)
         self._rect_timer.setInterval(250)
         self._rect_timer.timeout.connect(self._fit_scene_rect)
-        self.changed.connect(self._queue_rect_fit)
+        # The flow's own extent at the last fit, before margin and view
+        # centres: a change wholly inside it cannot move it (see
+        # _queue_rect_fit). Null until the first fit.
+        self._rect_content = QRectF()
+        # `changed` is connected only once the span is first fitted, never
+        # here. Anything on `changed` makes Qt route every view's repaints
+        # through it, for good — a disconnect does not undo it — so a canvas
+        # with its bars off must never have been connected at all.
+        self._rect_listening = False
         self.setSceneRect(_WORLD_RECT)
 
     def set_rect_fitted(self, fitted: bool) -> None:
@@ -87,14 +95,34 @@ class ContentFittedSceneRect:
             return
         self._rect_fitted = fitted
         if fitted:
+            if not self._rect_listening:
+                self._rect_listening = True
+                self.changed.connect(self._queue_rect_fit)
             self._fit_scene_rect()
         else:
             self._rect_timer.stop()
             self.setSceneRect(_WORLD_RECT)
 
-    def _queue_rect_fit(self, *_regions) -> None:
-        if self._rect_fitted and not self._rect_timer.isActive():
-            self._rect_timer.start()
+    def _queue_rect_fit(self, regions=None) -> None:
+        """Refit after a beat — unless every redrawn region lies strictly
+        inside the flow's extent at the last fit.
+
+        Measuring the span asks every item for its bounds, and `changed`
+        fires for any repaint at all: a selection, a status light, a
+        progress ring. Refitting on each made every edit and every 250 ms of
+        a run cost a walk of the whole flow. A region inside the extent
+        cannot move its edge: an item touching the edge dirties a rect that
+        touches it too, and a geometry change dirties the item's whole old
+        and new rect, so growing, shrinking and leaving all show up at the
+        border. A direct call (no regions) or an empty list always refits.
+        """
+        if not self._rect_fitted or self._rect_timer.isActive():
+            return
+        if regions and not self._rect_content.isNull():
+            inner = self._rect_content.adjusted(1, 1, -1, -1)
+            if all(inner.contains(r) for r in regions):
+                return
+        self._rect_timer.start()
 
     def flush_rect_fit(self) -> None:
         """Refit right now instead of after the debounce. Navigation that
@@ -146,7 +174,9 @@ class ContentFittedSceneRect:
         put, rather than creeping, and at that zoom the whole flow is on
         screen and there is nothing to pan to.
         """
-        target = self._shown_bounds().adjusted(
+        content = self._shown_bounds()
+        self._rect_content = content
+        target = content.adjusted(
             -SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN)
         # wherever a view is parked stays reachable: Esc-restore, a minimap
         # click into empty margin, a jump to the far side — none may be
@@ -1288,15 +1318,45 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             pin.refresh_connected()
 
     def _highlight_link_partners(self) -> None:
-        selected = {item.node.id for item in self.selected_node_items()}
+        """Light the cards linked to the selection, and put out the ones
+        that no longer are. Only those two sets are touched — the selection
+        changes on every click, and a walk of every node here made selecting
+        cost the size of the flow."""
         partners: set[str] = set()
-        for link in self.graph.links.values():
-            if link.src_node in selected:
-                partners.add(link.dst_node)
-            if link.dst_node in selected:
-                partners.add(link.src_node)
-        for node_id, item in self.node_items.items():
-            item.set_link_highlight(node_id in partners)
+        if self.graph.links:
+            selected = {item.node.id for item in self.selected_node_items()}
+            for link in self.graph.links.values():
+                if link.src_node in selected:
+                    partners.add(link.dst_node)
+                if link.dst_node in selected:
+                    partners.add(link.src_node)
+        lit = getattr(self, "_link_lit", set())
+        for node_id in lit | partners:
+            item = self.node_items.get(node_id)
+            if item is not None:
+                item.set_link_highlight(node_id in partners)
+        self._link_lit = partners
+
+    def select_items(self, items) -> None:
+        """Select a batch of items and say so once.
+
+        Qt announces `selectionChanged` per item, and each listener (the
+        Properties panel, the link glow, the Selection and Navigator docks)
+        reads the whole selection when it hears it — so selecting n items
+        one at a time cost n times the selection: Ctrl+A on 400 nodes made
+        a million calls. Adds to what is already selected; clear first for
+        a fresh selection."""
+        changed = False
+        blocked = self.blockSignals(True)
+        try:
+            for item in items:
+                if item is not None and not item.isSelected():
+                    item.setSelected(True)
+                    changed = changed or item.isSelected()
+        finally:
+            self.blockSignals(blocked)
+        if changed and not blocked:
+            self.selectionChanged.emit()
 
     def _on_status_changed(self, node_id: str, status: NodeStatus, message: str) -> None:
         item = self.node_items.get(node_id)
@@ -1714,6 +1774,32 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # made this quadratic in graph size for the output case alone
         return any(c.src_port == spec.name
                    for c in self.graph.out_connections(node_id))
+
+    def _shown_bounds(self) -> QRectF:
+        """The flow's extent for the scroll-bar span, from what each item
+        already knows about itself rather than from Qt's itemsBoundingRect.
+
+        That one asks every item in the scene — each pin, label and wire —
+        for its bounds in Python: about 34k calls for 400 nodes, run after
+        every edit and every 250 ms while anything repaints. A node's body is
+        its position plus its width and height; nodes, frames and shapes
+        enclose everything else on the canvas, and what hangs outside a body
+        (pins, a square node's name, a wire's bow) is well inside
+        SCENE_MARGIN. Hidden items count only on a split canvas (G12), as
+        before."""
+        split = getattr(self, "_canvas_split", False)
+        bounds = QRectF()
+        for item in self.node_items.values():
+            if split and not item.isVisible():
+                continue
+            pos = item.pos()
+            bounds = bounds.united(QRectF(pos.x(), pos.y(), item.width,
+                                          item.body_height))
+        for item in (*self.frame_items.values(), *self.shape_items.values()):
+            if split and not item.isVisible():
+                continue
+            bounds = bounds.united(item.sceneBoundingRect())
+        return bounds
 
     def selected_node_items(self) -> list[NodeItem]:
         return [i for i in self.selectedItems() if isinstance(i, NodeItem)]

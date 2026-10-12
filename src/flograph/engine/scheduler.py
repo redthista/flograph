@@ -30,7 +30,7 @@ from flograph.core.graph import Graph
 from flograph.core.drop_output import readers
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
-from flograph.core.reportlinks import report_problem, saves_anyway
+from flograph.core.reportlinks import is_reader, report_problem, saves_anyway
 from flograph.core.varlinks import VariableError, var_problem
 
 from . import pressure, varsubst
@@ -571,6 +571,7 @@ class ExecutionEngine(QObject):
         # node on every completion would be quadratic on a large flow, which
         # is the same reason Graph.topo_order keeps an insertion rank.
         self._pending: set[str] = set()
+        self._pending_readers: set[str] = set()
         self._ready: deque = deque()
         self._remaining_preds: dict[str, int] = {}
         # node_id -> _InFlight, for every node currently running.
@@ -758,6 +759,8 @@ class ExecutionEngine(QObject):
         # build_plan walked graph.topo_order(), so the additions sit after
         # everything that could release them and _ready stays ordered
         self._pending.update(additions)
+        self._pending_readers.update(
+            nid for nid in additions if is_reader(self.graph.nodes[nid]))
         # a value held for this run's readers is held for the newcomers too
         for held, waiting in self._holding.items():
             waiting |= readers(self.graph, held) & set(additions)
@@ -955,6 +958,10 @@ class ExecutionEngine(QObject):
         """
         planned = set(plan)
         self._pending = set(plan)
+        # the readers among them: all a failure has to look at to find one
+        # set to save anyway (see _prune_downstream)
+        self._pending_readers = {nid for nid in plan
+                                 if is_reader(self.graph.nodes[nid])}
         self._remaining_preds = {
             node_id: sum(1 for p in self.graph.predecessors(node_id)
                          if p in planned)
@@ -1301,7 +1308,10 @@ class ExecutionEngine(QObject):
         has no unfinished ancestor to be pruned by.
         """
         downstream = self._failure_reaches(node_id)
-        dropped = [nid for nid in self._pending if nid in downstream]
+        # from the failure's side, not the plan's: each failure costs what
+        # it reaches, and a run where many nodes fail is not a walk of the
+        # whole plan per failure
+        dropped = [nid for nid in downstream if nid in self._pending]
         self._pending.difference_update(dropped)
         for nid in dropped:
             self._remaining_preds.pop(nid, None)
@@ -1310,10 +1320,13 @@ class ExecutionEngine(QObject):
         # A reader set to save anyway was spared, but it may have been
         # waiting on what just went: what it waits for now is only what is
         # still to finish.
-        unfinished = self._pending | set(self._running)
-        for nid in list(self._pending):
+        self._pending_readers &= self._pending
+        unfinished = None
+        for nid in list(self._pending_readers):
             if not saves_anyway(self.graph.nodes[nid]):
                 continue
+            if unfinished is None:
+                unfinished = self._pending | set(self._running)
             remaining = sum(1 for p in self.graph.predecessors(nid)
                             if p in unfinished)
             if remaining == 0 and self._remaining_preds.get(nid, 0) > 0:
@@ -1332,20 +1345,22 @@ class ExecutionEngine(QObject):
         """What a failure at `node_id` takes down with it: everything
         downstream, except across a report edge into a reader set to save
         anyway — that one runs, and its report marks what is missing."""
-        report_only = {(c.src_node, c.dst_node)
-                       for c in self.graph.report_links.values()}
-        other = {(c.src_node, c.dst_node) for c in (
-            *self.graph.connections.values(), *self.graph.links.values(),
-            *self.graph.var_links.values())}
+        # Asked edge by edge as the walk reaches it, never by gathering
+        # every edge in the graph first: that made each failure cost the
+        # whole graph, and a run where many nodes fail cost it many times.
+        report_links = self.graph.report_links
         seen: set[str] = set()
         stack = [node_id]
         while stack:
             src = stack.pop()
-            for nxt in self.graph.successors(src):
+            between: dict[str, bool] = {}   # successor -> report edges only
+            for conn in self.graph.out_connections(src):
+                only = conn.id in report_links
+                between[conn.dst_node] = between.get(conn.dst_node, True) and only
+            for nxt, report_only in between.items():
                 if nxt in seen:
                     continue
-                if ((src, nxt) in report_only and (src, nxt) not in other
-                        and saves_anyway(self.graph.nodes[nxt])):
+                if report_only and saves_anyway(self.graph.nodes[nxt]):
                     continue
                 seen.add(nxt)
                 stack.append(nxt)

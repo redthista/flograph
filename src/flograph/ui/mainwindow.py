@@ -4072,10 +4072,8 @@ class MainWindow(QMainWindow):
             new_ids.append(node.id)
         self.undo_stack.endMacro()
         self.scene.clearSelection()
-        for node_id in new_ids:
-            item = self.scene.node_items.get(node_id)
-            if item is not None:
-                item.setSelected(True)
+        self.scene.select_items(self.scene.node_items.get(node_id)
+                                for node_id in new_ids)
 
     # ---------------------------------------------------------- user nodes
 
@@ -4552,8 +4550,7 @@ class MainWindow(QMainWindow):
             item.setSelected(True)
         payload = self._selection_payload() or {}
         self.scene.clearSelection()
-        for prev in keep:
-            prev.setSelected(True)
+        self.scene.select_items(keep)
         return user_frames.content_hash(payload)
 
     def _update_component_instance(self, frame_id: str) -> None:
@@ -5176,15 +5173,11 @@ class MainWindow(QMainWindow):
         selects what it shows, never what it has painted over."""
         self._onto_the_canvas()
         holds = self.view.fence_holds
-        for item in self.scene.node_items.values():
-            if holds(item):
-                item.setSelected(True)
-        for item in self.scene.frame_items.values():
-            if holds(item):
-                item.setSelected(True)
-        for item in self.scene.shape_items.values():
-            if item.isVisible() and holds(item):
-                item.setSelected(True)
+        self.scene.select_items([
+            *(i for i in self.scene.node_items.values() if holds(i)),
+            *(i for i in self.scene.frame_items.values() if holds(i)),
+            *(i for i in self.scene.shape_items.values()
+              if i.isVisible() and holds(i))])
 
     def _find_node(self) -> None:
         """Edit > Find Node…, and Ctrl+F on the canvas.
@@ -5998,18 +5991,10 @@ class MainWindow(QMainWindow):
                     id_map[dst_node], dst_port))
         self.undo_stack.endMacro()
         self.scene.clearSelection()
-        for node in new_nodes:
-            item = self.scene.node_items.get(node.id)
-            if item is not None:
-                item.setSelected(True)
-        for frame in new_frames:
-            item = self.scene.frame_items.get(frame.id)
-            if item is not None:
-                item.setSelected(True)
-        for shape in new_shapes:
-            item = self.scene.shape_items.get(shape.id)
-            if item is not None:
-                item.setSelected(True)
+        self.scene.select_items([
+            *(self.scene.node_items.get(n.id) for n in new_nodes),
+            *(self.scene.frame_items.get(f.id) for f in new_frames),
+            *(self.scene.shape_items.get(s.id) for s in new_shapes)])
         # what it built, so a component update can re-attach the wires that
         # used to reach the nodes this just replaced
         return {"nodes": id_map, "frames": [f.id for f in new_frames]}

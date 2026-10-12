@@ -60,7 +60,8 @@ own nodes. G13 shipped 2026-09-12 too, and closes the chunk's newest
 idea: a frame turns into a model canvas — a node-like box with inputs and
 outputs you declare — and turns back again, and the canvas tabs fold
 under the Model tab that heads them. What is left of G is the three old
-entries, G1, G2 and G10. W2 shipped 2026-09-12 and chunk W retires with it: Plotly Table and
+entries, G1 and G2 (G10 closed
+2026-10-12: the palette opens fast on Windows now). W2 shipped 2026-09-12 and chunk W retires with it: Plotly Table and
 Gantt Chart filter when clicked, like every other visual that can. N5 shipped
 2026-09-13: a deep slicer tree opens and shuts in one go, and arrives
 opened as far as its node says. U2 shipped the same day and
@@ -100,6 +101,10 @@ statistics window draws the 60 fps budget line — so this is a policy that
 watches the measurement rather than new drawing code. Decide it with G2 in
 front of you: they are the same trade-off from opposite sides.
 
+  Held 2026-10-12 (Dan): a dropped frame may well be friendlier than parts
+  of the canvas flattening while you move, and a very heavy flow on Windows
+  already pans well since 0.1.26. Keep it here; don't build it unasked.
+
 ---
 
 ## G. Canvas interaction
@@ -129,42 +134,6 @@ replaced it (a show-scroll-bars setting).
 
   Both are decidable, but they need eyes on a real canvas, not a guess.
   Worth pairing with F1, which is the same trade-off from the other side.
-
-**G10. The right-click palette is slow to open on Windows** (Dan). The node
-palette that opens on a canvas right-click is noticeably slow on one Windows
-machine. `NodePalettePopup` is built once and reused, but every open tears
-the list down and rebuilds it: `popup_at` calls `_refresh("")`
-unconditionally, which does `self._list.clear()` then builds a fresh
-`QListWidgetItem` with an icon for all ~70 specs, and `registry.search("")`
-re-sorts the whole spec dict on every call. Icons are cached and the
-registry is not re-scanned, so the cost is the per-open widget rebuild plus
-the sort, none of it kept between opens. A persistent model, or a memoised
-`registry.all()`, is the lever — but measure on the slow machine first: the
-popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
-cause may be Windows popup/paint behaviour rather than the rebuild.
-
-  Measured 2026-09-12, and the rebuild is not it. Offscreen on Linux,
-  `popup_at` through show and first paint takes ~2 ms (8 ms the first time),
-  `_refresh` 0.7 ms for today's 118 rows, `registry.search("")` 0.01 ms;
-  `Favorites.contains` is a list lookup and `spec_icon` is cached. So the
-  cost is on the Windows side, and the one Windows-only thing in the path is
-  `ui/win_frame.py`: its Aero Snap filter is installed on the
-  **QApplication**, so every native message in the process — the popup's
-  creation, paint and mouse moves included — is handed to Python, which
-  calls `isVisible()` and `winId()` before checking whether the message is
-  for the main window at all. Issue 7 is what an application-wide Python
-  filter costs. Cheap to tighten (cache the hwnd and compare it first, or
-  move to `MainWindow.nativeEvent`), but it landed 2026-09-02 and this was
-  filed 2026-08-30, so it can make it worse, not explain it. Next step is a
-  timing on the slow machine itself.
-
-  Tightened 2026-09-13, unmeasured: the filter now reads the HWND off the
-  message pointer and compares it with the handle `_apply_styles`
-  remembers, so a message for any other window — the palette popup's
-  included — is turned away before a MSG is built or Qt is called
-  (`tests/test_win_frame.py` pins that no Qt call happens). Whether that
-  was the slowness is still for the slow machine to say; leave this entry
-  until it has.
 
 ---
 
