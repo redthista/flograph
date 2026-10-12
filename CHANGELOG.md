@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **No double scroll bars on a maximized dashboard tile** | With the canvas scroll bars turned on, maximizing a tile left the page's own bars showing beside it — and a table, which scrolls itself, got two sets. The page's bars now step aside while a tile fills the page and come back when it is restored. |
 
 ## 0.1.27
 
