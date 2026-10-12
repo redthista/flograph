@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Live charts keep their height in a themed report** | A live chart in a report's web page (`![[Chart\|height=150\|live]]`) ignored `height=` and `ratio=` whenever the page used a starter theme — every theme gives all charts one shape, and that won. A chart whose embed asks for a shape now keeps it, in a ```` ```columns ```` block too; a chart that asks for none still takes the theme's, and full screen still fills the screen. |
 
 ## 0.1.26
 
