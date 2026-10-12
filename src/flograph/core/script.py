@@ -125,6 +125,12 @@ CONTROL_KINDS = frozenset({
     "date",      # calendar picker
     "toggle",    # single checkbox -> bool
     "choice",    # dropdown of fixed or upstream-supplied options
+    "date_range",  # two calendar pickers -> a start/end pair
+    "multi",     # several of a set of options -> a list
+    "time",      # a time of day, "HH:MM"
+    "datetime",  # a date and time, "YYYY-MM-DDTHH:MM"
+    "colour",    # a swatch + picker -> "#rrggbb"
+    "file",      # pick a file -> its path
 })
 
 

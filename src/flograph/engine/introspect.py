@@ -122,7 +122,8 @@ def control_upstream(graph: Graph, cache: OutputCache,
     node = graph.nodes.get(node_id)
     if node is None:
         return {}
-    is_date = node.spec.control == "date"
+    # the calendar shapes read their bounds as ISO dates
+    is_date = node.spec.control in ("date", "date_range")
     resolved: dict = {}
     for port in node.spec.inputs:
         source = cached_input(graph, cache, node_id, port.name)

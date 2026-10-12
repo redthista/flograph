@@ -1,10 +1,30 @@
 # Input Controls
 
-The **Input** category holds the nodes you *set* rather than compute: a
-Slider, a Number box, a Text box, a Date picker, a Toggle, a Choice dropdown
-and Between, a two-handled range. Each one is a card on the canvas and a
-tile on a [[Dashboards and Reports|dashboard]], and both are the same
-control: move it in either place and the other follows.
+The **Input** category holds the nodes you *set* rather than compute. Each
+one is a card on the canvas and a tile on a [[Dashboards and Reports|
+dashboard]], and both are the same control: move it in either place and the
+other follows.
+
+| Control | What it gives the flow |
+|---|---|
+| **Slider** | a number, dragged along a track |
+| **Between** | a `low` and a `high` number — a window on one track |
+| **Number** | a number, typed |
+| **Text** | text |
+| **Date** | a date, `YYYY-MM-DD` |
+| **Date Range** | a `start` and an `end` date — last 30 days, this month, year to date, or two picked dates |
+| **Time** | a time of day, `HH:MM` |
+| **Date & Time** | a moment, `YYYY-MM-DDTHH:MM` |
+| **Toggle** | True or False, as a tick box or a switch |
+| **Choice** | one of a set, as a dropdown, buttons or radio buttons |
+| **Multi Choice** | a list of any number of a set, as chips |
+| **Colour** | a colour, `#rrggbb`, with optional preset swatches |
+| **File** | the path of a file or folder the person chooses |
+
+Options and bounds can come from the control's own input ports: wire a
+column into a Choice's or Multi Choice's `options` and the picks are that
+column's values; wire a date column into a Date Range's `minimum` and
+`maximum` and it is pinned to the period the data covers.
 
 Every control carries the same **Behaviour** settings in its Properties,
 folded under their own heading, whatever its shape — including a control

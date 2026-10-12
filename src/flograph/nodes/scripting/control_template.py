@@ -11,13 +11,18 @@ That is the whole trick — a control node is a *configuration* of one of the
 built-in widget shapes plus whatever run() does with the value, and most
 useful controls are exactly that.
 
-The six shapes: slider, number, text, date, toggle, choice. Change
-NODE["control"] to switch, and give it the params that shape reads (listed
-against each below).
+The shapes: slider, range, number, text, date, date_range, time, datetime,
+toggle, choice, multi, colour, file. Change NODE["control"] to switch, and
+give it the params that shape reads (listed against each below).
 
-If you need a shape that doesn't exist — a colour picker, a two-handled
-range, a star rating — that one *does* need Python: add a ControlWidget
-subclass to flograph/ui/controls.py and its name to CONTROL_KINDS in
+Every control also gets the Behaviour settings without declaring them —
+Apply changes, Show reset button, Variable name, Required, Help text and
+Accent colour (flograph/core/control_apply.py) — so yours can hold a change
+until Apply and publish ${name} like the built-in ones.
+
+If you need a shape that doesn't exist — a star rating, a map pin — that
+one *does* need Python: add a ControlWidget subclass to
+flograph/ui/controls.py and its name to CONTROL_KINDS in
 flograph/core/script.py. Everything else here stays the same.
 """
 
@@ -37,7 +42,7 @@ flograph/core/script.py. Everything else here stays the same.
 NODE = {
     "label": "Control Template",
     "category": "Scripting",
-    "version": "1.0",
+    "version": "1.1",
     "card": "control",
     "control": "slider",
     "inputs": [("maximum", "any", {"optional": True})],
@@ -54,9 +59,17 @@ NODE = {
 #   slider   minimum maximum step decimals
 #   number   minimum maximum step decimals prefix suffix
 #   text     placeholder multiline
-#   date     minimum maximum          (blank = unbounded; ISO YYYY-MM-DD)
-#   toggle   text                     (the label beside the tick box)
-#   choice   items                    (one option per line)
+#   range    minimum maximum step decimals    (value: JSON pair)
+#   date     minimum maximum preset days allow_blank
+#                                     (blank = unbounded; ISO YYYY-MM-DD)
+#   date_range minimum maximum        (value: a window name or a JSON pair)
+#   time     -                        (value: "HH:MM")
+#   datetime -                        (value: "YYYY-MM-DDTHH:MM")
+#   toggle   text style               (the label beside the tick box)
+#   choice   items style all_option   (one option per line)
+#   multi    items none_means         (value: JSON list of the ticked)
+#   colour   swatches                 (value: "#rrggbb")
+#   file     mode filter              (value: the path)
 #
 # width/height are the card's size on the canvas. Declare them and the card
 # gets a corner resize grip that writes straight into them; leave them out

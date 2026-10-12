@@ -287,9 +287,13 @@ same tiles stay framed, for when the screen a dashboard is opened on is not
 the screen it was built on. Both travel with the project.
 
 **Input controls** are the other half of that: a whole node category that you
-*set* rather than compute. **Slider**, **Number**, **Text**, **Date**,
-**Toggle** and **Choice** each carry a caption you write, are typed properly
-so wires still validate, and re-run everything downstream when you move them.
+*set* rather than compute. **Slider**, **Between**, **Number**, **Text**,
+**Date**, **Date Range**, **Time**, **Date & Time**, **Toggle**, **Choice**,
+**Multi Choice**, **Colour** and **File** each carry a caption you write, are
+typed properly so wires still validate, and re-run everything downstream when
+you move them — or hold the change until **Apply** is pressed, on the control
+or on one Apply button for a whole page. Any control can publish its value as
+a `${variable}` for use in any other node's settings.
 A **Slicer** does the same for picking values out of a column. The result is
 a dashboard you can hand to someone who will never open the model canvas:
 they turn the knobs, the charts answer.
@@ -336,7 +340,8 @@ favorites first in the `Tab` search popup. The star button next to the
 search box narrows the whole tree to favorites only. Favorites persist
 per-machine in settings.
 
-**Input** — Slider, Between Slider, Number, Text, Date, Toggle, Choice.
+**Input** — Slider, Between Slider, Number, Text, Date, Date Range, Time,
+Date & Time, Toggle, Choice, Multi Choice, Colour, File.
 
 **IO** — **Read File** reads CSV, Excel, JSON (incl. JSONL), Parquet and
 SQLite through one node: pick the **Format** (or leave it on *auto* and let

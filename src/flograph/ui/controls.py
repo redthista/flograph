@@ -90,6 +90,12 @@ CONTROL_SIZES: dict[str, tuple[float, float]] = {
     "date": (200.0, 84.0),
     "toggle": (200.0, 76.0),
     "choice": (220.0, 84.0),
+    "date_range": (300.0, 110.0),
+    "multi": (260.0, 150.0),
+    "time": (180.0, 84.0),
+    "datetime": (220.0, 84.0),
+    "colour": (200.0, 104.0),
+    "file": (260.0, 84.0),
 }
 DEFAULT_CONTROL_SIZE = (220.0, 90.0)
 
@@ -188,14 +194,14 @@ def _stylesheet(accent: Optional[QColor] = None) -> str:
         f"QLabel#control_readout {{ color: {theme.NODE_TEXT.name()};"
         f" font-size: 8.5pt; font-weight: bold; }}"
         f"QWidget#readout_row {{ background: transparent; }}"
-        f"QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QDateEdit,"
+        f"QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit,"
         f" QComboBox {{ background: {theme.NODE_BODY.name()};"
         f" color: {theme.NODE_TEXT.name()};"
         f" border: 1px solid {theme.NODE_BORDER.name()};"
         f" border-radius: 3px; padding: 2px 4px; font-size: 9pt; }}"
         # where the keyboard is, in the control's own colour
         f"QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus,"
-        f" QDoubleSpinBox:focus, QDateEdit:focus, QComboBox:focus"
+        f" QDoubleSpinBox:focus, QDateTimeEdit:focus, QComboBox:focus"
         f" {{ border-color: {on}; }}"
         # set on an editor whose value is refused (a required box left
         # empty, text that misses its pattern) — after :focus, so it wins
@@ -1327,6 +1333,391 @@ class ChoiceControl(ControlWidget):
             self._group.checkedButton().setFocus()
 
 
+class DateRangeControl(ControlWidget):
+    """A window of dates: a dropdown of moving windows over two pickers.
+
+    The value is either a window's name or a picked pair (see
+    core.controls.date_range_values), so choosing "last 30 days" keeps it
+    moving with the calendar, while touching either picker pins it — and
+    the dropdown then says "custom", so nobody mistakes a pinned range for
+    a moving one.
+    """
+
+    def _build(self) -> None:
+        from flograph.core.controls import CUSTOM_RANGE, RANGE_PRESETS
+        from .canvas.popup_lift import CardComboBox
+
+        self._preset = CardComboBox()
+        self._preset.setObjectName("control_range_preset")
+        for name in (*RANGE_PRESETS, CUSTOM_RANGE):
+            self._preset.addItem(name, name)
+        self._preset.activated.connect(self._preset_picked)
+        self._layout.addWidget(self._preset)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        self._start, self._end = QDateEdit(), QDateEdit()
+        for edit, name in ((self._start, "control_start"),
+                           (self._end, "control_end")):
+            edit.setObjectName(name)
+            edit.setCalendarPopup(True)
+            edit.setDisplayFormat(ISO_FORMAT)
+            edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            edit.dateChanged.connect(self._dates_picked)
+        row.addWidget(self._start, 1)
+        row.addWidget(QLabel("–"))
+        row.addWidget(self._end, 1)
+        self._layout.addLayout(row)
+        self._chosen = ""       # what the value will be on the next commit
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.controls import as_iso_date, date_range_values
+
+        low = as_iso_date(self._wired("minimum", params.get("minimum")))
+        high = as_iso_date(self._wired("maximum", params.get("maximum")))
+        preset, start, end = date_range_values(params.get("value"), low, high)
+        for edit in (self._start, self._end):
+            edit.setDateRange(QDate(1752, 9, 14), QDate(7999, 12, 31))
+            if low:
+                edit.setMinimumDate(iso_to_qdate(low))
+            if high:
+                edit.setMaximumDate(iso_to_qdate(high))
+        self._start.setDate(iso_to_qdate(start))
+        self._end.setDate(iso_to_qdate(end))
+        self._preset.setCurrentIndex(max(0, self._preset.findData(preset)))
+        self._chosen = str(params.get("value") or "")
+
+    def _preset_picked(self, *_args) -> None:
+        from flograph.core.controls import CUSTOM_RANGE
+
+        name = self._preset.currentData()
+        if name == CUSTOM_RANGE:
+            self._chosen = self._pair()
+        else:
+            self._chosen = name
+        self._commit()
+
+    def _dates_picked(self, *_args) -> None:
+        if self._syncing:
+            return
+        self._chosen = self._pair()
+        self._commit()
+
+    def _pair(self) -> str:
+        import json
+        start, end = sorted((qdate_to_iso(self._start.date()),
+                             qdate_to_iso(self._end.date())))
+        return json.dumps([start, end])
+
+    def _read(self):
+        return self._chosen
+
+    def focus_editor(self) -> None:
+        self._start.setFocus()
+
+
+class MultiControl(ControlWidget):
+    """Several of a set, as chips that wrap to the card's width, with All
+    and None. Chips rather than a dropdown of ticks: on a card a dropdown
+    is a popup with all of a popup's troubles (see canvas.popup_lift), and
+    a handful of options is better seen at once anyway. Hundreds belong in
+    a Slicer."""
+
+    def _build(self) -> None:
+        from .flow_layout import FlowLayout
+
+        tools = QHBoxLayout()
+        tools.setContentsMargins(0, 0, 0, 0)
+        tools.setSpacing(4)
+        self._all = QToolButton()
+        self._all.setText("All")
+        self._none = QToolButton()
+        self._none.setText("None")
+        for button in (self._all, self._none):
+            button.setObjectName("control_reset")
+            button.setFocusPolicy(Qt.NoFocus)
+        self._all.clicked.connect(lambda: self._set_all(True))
+        self._none.clicked.connect(lambda: self._set_all(False))
+        self._summary = QLabel("")
+        self._summary.setObjectName("bound")
+        tools.addWidget(self._summary, 1)
+        tools.addWidget(self._all)
+        tools.addWidget(self._none)
+        self._layout.addLayout(tools)
+        self._chips_box = QWidget()
+        self._chips_box.setObjectName("readout_row")
+        self._chips = FlowLayout(self._chips_box, spacing=3)
+        self._layout.addWidget(self._chips_box)
+        self._buttons: list[QToolButton] = []
+        self._built: tuple = ()
+
+    def _options(self, params: dict) -> list[str]:
+        options = self._upstream.get("options")
+        if options is None:
+            options = option_list(params.get("items"))
+        return [str(o) for o in options]
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.controls import selected_values
+
+        options = self._options(params)
+        picked = selected_values(params.get("value"))
+        # a stored pick no longer offered stays visible, as a Choice's does
+        entries = options + [p for p in picked if p not in options]
+        if self._built != tuple(entries):
+            self._rebuild(entries, set(options))
+        for button in self._buttons:
+            button.setChecked(button.property("choice_value") in picked)
+        self._update_summary(params)
+
+    def _rebuild(self, entries, offered) -> None:
+        for button in self._buttons:
+            self._chips.removeWidget(button)
+            button.deleteLater()
+        self._buttons = []
+        for value in entries:
+            button = QToolButton()
+            button.setObjectName("choice_button")
+            button.setCheckable(True)
+            button.setText(value if value in offered
+                           else f"{value}  (not in list)")
+            button.setProperty("choice_value", value)
+            button.toggled.connect(self._chip_toggled)
+            self._chips.addWidget(button)
+            self._buttons.append(button)
+        self._built = tuple(entries)
+
+    def _chip_toggled(self, *_args) -> None:
+        self._update_summary(self._params)
+        self._commit()
+
+    def _set_all(self, on: bool) -> None:
+        self._syncing = True
+        try:
+            for button in self._buttons:
+                button.setChecked(on)
+        finally:
+            self._syncing = False
+        self._update_summary(self._params)
+        self._commit()
+
+    def _update_summary(self, params: dict) -> None:
+        ticked = sum(1 for b in self._buttons if b.isChecked())
+        if ticked:
+            text = f"{ticked} of {len(self._buttons)}"
+        else:
+            text = ("none ticked — all pass"
+                    if params.get("none_means", "all") == "all"
+                    else "none ticked")
+        self._summary.setText(text)
+
+    def _read(self):
+        import json
+        return json.dumps([b.property("choice_value") for b in self._buttons
+                           if b.isChecked()])
+
+    def _primary(self):
+        return self._chips_box
+
+    def focus_editor(self) -> None:
+        if self._buttons:
+            self._buttons[0].setFocus()
+
+
+class TimeControl(ControlWidget):
+    """A time of day, "HH:MM"."""
+
+    def _build(self) -> None:
+        from PySide6.QtWidgets import QTimeEdit
+
+        self._edit = QTimeEdit()
+        self._edit.setObjectName("control_time")
+        self._edit.setDisplayFormat("HH:mm")
+        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._edit.setKeyboardTracking(False)
+        self._edit.timeChanged.connect(self._commit)
+        self._layout.addWidget(self._edit)
+
+    def _apply(self, params: dict) -> None:
+        from PySide6.QtCore import QTime
+        from flograph.core.controls import time_value
+
+        self._edit.setTime(QTime.fromString(time_value(params.get("value")),
+                                            "HH:mm"))
+
+    def _read(self):
+        return self._edit.time().toString("HH:mm")
+
+    def focus_editor(self) -> None:
+        self._edit.setFocus()
+
+
+class DateTimeControl(ControlWidget):
+    """A date and a time, "YYYY-MM-DDTHH:MM", with a calendar popup."""
+
+    def _build(self) -> None:
+        from PySide6.QtWidgets import QDateTimeEdit
+
+        self._edit = QDateTimeEdit()
+        self._edit.setObjectName("control_datetime")
+        self._edit.setCalendarPopup(True)
+        self._edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._edit.setKeyboardTracking(False)
+        self._edit.dateTimeChanged.connect(self._commit)
+        self._layout.addWidget(self._edit)
+
+    def _apply(self, params: dict) -> None:
+        from PySide6.QtCore import QDateTime
+        from flograph.core.controls import datetime_value
+
+        self._edit.setDateTime(QDateTime.fromString(
+            datetime_value(params.get("value")), "yyyy-MM-ddTHH:mm"))
+
+    def _read(self):
+        return self._edit.dateTime().toString("yyyy-MM-ddTHH:mm")
+
+    def focus_editor(self) -> None:
+        self._edit.setFocus()
+
+
+class ColourControl(ControlWidget):
+    """A swatch (click for the full picker), its hex beside it, and an
+    optional row of preset swatches."""
+
+    SWATCH = 18
+
+    def _build(self) -> None:
+        from .flow_layout import FlowLayout
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        self._swatch = QToolButton()
+        self._swatch.setObjectName("control_swatch")
+        self._swatch.setFixedSize(30, 20)
+        self._swatch.setToolTip("Choose a colour")
+        self._swatch.clicked.connect(self._pick)
+        self._hex = QLabel("")
+        row.addWidget(self._swatch)
+        row.addWidget(self._hex, 1)
+        self._layout.addLayout(row)
+        self._presets_box = QWidget()
+        self._presets_box.setObjectName("readout_row")
+        self._presets = FlowLayout(self._presets_box, spacing=3)
+        self._layout.addWidget(self._presets_box)
+        self._preset_buttons: list[QToolButton] = []
+        self._built: tuple = ()
+        self._value = "#3b82f6"
+
+    @staticmethod
+    def _paint(button: QToolButton, colour: str, size=None) -> None:
+        button.setStyleSheet(
+            f"QToolButton {{ background: {colour};"
+            f" border: 1px solid {theme.NODE_BORDER.name()};"
+            f" border-radius: 3px; }}"
+            f"QToolButton:hover {{ border: 1px solid {theme.NODE_TEXT.name()}; }}")
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.controls import colour_value, lines_to_values
+
+        self._value = colour_value(params.get("value"))
+        self._paint(self._swatch, self._value)
+        self._hex.setText(self._value)
+        presets = tuple(colour_value(c, "") for c
+                        in lines_to_values(params.get("swatches")))
+        presets = tuple(c for c in presets if c)
+        if presets != self._built:
+            for button in self._preset_buttons:
+                self._presets.removeWidget(button)
+                button.deleteLater()
+            self._preset_buttons = []
+            for colour in presets:
+                button = QToolButton()
+                button.setFixedSize(self.SWATCH, self.SWATCH)
+                button.setToolTip(colour)
+                self._paint(button, colour)
+                button.clicked.connect(lambda _c=False, c=colour: self._set(c))
+                self._presets.addWidget(button)
+                self._preset_buttons.append(button)
+            self._built = presets
+        self._presets_box.setVisible(bool(presets))
+
+    def _pick(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        # a dialog is a window of its own, so a card is no trouble to it
+        colour = QColorDialog.getColor(QColor(self._value), self.window(),
+                                       "Choose a colour")
+        if colour.isValid():
+            self._set(colour.name())
+
+    def _set(self, colour: str) -> None:
+        self._value = colour
+        self._paint(self._swatch, colour)
+        self._hex.setText(colour)
+        self._commit()
+
+    def _read(self):
+        return self._value
+
+    def focus_editor(self) -> None:
+        self._swatch.setFocus()
+
+
+class FileControl(ControlWidget):
+    """A "Choose…" button and the chosen file's name. The full path is the
+    tooltip; the card shows the name, which is what people recognise."""
+
+    def _build(self) -> None:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        self._button = QToolButton()
+        self._button.setObjectName("choice_button")
+        self._button.setText("Choose…")
+        self._button.clicked.connect(self._pick)
+        self._name = QLabel("")
+        self._name.setObjectName("control_file_name")
+        row.addWidget(self._button)
+        row.addWidget(self._name, 1)
+        self._layout.addLayout(row)
+        self._path = ""
+
+    def _apply(self, params: dict) -> None:
+        import os
+
+        self._path = str(params.get("value", "") or "")
+        name = os.path.basename(self._path.rstrip("/\\")) or self._path
+        self._name.setText(name or "No file chosen")
+        self._name.setToolTip(self._path)
+
+    def _pick(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        import os
+
+        start = os.path.dirname(self._path) if self._path else ""
+        if self._params.get("mode") == "folder":
+            path = QFileDialog.getExistingDirectory(
+                self.window(), "Choose a folder", start)
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self.window(), "Choose a file", start,
+                str(self._params.get("filter") or ""))
+        if path:
+            self._path = path
+            self._commit()
+
+    def _read(self):
+        return self._path
+
+    def _primary(self):
+        return self._button
+
+    def focus_editor(self) -> None:
+        self._button.setFocus()
+
+
 _CONTROLS = {
     "slider": SliderControl,
     "range": RangeControl,
@@ -1335,6 +1726,12 @@ _CONTROLS = {
     "date": DateControl,
     "toggle": ToggleControl,
     "choice": ChoiceControl,
+    "date_range": DateRangeControl,
+    "multi": MultiControl,
+    "time": TimeControl,
+    "datetime": DateTimeControl,
+    "colour": ColourControl,
+    "file": FileControl,
 }
 
 

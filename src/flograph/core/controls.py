@@ -304,3 +304,133 @@ def selected_values(raw: Any) -> list[str]:
     if isinstance(parsed, list):
         return [str(v) for v in parsed]
     return [str(parsed)]
+
+
+# ------------------------------------------------------------ date range
+
+# What a Date Range's value can name instead of two dates. Relative, so a
+# dashboard opened next month shows next month's "last 30 days" without
+# anybody editing it; "whole range" is every day between the bounds (wired
+# from a date column, typically). The value is either one of these or a
+# picked [start, end] pair, and the card writes whichever the user chose.
+RANGE_PRESETS = ["last 7 days", "last 30 days", "last 90 days",
+                 "this month", "last month", "year to date", "whole range"]
+CUSTOM_RANGE = "custom"
+
+
+def date_range_values(raw: Any, low: str = "", high: str = "",
+                      today=None) -> tuple:
+    """A Date Range's value as `(preset or "custom", start, end)`, ISO
+    strings clamped into `low`..`high` (either may be "" for unbounded).
+
+    Blank or unreadable falls back to "last 30 days", which is also what a
+    fresh control starts on — the window most dashboards open with.
+    """
+    import datetime
+    import json
+
+    today = today or datetime.date.today()
+    text = str(raw or "").strip()
+    preset, pair = "", None
+    if text in RANGE_PRESETS:
+        preset = text
+    elif text:
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and len(parsed) == 2:
+                pair = [as_iso_date(parsed[0]), as_iso_date(parsed[1])]
+        except ValueError:
+            pass
+    if pair is None or not all(pair):
+        preset = preset or "last 30 days"
+        start, end = _preset_window(preset, today, low, high)
+    else:
+        start, end = sorted(pair)
+    if low:
+        start, end = max(start, low), max(end, low)
+    if high:
+        start, end = min(start, high), min(end, high)
+    return (preset or CUSTOM_RANGE), start, end
+
+
+def _preset_window(preset: str, today, low: str, high: str) -> tuple:
+    import datetime
+
+    def iso(day):
+        return day.isoformat()
+
+    if preset in ("last 7 days", "last 30 days", "last 90 days"):
+        days = int(preset.split()[1])
+        return iso(today - datetime.timedelta(days=days - 1)), iso(today)
+    if preset == "this month":
+        return iso(today.replace(day=1)), iso(today)
+    if preset == "last month":
+        end = today.replace(day=1) - datetime.timedelta(days=1)
+        return iso(end.replace(day=1)), iso(end)
+    if preset == "year to date":
+        return iso(today.replace(month=1, day=1)), iso(today)
+    # whole range: the bounds, or the default window where there are none
+    if low and high:
+        return low, high
+    start = iso(today - datetime.timedelta(days=29))
+    return (low or start), (high or iso(today))
+
+
+# ------------------------------------------------------------ multi choice
+
+def multi_values(raw: Any, options: Optional[list[str]],
+                 none_means: str = "all") -> list[str]:
+    """What a Multi Choice emits: the ticked values, in the options' order
+    (a stored pick no longer offered is kept, at the end — the same rule as
+    a Choice). Nothing ticked means every option when `none_means` is
+    "all", which is how "no filter yet" reads on a dashboard, and an empty
+    list when it is "nothing"."""
+    picked = selected_values(raw)
+    if not picked:
+        return list(options or []) if none_means == "all" else []
+    order = {v: i for i, v in enumerate(options or [])}
+    return sorted(picked, key=lambda v: (v not in order, order.get(v, 0)))
+
+
+# ------------------------------------------------------------ time, colour
+
+def time_value(raw: Any) -> str:
+    """A time param as "HH:MM", or "00:00" when it can't be read — a time
+    picker always shows a time, so the flow always gets the one shown."""
+    text = str(raw or "").strip()
+    parts = text.split(":")
+    try:
+        hours, minutes = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError):
+        return "00:00"
+    if not (0 <= hours < 24 and 0 <= minutes < 60):
+        return "00:00"
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def datetime_value(raw: Any) -> str:
+    """A date-and-time param as "YYYY-MM-DDTHH:MM" — ISO, so it compares
+    against a pandas datetime column as it is. Blank means midnight today:
+    a fixed point in the day, so the card and the run agree on it."""
+    import datetime
+
+    text = str(raw or "").strip().replace(" ", "T")
+    try:
+        moment = datetime.datetime.fromisoformat(text[:16])
+    except ValueError:
+        moment = datetime.datetime.combine(datetime.date.today(),
+                                           datetime.time())
+    return moment.strftime("%Y-%m-%dT%H:%M")
+
+
+def colour_value(raw: Any, fallback: str = "#3b82f6") -> str:
+    """A colour param as lower-case "#rrggbb". Short hex and a missing # are
+    tidied; anything else is the fallback rather than an invalid colour."""
+    import re
+
+    text = str(raw or "").strip().lower()
+    if text and not text.startswith("#"):
+        text = "#" + text
+    if re.fullmatch(r"#[0-9a-f]{3}", text):
+        text = "#" + "".join(c * 2 for c in text[1:])
+    return text if re.fullmatch(r"#[0-9a-f]{6}", text) else fallback
