@@ -1087,6 +1087,8 @@ class NodeItem(QGraphicsObject):
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
         self._note_link_press: QPointF | None = None  # link hit on press
+        self._maximize_press = False   # the header's maximize button, pressed
+        self._maximize_hover = False
         self._table_widget = None   # SpreadsheetView (grid cards only)
         self._table_model = None    # SheetModel (grid cards only)
         self._table_ribbon = None   # SheetRibbon (grid cards only)
@@ -3746,6 +3748,39 @@ class NodeItem(QGraphicsObject):
         x = 22.0 if self._fold_toggle_rect() is not None else 7.0
         return QRectF(x, HEADER_H / 2 - 5, 11, 10)
 
+    def _maximize_button_rect(self) -> Optional[QRectF]:
+        """The window glyph just left of the status LED that opens a Table
+        card in its full editor, or None when this node has no such view.
+
+        Only an open Table card: a folded one is an icon with no header, and
+        at low zoom the header is a flat bar with nothing to aim at.
+        """
+        if not self.table or self._flat or self._folded:
+            return None
+        right = self.width - 13 - LED_RADIUS - 6   # LED centre is width - 13
+        return QRectF(right - 10, HEADER_H / 2 - 5, 10, 10)
+
+    def _over_maximize_button(self, pos: QPointF) -> bool:
+        rect = self._maximize_button_rect()
+        # generous, like the chevrons: a 10px glyph is a small target
+        return rect is not None and rect.adjusted(-3, -4, 3, 4).contains(pos)
+
+    def _paint_maximize_button(self, painter: QPainter, rect: QRectF) -> None:
+        """A window: an outline with a thicker title bar, the glyph every
+        title bar uses for maximize. Brighter under the cursor."""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        colour = (theme.NODE_TEXT if self._maximize_hover
+                  else theme.NODE_SUBTEXT)
+        painter.setPen(QPen(colour, 1.2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect.adjusted(0.6, 0.6, -0.6, -0.6), 1.5, 1.5)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(colour))
+        painter.drawRect(QRectF(rect.left() + 0.6, rect.top() + 0.6,
+                                rect.width() - 1.2, 2.4))
+        painter.restore()
+
     def _paint_collapse_toggle(self, painter: QPainter,
                                rect: QRectF) -> None:
         """A disclosure triangle: pointing down when the pins run down the
@@ -3802,7 +3837,9 @@ class NodeItem(QGraphicsObject):
         for chevron in (fold, toggle):
             if chevron is not None:
                 left = max(left, chevron.right() + 5)
-        label_rect = QRectF(left, 0, width - left - 20, HEADER_H)
+        maximize = self._maximize_button_rect()
+        right = maximize.left() - 4 if maximize is not None else width - 20
+        label_rect = QRectF(left, 0, right - left, HEADER_H)
         label_text = f"⚠ {self.node.label}" if self.broken else self.node.label
         label = painter.fontMetrics().elidedText(
             label_text, Qt.ElideRight, int(label_rect.width()))
@@ -3811,8 +3848,11 @@ class NodeItem(QGraphicsObject):
         led_center_x = width - 13
         self._paint_status_led(painter, led_center_x, HEADER_H / 2,
                                self._header_color())
-        self._paint_temp_edit_dot(painter, led_center_x - LED_RADIUS - 10,
-                                  HEADER_H / 2)
+        dot_x = led_center_x - LED_RADIUS - 10
+        if maximize is not None:
+            self._paint_maximize_button(painter, maximize)
+            dot_x = maximize.left() - 6
+        self._paint_temp_edit_dot(painter, dot_x, HEADER_H / 2)
 
     def _paint_status_led(self, painter: QPainter, cx: float, cy: float,
                           behind: QColor) -> None:
@@ -4205,6 +4245,16 @@ class NodeItem(QGraphicsObject):
         if step != self._pager_hover:
             self._pager_hover = step
             self.update()
+        maximize = edge is None and not step and self._over_maximize_button(
+            event.pos())
+        if maximize != self._maximize_hover:
+            self._maximize_hover = maximize
+            if maximize:
+                self.setToolTip("Open Full Editor — the table in a window "
+                                "of its own, with the full ribbon")
+            else:
+                self._refresh_tooltip()
+            self.update()
         if step:
             self.setCursor(Qt.PointingHandCursor)
         elif edge == "corner":
@@ -4213,6 +4263,8 @@ class NodeItem(QGraphicsObject):
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
+        elif maximize:
+            self.setCursor(Qt.PointingHandCursor)
         elif self._hovering_a_chevron(event.pos()):
             # the fold / gather-ports triangles are click targets, not drag
             # bars — say so, even on a folded node whose whole body drags
@@ -4244,6 +4296,10 @@ class NodeItem(QGraphicsObject):
 
     def hoverLeaveEvent(self, event) -> None:
         self.unsetCursor()
+        if self._maximize_hover:
+            self._maximize_hover = False
+            self._refresh_tooltip()
+            self.update()
         if self._pager_hover:
             self._pager_hover = 0
             self.update()
@@ -4325,6 +4381,14 @@ class NodeItem(QGraphicsObject):
                 # fold costs one Ctrl+Z
                 and fold.adjusted(-4, -4, 4, 4).contains(event.pos())):
             self.toggle_folded()
+            event.accept()
+            return
+        if (event.button() == Qt.LeftButton
+                and self._over_maximize_button(event.pos())):
+            # Opened on release, not here: the editor is modal, and opening
+            # it mid-press would leave the scene holding a press whose
+            # release went to the dialog — a drag nothing ever ends.
+            self._maximize_press = True
             event.accept()
             return
         if (self.note and event.button() == Qt.LeftButton
@@ -4514,6 +4578,12 @@ class NodeItem(QGraphicsObject):
         if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
             # that second button letting go: not the end of the drag
             super().mouseReleaseEvent(event)
+            return
+        if self._maximize_press:
+            self._maximize_press = False
+            if self._over_maximize_button(event.pos()):
+                QTimer.singleShot(0, self._open_table_editor)
+            event.accept()
             return
         if self._note_link_press is not None:
             press, self._note_link_press = self._note_link_press, None

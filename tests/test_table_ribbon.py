@@ -5,7 +5,7 @@ and replace, moving rows and columns."""
 import json
 
 import pytest
-from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
+from PySide6.QtCore import QItemSelectionModel, QPoint, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QUndoStack
 from PySide6.QtCore import QEvent
 
@@ -507,3 +507,63 @@ def test_an_auto_ribbon_lets_the_window_narrow_and_goes_compact(qtbot):
     ribbon._choose_size()
     assert bench.width() == 560
     assert ribbon.active_size == "compact"
+
+
+class _Click:
+    """Just enough of a QGraphicsSceneMouseEvent for the item's handlers."""
+
+    def __init__(self, pos, button=Qt.LeftButton):
+        from PySide6.QtCore import QPointF
+        self._pos = QPointF(pos)
+        self._button = button
+
+    def pos(self):
+        return self._pos
+
+    def button(self):
+        return self._button
+
+    def buttons(self):
+        return Qt.NoButton
+
+    def modifiers(self):
+        return Qt.NoModifier
+
+    def accept(self):
+        pass
+
+
+def test_header_maximize_button_opens_full_editor(env, registry, qtbot,
+                                                  monkeypatch):
+    from flograph.ui.canvas.node_item import LED_RADIUS
+
+    graph, _stack, scene = env
+    node = _table(graph, registry)
+    item = scene.node_items[node.id]
+    rect = item._maximize_button_rect()
+    assert rect is not None
+    # just left of the status LED, and clear of it
+    assert rect.right() < item.width - 13 - LED_RADIUS
+
+    opened = []
+    monkeypatch.setattr(item, "_open_table_editor",
+                        lambda: opened.append(True))
+    item.mousePressEvent(_Click(rect.center()))
+    assert not opened            # not on press: the editor is modal
+    item.mouseReleaseEvent(_Click(rect.center()))
+    qtbot.waitUntil(lambda: opened == [True])
+
+    # pressed on the button, let go elsewhere: nothing opens
+    item.mousePressEvent(_Click(rect.center()))
+    item.mouseReleaseEvent(_Click(rect.center() + QPointF(0, 80)))
+    qtbot.wait(20)
+    assert opened == [True]
+
+
+def test_header_maximize_button_only_on_open_table_cards(env, registry):
+    graph, _stack, scene = env
+    table = scene.node_items[_table(graph, registry).id]
+    other = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+    assert scene.node_items[other.id]._maximize_button_rect() is None
+    table.toggle_folded()
+    assert table._maximize_button_rect() is None

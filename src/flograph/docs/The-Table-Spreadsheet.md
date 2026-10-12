@@ -21,7 +21,8 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 Hover any button for what it does, in a sentence, and its shortcut. Under the ribbon is the **formula bar**: the selected cell's name and what it holds as written (`=[@Units]*[@Price]`, not its result) — type there to edit it, or click **fx** for every function. **Open Full Editor…** is also on the right-click menu of the node and of every cell, row number and column header. On a
 canvas card the ribbon is one line of icons to leave the grid room; in the
-full editor (**View ▸ Full Editor**, or the card's expand button) and on a
+full editor (**View ▸ Full Editor**, the card's expand button, or the window
+button in the card's header, just left of its status light) and on a
 wide dashboard tile each group has labelled buttons and its name underneath.
 The full editor is a window of its own: maximize it from its title bar, or
 press **F11** to fill the screen and again to come back.
