@@ -95,3 +95,86 @@ class TestMinimapSettingDialog:
         checkbox.setChecked(False)
         assert window.minimap_enabled is False
         assert window.view.minimap.isHidden() is True
+
+
+def _click(widget, pos, *, release_at=None):
+    """A real press/release pair at the widget's handlers — the gesture,
+    not a call to set_collapsed (see the drag-select note in the memory of
+    why calling the method proves nothing about the click)."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    def event(kind, at, buttons):
+        at = QPointF(at)
+        return QMouseEvent(kind, at, widget.mapToGlobal(at), Qt.LeftButton,
+                           buttons, Qt.NoModifier)
+
+    widget.mousePressEvent(event(QEvent.MouseButtonPress, pos, Qt.LeftButton))
+    end = pos if release_at is None else release_at
+    widget.mouseReleaseEvent(event(QEvent.MouseButtonRelease, end,
+                                   Qt.NoButton))
+
+
+class TestMinimapCollapse:
+    def test_starts_open(self, window):
+        from flograph.ui.canvas.minimap import HEIGHT, WIDTH
+        assert window.view.minimap.collapsed is False
+        assert window.view.minimap.size().toTuple() == (WIDTH, HEIGHT)
+
+    def test_corner_toggle_folds_to_a_square_and_back(self, window):
+        from flograph.ui.canvas.minimap import COLLAPSED, HEIGHT, WIDTH
+        minimap = window.view.minimap
+        minimap.reposition()        # the window is never shown here
+        right = minimap.geometry().right()
+
+        _click(minimap, minimap._toggle_rect().center())
+        assert minimap.collapsed is True
+        assert minimap.size().toTuple() == (COLLAPSED, COLLAPSED)
+        # folds into its own corner, not towards the toggle
+        assert minimap.geometry().right() == right
+        assert window.settings.value(
+            "canvas/minimap_collapsed", False, type=bool) is True
+
+        _click(minimap, minimap.rect().center())
+        assert minimap.collapsed is False
+        assert minimap.size().toTuple() == (WIDTH, HEIGHT)
+        assert window.settings.value(
+            "canvas/minimap_collapsed", True, type=bool) is False
+
+    def test_clicking_the_toggle_does_not_pan_the_canvas(self, window,
+                                                         monkeypatch):
+        minimap = window.view.minimap
+        panned = []
+        monkeypatch.setattr(window.view, "center_on_scene", panned.append)
+        _click(minimap, minimap._toggle_rect().center())
+        assert panned == []
+
+    def test_clicking_the_map_still_pans_and_does_not_fold(self, window,
+                                                           monkeypatch):
+        minimap = window.view.minimap
+        panned = []
+        monkeypatch.setattr(window.view, "center_on_scene", panned.append)
+        _click(minimap, minimap.rect().center())
+        assert len(panned) == 1
+        assert minimap.collapsed is False
+
+    def test_a_press_dragged_off_the_toggle_cancels(self, window):
+        minimap = window.view.minimap
+        _click(minimap, minimap._toggle_rect().center(),
+               release_at=minimap.rect().center())
+        assert minimap.collapsed is False
+
+    def test_folded_map_takes_no_snapshots(self, window):
+        minimap = window.view.minimap
+        minimap.set_collapsed(True)
+        before = minimap.snapshots
+        minimap.mark_stale()
+        minimap._retake()
+        assert minimap.snapshots == before
+
+    def test_folded_state_survives_a_restart(self, qtbot, registry, window):
+        window.set_minimap_collapsed(True)
+        again = mod.MainWindow(registry)
+        again.confirm_close = False
+        qtbot.addWidget(again)
+        assert again.view.minimap.collapsed is True

@@ -2,8 +2,8 @@
 current viewport, click/drag to navigate. No second QGraphicsView."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from flograph.core.node import NodeStatus
@@ -14,6 +14,11 @@ from .node_item import DEACTIVATED_OPACITY
 WIDTH, HEIGHT = 200, 140
 MARGIN = 12
 REFRESH_MS = 200
+#: the side of the square a minimised map folds down to
+COLLAPSED = 24
+#: the minimise toggle in the open map's bottom-left corner
+TOGGLE = 18
+TOGGLE_INSET = 4
 
 
 def _state_color(item) -> QColor:
@@ -105,11 +110,18 @@ class Minimap(QWidget):
     #: the longest a busy scene (a drag, a run) waits for a fresh map
     MAX_WAIT_MS = 1000
 
+    #: the user minimised (True) or restored (False) the map by its toggle
+    collapsed_toggled = Signal(bool)
+
     def __init__(self, view) -> None:
         super().__init__(view)
         self._view = view
         self.setFixedSize(WIDTH, HEIGHT)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setMouseTracking(True)     # the toggle's hover
+        self._collapsed = False
+        self._toggle_hover = False
+        self._toggle_pressed = False
         # (rect, brush, pen) per frame and node, in scene coordinates
         self._frames: list = []
         self._nodes: list = []
@@ -148,7 +160,7 @@ class Minimap(QWidget):
         if not self._stale:
             self._stale = True
             self._stale_since = now
-        if not self.isVisible():
+        if not self.isVisible() or self._collapsed:
             return      # retaken on the next paint, if there ever is one
         if (now - self._stale_since) * 1000 >= self.MAX_WAIT_MS:
             if not self._settle.isActive():
@@ -157,7 +169,7 @@ class Minimap(QWidget):
         self._settle.start(self.SETTLE_MS)
 
     def _retake(self) -> None:
-        if self._stale and self.isVisible():
+        if self._stale and self.isVisible() and not self._collapsed:
             self._snapshot()
             self.update()
 
@@ -185,6 +197,88 @@ class Minimap(QWidget):
                     nodes.append((box, _node_brush(item), _node_pen(item)))
                     rect = rect.united(box)
         self._frames, self._nodes, self._items_rect = frames, nodes, rect
+
+    # ------------------------------------------------------------ collapse
+
+    @property
+    def collapsed(self) -> bool:
+        return self._collapsed
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        """Fold the map to a small square in the same corner, or open it.
+
+        Folded, it is only the button that opens it again: no map is drawn
+        and no snapshot is taken, so a folded map costs nothing while the
+        flow changes — the first paint after opening catches it up.
+        """
+        collapsed = bool(collapsed)
+        if collapsed == self._collapsed:
+            return
+        self._collapsed = collapsed
+        side = (COLLAPSED, COLLAPSED) if collapsed else (WIDTH, HEIGHT)
+        self.setFixedSize(*side)
+        self._set_toggle_hover(False)
+        self._update_tooltip()
+        self.reposition()
+        if not collapsed and self._stale and self.isVisible():
+            self._settle.start(0)   # changed while folded
+        self.update()
+
+    def _toggle_rect(self) -> QRectF:
+        if self._collapsed:
+            return QRectF(self.rect())
+        return QRectF(TOGGLE_INSET, HEIGHT - TOGGLE - TOGGLE_INSET,
+                      TOGGLE, TOGGLE)
+
+    def _update_tooltip(self) -> None:
+        if self._collapsed:
+            self.setToolTip("Show the minimap")
+        elif self._toggle_hover:
+            self.setToolTip("Minimise the minimap")
+        else:
+            self.setToolTip("")
+
+    def _set_toggle_hover(self, hover: bool) -> None:
+        if hover != self._toggle_hover:
+            self._toggle_hover = hover
+            self.setCursor(Qt.PointingHandCursor if hover
+                           else Qt.ArrowCursor)
+            self._update_tooltip()
+            self.update()
+
+    def _paint_toggle(self, painter: QPainter) -> None:
+        """Open: an arrow into the top-right corner the map folds into.
+        Folded: a tiny map — a frame with a viewport box."""
+        rect = self._toggle_rect()
+        if self._toggle_hover:
+            fill = QColor(theme.NODE_TEXT)
+            fill.setAlphaF(0.18)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 3, 3)
+        colour = QColor(theme.NODE_TEXT)
+        if not self._toggle_hover:
+            colour.setAlphaF(0.7)
+        pen = QPen(colour, 1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        c = rect.center()
+        if self._collapsed:
+            painter.drawRoundedRect(
+                QRectF(c.x() - 7, c.y() - 5, 14, 10), 1.5, 1.5)
+            painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.4))
+            painter.drawRect(QRectF(c.x() - 1, c.y() - 3, 6, 4))
+            return
+        x, y = c.x(), c.y()
+        path = QPainterPath()
+        path.moveTo(x - 4, y + 4)
+        path.lineTo(x + 4, y - 4)
+        path.moveTo(x - 0.5, y - 4)
+        path.lineTo(x + 4, y - 4)
+        path.lineTo(x + 4, y + 0.5)
+        painter.drawPath(path)
 
     # ------------------------------------------------------------- mapping
 
@@ -271,6 +365,9 @@ class Minimap(QWidget):
         painter.setBrush(bg)
         painter.setPen(QPen(theme.GRID_COARSE, 1))
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 4, 4)
+        if self._collapsed:
+            self._paint_toggle(painter)
+            return
 
         content = self._content_rect()
         s = self._scale(content)
@@ -283,16 +380,48 @@ class Minimap(QWidget):
         painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.5))
         painter.drawRect(QRectF(top_left, viewport.size() * s))
 
+        # over the map, on the map's own background, so a node under the
+        # corner can't make the glyph unreadable
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(self._toggle_rect(), 3, 3)
+        self._paint_toggle(painter)
+
     # ---------------------------------------------------------- interaction
 
     def mousePressEvent(self, event) -> None:
-        self._view.center_on_scene(self._to_scene(event.position()))
         event.accept()
+        if self._toggle_rect().contains(event.position()):
+            # toggles on release, so a press that wanders off cancels it;
+            # until then a drag from the button must not pan the canvas
+            self._toggle_pressed = event.button() == Qt.LeftButton
+            return
+        if self._collapsed:
+            return
+        self._view.center_on_scene(self._to_scene(event.position()))
 
     def mouseMoveEvent(self, event) -> None:
+        self._set_toggle_hover(self._toggle_rect().contains(event.position()))
+        if self._toggle_pressed or self._collapsed:
+            event.accept()
+            return
         if event.buttons() & Qt.LeftButton:
             self._view.center_on_scene(self._to_scene(event.position()))
             event.accept()
 
+    def mouseReleaseEvent(self, event) -> None:
+        event.accept()
+        if not self._toggle_pressed or event.button() != Qt.LeftButton:
+            return
+        self._toggle_pressed = False
+        if self._toggle_rect().contains(event.position()):
+            self.set_collapsed(not self._collapsed)
+            self.collapsed_toggled.emit(self._collapsed)
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self._set_toggle_hover(False)
+
     def reposition(self) -> None:
-        self.move(self._view.viewport().width() - WIDTH - MARGIN, MARGIN)
+        self.move(self._view.viewport().width() - self.width() - MARGIN,
+                  MARGIN)

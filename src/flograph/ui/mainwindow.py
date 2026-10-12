@@ -279,6 +279,10 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = self.settings.value(
             "canvas/minimap_enabled", True, type=bool)
         self.view.minimap.setVisible(self.minimap_enabled)
+        self.view.minimap.set_collapsed(self.settings.value(
+            "canvas/minimap_collapsed", False, type=bool))
+        self.view.minimap.collapsed_toggled.connect(
+            self._remember_minimap_collapsed)
         self.shape_rail_enabled = self.settings.value(
             "canvas/shape_rail", False, type=bool)
         self.view.set_shape_rail_enabled(self.shape_rail_enabled)
@@ -1067,6 +1071,15 @@ class MainWindow(QMainWindow):
         # a frame's tab keeps it put away: it maps the whole flow, and
         # clicking it would pan out to what the tab is there to hide
         self.view.minimap.setVisible(enabled and self.view.fence_frame is None)
+
+    def _remember_minimap_collapsed(self, collapsed: bool) -> None:
+        """The map's own corner toggle folded or opened it: keep that for
+        the next start, as the Settings toggle keeps on/off."""
+        self.settings.setValue("canvas/minimap_collapsed", collapsed)
+
+    def set_minimap_collapsed(self, collapsed: bool) -> None:
+        self.view.minimap.set_collapsed(collapsed)
+        self._remember_minimap_collapsed(collapsed)
 
     def set_shape_rail_enabled(self, enabled: bool) -> None:
         """Show the Miro-style shape tool rail over the model canvas. Off by
@@ -5618,6 +5631,7 @@ class MainWindow(QMainWindow):
         self.set_grid_visible(False)
         self.set_scrollbars_enabled(True)
         self.set_minimap_enabled(True)
+        self.set_minimap_collapsed(False)
         self.set_shape_rail_enabled(False)
         self.set_port_labels_enabled(False)
         self.set_flow_pins_enabled(False)
