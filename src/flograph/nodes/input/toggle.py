@@ -9,11 +9,14 @@ a chart node's own boolean option.
 
 Wire anything into "text" to set the label from your data or from another
 control, so a tick box can name what it is actually filtering.
+
+"Style" draws it as a tick box or as a sliding on/off switch; either way
+the value is True or False.
 """
 NODE = {
     "label": "Toggle",
     "category": "Input",
-    "version": "1.0",
+    "version": "1.1",
     "card": "control",
     "control": "toggle",
     "inputs": [("text", "any", {"optional": True})],
@@ -25,6 +28,9 @@ PARAMS = [
     {"name": "text", "type": "string", "label": "Checkbox label",
      "default": "Enabled", "placeholder": "Shown beside the tick box"},
     {"name": "value", "type": "bool", "label": "Ticked", "default": False},
+    {"name": "style", "type": "choice", "label": "Style",
+     "options": ["checkbox", "switch"], "default": "checkbox",
+     "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
      "default": 200, "min": 120, "max": 800, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",

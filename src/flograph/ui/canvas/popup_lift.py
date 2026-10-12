@@ -227,7 +227,9 @@ def _popup_stylesheet() -> str:
             f" background: {theme.NODE_HEADER.name()}; }}"
             f"QListView::item:selected {{"
             f" background: {theme.SELECTION_OUTLINE.name()};"
-            f" color: {theme.NODE_BORDER.name()}; }}")
+            f" color: {theme.NODE_BORDER.name()}; }}"
+            f"QLabel#popup_filter {{ color: {theme.NODE_SUBTEXT.name()};"
+            f" background: transparent; font-size: 9pt; }}")
 
 
 class DismissedByAClickElsewhere:
@@ -381,6 +383,15 @@ class CardPopupList(DismissedByAClickElsewhere, QListView):
         self.setStyleSheet(_popup_stylesheet())
         self._opened = QElapsedTimer()
         self._pressed_inside = False
+        # Type to narrow the list. A dropdown of 200 store names is a list
+        # nobody scrolls; a strip at the top says what has been typed, and
+        # rows that don't contain it are hidden (rows keep their numbers, so
+        # `picked` still names the model row).
+        from PySide6.QtWidgets import QLabel
+        self._filter = ""
+        self._filter_label = QLabel(self)
+        self._filter_label.setObjectName("popup_filter")
+        self._filter_label.hide()
 
     # ---- size and place
 
@@ -411,6 +422,7 @@ class CardPopupList(DismissedByAClickElsewhere, QListView):
             # page moved), and a popup's window has to be the one on screen
             self.setParent(window, Qt.Popup)
             self.setStyleSheet(_popup_stylesheet())
+        self.set_filter("")
         size = self.wanted_size(anchor.width(), rows_at_once)
         self.setGeometry(popup_geometry(anchor, size,
                                         _screen_for(anchor.center())))
@@ -440,12 +452,65 @@ class CardPopupList(DismissedByAClickElsewhere, QListView):
         if index.isValid():
             self._commit(index.row())
 
+    # ---- narrowing
+
+    def filter_text(self) -> str:
+        return self._filter
+
+    def set_filter(self, text: str) -> None:
+        """Hide every row whose text doesn't contain `text` (any case), and
+        keep the highlight on a row that is still showing."""
+        self._filter = text
+        model = self.model()
+        rows = model.rowCount(self.rootIndex()) if model is not None else 0
+        needle = text.casefold()
+        first = None
+        for row in range(rows):
+            index = model.index(row, self.modelColumn(), self.rootIndex())
+            shown = needle in str(index.data() or "").casefold()
+            self.setRowHidden(row, not shown)
+            if shown and first is None:
+                first = index
+        current = self.currentIndex()
+        if first is not None and (not current.isValid()
+                                  or self.isRowHidden(current.row())):
+            self.setCurrentIndex(first)
+        if text:
+            self._filter_label.setText(f"\U0001F50D {text}")
+            self._filter_label.adjustSize()
+            height = self._filter_label.sizeHint().height() + 4
+            self.setViewportMargins(0, height, 0, 0)
+            self._filter_label.setGeometry(
+                self.frameWidth() + 4, self.frameWidth() + 2,
+                max(10, self.width() - 2 * self.frameWidth() - 8), height - 4)
+            self._filter_label.show()
+        else:
+            self._filter_label.hide()
+            self.setViewportMargins(0, 0, 0, 0)
+
     def keyPressEvent(self, event) -> None:
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+        key = event.key()
+        if key in (Qt.Key_Return, Qt.Key_Enter):
             index = self.currentIndex()
-            if index.isValid():
+            if index.isValid() and not self.isRowHidden(index.row()):
                 self._commit(index.row())
                 return
+        if key == Qt.Key_Backspace and self._filter:
+            self.set_filter(self._filter[:-1])
+            event.accept()
+            return
+        if key == Qt.Key_Escape and self._filter:
+            self.set_filter("")      # the first Escape un-narrows the list
+            event.accept()
+            return
+        text = event.text()
+        if (text and text.isprintable()
+                and not event.modifiers() & (Qt.ControlModifier
+                                             | Qt.AltModifier
+                                             | Qt.MetaModifier)):
+            self.set_filter(self._filter + text)
+            event.accept()
+            return
         super().keyPressEvent(event)
 
 

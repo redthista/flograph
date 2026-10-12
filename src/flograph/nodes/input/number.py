@@ -5,7 +5,9 @@ row limit, a tolerance. Same output as a Slider, different affordance: use
 this when the range is wide or the exact figure matters.
 
 "Prefix" and "Suffix" are display only (£, %, " days"); the value that flows
-downstream is always the bare number. Set "Decimals" above 0 for a float.
+downstream is always the bare number, and so is "Thousands separator"
+(1,250,000 on the card, 1250000 downstream). Set "Decimals" above 0 for a
+float.
 
 Wire a number column into "minimum" or "maximum" to bound the box by what
 your data actually contains rather than by typed-in limits; a column is
@@ -14,7 +16,7 @@ reduced to its lowest value for "minimum" and its highest for "maximum".
 NODE = {
     "label": "Number",
     "category": "Input",
-    "version": "1.0",
+    "version": "1.1",
     "card": "control",
     "control": "number",
     "inputs": [("minimum", "any", {"optional": True}),
@@ -36,6 +38,8 @@ PARAMS = [
      "default": "", "placeholder": "e.g. £ — display only"},
     {"name": "suffix", "type": "string", "label": "Suffix",
      "default": "", "placeholder": "e.g. % — display only"},
+    {"name": "thousands", "type": "bool", "label": "Thousands separator",
+     "default": False, "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
      "default": 200, "min": 120, "max": 800, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",

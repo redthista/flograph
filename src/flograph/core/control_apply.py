@@ -53,7 +53,47 @@ COMMON_PARAMS: list[dict] = [
     {"name": "variable", "type": "string", "label": "Variable name",
      "default": "", "section": _SECTION,
      "placeholder": "e.g. threshold — then write ${threshold} in any box"},
+    # Not cosmetic either: a required control left blank stops the nodes
+    # after it, which is a different run (see required_problem).
+    {"name": "required", "type": "bool", "label": "Required",
+     "default": False, "section": _SECTION},
+    {"name": "help", "type": "string", "label": "Help text",
+     "default": "", "cosmetic": True, "section": _SECTION,
+     "placeholder": "Shown when someone hovers the ⓘ beside the caption"},
+    {"name": "accent", "type": "color", "label": "Accent colour",
+     "default": "", "placeholder": "Theme", "cosmetic": True,
+     "section": _SECTION},
 ]
+
+# Shapes whose blank value is a real choice rather than a missing one: a
+# dropdown nobody touched shows (and emits) its first option, a tick box is
+# always ticked or not, a number is always a number.
+_NEVER_BLANK = frozenset({"slider", "range", "number", "toggle", "choice",
+                          "colour"})
+
+
+def is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() in ("", "[]")
+    if isinstance(value, (list, tuple, set, dict)):
+        return not value
+    return False
+
+
+def required_problem(node) -> str | None:
+    """Why a required control cannot let the flow run, or None. Asked by
+    the scheduler before dispatch, so it holds for every control —
+    including one somebody wrote for themselves."""
+    if (node is None or node.spec.card != "control"
+            or not node.params.get("required")
+            or node.spec.control in _NEVER_BLANK):
+        return None
+    if not is_blank(node.params.get("value")):
+        return None
+    name = str(node.params.get("caption") or "").strip() or node.label
+    return f"not configured: {name!r} is required — fill it in"
 
 
 def apply_mode(node) -> str:

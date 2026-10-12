@@ -25,6 +25,7 @@ from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
 from flograph.core import perf
 from flograph.core.bypass import bypass_outputs, passthrough
+from flograph.core.control_apply import required_problem
 from flograph.core.graph import Graph
 from flograph.core.drop_output import readers
 from flograph.core.links import from_problem
@@ -1260,6 +1261,9 @@ class ExecutionEngine(QObject):
             # its params, variables and report go unread, so what they lack
             # is not a reason to hold up the nodes waiting on its inputs
             return None
+        problem = required_problem(node)
+        if problem is not None:
+            return problem
         # A ${name} is a dependency with no port, so the loop above cannot
         # see it: an unresolvable reference, and a Variables node that
         # produced nothing, both have to be asked about separately.

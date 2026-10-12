@@ -58,13 +58,54 @@ def values_from_source(source: Any,
     return [str(source)]
 
 
-def date_value(raw: Any) -> str:
+# What a Date control's blank value means. "fixed" is the old behaviour:
+# a blank shows (and emits) today. The others are relative to the day the
+# flow runs, which is what a dashboard someone opens every morning wants —
+# a typed date goes stale, "start of month" does not.
+DATE_PRESETS = ["fixed", "today", "yesterday", "start of week",
+                "start of month", "start of year", "days ago"]
+
+
+def preset_date(preset: str, days: int = 0, today=None) -> str:
+    """The ISO date a preset means on `today` (default: the real today);
+    "" for "fixed", which is no preset at all."""
+    import datetime
+
+    today = today or datetime.date.today()
+    if preset == "today":
+        day = today
+    elif preset == "yesterday":
+        day = today - datetime.timedelta(days=1)
+    elif preset == "start of week":
+        day = today - datetime.timedelta(days=today.weekday())
+    elif preset == "start of month":
+        day = today.replace(day=1)
+    elif preset == "start of year":
+        day = today.replace(month=1, day=1)
+    elif preset == "days ago":
+        day = today - datetime.timedelta(days=max(0, int(days or 0)))
+    else:
+        return ""
+    return day.isoformat()
+
+
+def date_value(raw: Any, preset: str = "fixed", days: int = 0,
+               allow_blank: bool = False) -> str:
     """A date param resolved to the ISO string that actually flows.
 
-    A blank param is the "never touched" state, and the picker can't display
-    nothing — it shows today. Resolving that here means the date you see on
-    the card is the date downstream receives, instead of the card showing
-    today while the node quietly emits "".
+    A date somebody picked wins. A blank param is the "never touched"
+    state, and a preset is what that state means — "start of month" on a
+    control nobody has moved, which is what keeps a dashboard current
+    without anyone editing it. Picking a day replaces it; Reset to Default
+    (a blank again) brings the preset back. Deciding it this way round, not
+    "preset wins", is what lets a hand-picked date stay picked: the widget
+    can only ever write the value.
+
+    With no preset, blank shows today — the picker can't display nothing —
+    and resolving that here means the date on the card is the date
+    downstream receives, instead of the card showing today while the node
+    quietly emits "". With `allow_blank` the picker *can* show nothing
+    ("No date"), so a blank stays blank.
     """
     import datetime
 
@@ -74,15 +115,27 @@ def date_value(raw: Any) -> str:
             return datetime.date.fromisoformat(text).isoformat()
         except ValueError:
             pass
+    relative = preset_date(preset, days)
+    if relative:
+        return relative
+    if allow_blank:
+        return ""
     return datetime.date.today().isoformat()
 
 
-def choice_value(raw: Any, options: Optional[list[str]]) -> str:
+# The entry a Choice with "(All)" switched on puts first. Picking it emits
+# "" — no choice made — which an Input Panel reads as "don't filter".
+ALL_LABEL = "(All)"
+
+
+def choice_value(raw: Any, options: Optional[list[str]],
+                 all_option: bool = False) -> str:
     """A choice param resolved to what the dropdown is actually showing.
 
     Blank means "never picked", and a dropdown with options always has one
     highlighted — the first. Emitting "" while the card reads "north" is the
-    kind of mismatch that makes a dashboard lie, so both land here.
+    kind of mismatch that makes a dashboard lie, so both land here. With
+    `all_option` the first entry *is* "(All)", so blank stays blank.
 
     A stored value that is no longer offered is passed through unchanged:
     the widget keeps showing it (marked "not in list"), and silently
@@ -90,9 +143,41 @@ def choice_value(raw: Any, options: Optional[list[str]]) -> str:
     them.
     """
     value = str(raw or "")
-    if value:
+    if value or all_option:
         return value
     return options[0] if options else ""
+
+
+def cast_choice(value: str, value_type: str) -> Any:
+    """A picked option as the type the Choice says it emits: text as is,
+    or a number ("2024" -> 2024, "0.5" -> 0.5). A pick that isn't a number
+    is passed through as text rather than refused, and blank stays blank."""
+    if value_type != "number" or value in ("", None):
+        return value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    return int(number) if number.is_integer() else number
+
+
+def pattern_problem(value: Any, pattern: str, message: str = "") -> Optional[str]:
+    """Why a Text control's value doesn't fit its pattern, or None. A
+    pattern that is itself broken is reported as such — the author's
+    mistake, said plainly, rather than every value being "wrong"."""
+    import re
+
+    pattern = str(pattern or "")
+    text = str(value or "")
+    if not pattern or not text:
+        return None
+    try:
+        ok = re.fullmatch(pattern, text) is not None
+    except re.error as exc:
+        return f"the pattern {pattern!r} is not a valid regular expression ({exc})"
+    if ok:
+        return None
+    return str(message or "").strip() or f"{text!r} does not match {pattern!r}"
 
 
 def reduce_bound(source: Any, high: bool) -> Any:

@@ -22,7 +22,8 @@ untouched Between spans its whole range, so wiring a column into both ports
 gives you a window over exactly the data you have and nothing outside it.
 
 Drag either handle past the other and they swap rather than jam, so a range
-can always be reopened from wherever you grabbed it.
+can always be reopened from wherever you grabbed it. In Properties the range
+is two boxes, low and high; leave both empty for the whole range.
 
 Drop it on a dashboard page and it comes with it: the person reading the
 dashboard moves the handles, the charts follow, and they never see the model.
@@ -30,7 +31,7 @@ dashboard moves the handles, the charts follow, and they never see the model.
 NODE = {
     "label": "Between",
     "category": "Input",
-    "version": "1.0",
+    "version": "1.1",
     "card": "control",
     "control": "range",
     "inputs": [("minimum", "any", {"optional": True}),
@@ -44,8 +45,7 @@ PARAMS = [
     # one "value" for every control shape — the same arrangement a Slicer
     # uses for its ticked values. Blank means "never touched", which the
     # widget and run() both read as the full range.
-    {"name": "value", "type": "string", "label": "Range",
-     "default": "", "placeholder": "e.g. [10, 50] — or just drag the handles"},
+    {"name": "value", "type": "range", "label": "Range", "default": ""},
     {"name": "minimum", "type": "float", "label": "Minimum", "default": 0.0},
     {"name": "maximum", "type": "float", "label": "Maximum", "default": 100.0},
     {"name": "step", "type": "float", "label": "Step", "default": 1.0},

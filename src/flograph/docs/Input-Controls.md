@@ -8,7 +8,38 @@ control: move it in either place and the other follows.
 
 Every control carries the same **Behaviour** settings in its Properties,
 folded under their own heading, whatever its shape — including a control
-you wrote yourself from the **Control Template**.
+you wrote yourself from the **Control Template**:
+
+| Setting | What it does |
+|---|---|
+| **Apply changes** | When a change reaches the flow — see below. |
+| **Show reset button** | A small ↺ on the control while it is away from its default. |
+| **Variable name** | Publishes the value as `${name}` — see below. |
+| **Required** | A red `*` on the caption; left empty, the box is outlined red and the nodes after it stop with "*Caption* is required". (Numbers, sliders, tick boxes and dropdowns always hold a value, so it has no effect on them.) |
+| **Help text** | An ⓘ beside the caption; hovering it shows the text. Write what the person using the dashboard needs to know. |
+| **Accent colour** | The control's own colour for its track, ticks, focus ring and buttons. **Theme** keeps the usual blue. |
+
+## Each control's own options
+
+- **Text** — an ✕ in the box empties it. **Search as you type** follows the
+  typing (once it pauses) instead of waiting for Enter. **Pattern** is a
+  regular expression the text must match, with **Pattern message** saying
+  what is wrong; a mismatch is outlined red and stops the flow. **Hide what
+  is typed** shows dots — but the text is still saved in the project, so keep
+  real passwords in a secret (`${env:NAME}`).
+- **Choice** — **Style** shows the options as a dropdown, a row of
+  **buttons**, or **radio** buttons. In a dropdown, type while it is open to
+  narrow a long list. **Offer (All)** adds an "(All)" entry that emits an
+  empty value — "don't filter". **Emits number** sends 2024, not "2024".
+- **Toggle** — **Style** draws a tick box or an on/off switch.
+- **Date** — **Starts on** gives an untouched picker a moving date: today,
+  yesterday, the start of this week, month or year, or a number of days ago.
+  A date picked by hand stays picked until it is reset. **Allow no date**
+  lets it be left empty ("No date", emitted as "").
+- **Number** — **Thousands separator** shows 1,250,000; the flow still gets
+  the bare number.
+- **Between** — in Properties the range is two boxes, low and high; both
+  empty is the whole range.
 
 ## Applying a change
 

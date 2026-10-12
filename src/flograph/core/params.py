@@ -26,6 +26,8 @@ PARAM_TYPES = {
                   # comma list of them — none ticked meaning every page)
     "date",      # QDateEdit with a calendar popup; stores an ISO "YYYY-MM-DD"
     "color",      # swatch + colour picker; stores "#rrggbb", "" for "theme"
+    "range",      # two number boxes, low and high; stores a JSON pair
+                  # "[10, 50]", "" for "the whole range"
 }
 
 _TYPE_DEFAULTS: dict[str, Any] = {
@@ -33,7 +35,7 @@ _TYPE_DEFAULTS: dict[str, Any] = {
     "choice": None, "file_open": "", "file_save": "", "columns": "",
     "color": "",
     "folder_open": "",
-    "password": "", "node_ref": "", "page_ref": "", "date": "",
+    "password": "", "node_ref": "", "page_ref": "", "date": "", "range": "",
 }
 
 

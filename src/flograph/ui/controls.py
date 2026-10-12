@@ -68,6 +68,17 @@ CHECK_ON = QColor("#3b82f6")
 # A change waiting for Apply: the same amber as a dirty node's LED, so
 # "not reached the flow yet" reads the same everywhere it is said.
 PENDING = QColor("#f59e0b")
+# An editor holding a value the node will refuse
+INVALID = QColor("#ef4444")
+
+
+def _ink_on(colour: QColor) -> str:
+    """Near-black or white, whichever stays readable on `colour` — the
+    slicer's rule (`slicer_list.ink_on`), not imported from it because the
+    slicer's module imports the canvas, which imports this one."""
+    luminance = (0.299 * colour.red() + 0.587 * colour.green()
+                 + 0.114 * colour.blue()) / 255
+    return "#111827" if luminance > 0.6 else "#ffffff"
 
 # Natural size for a control card on the canvas and a tile on a dashboard.
 # Chosen so the widget plus its caption fits without scrolling.
@@ -109,17 +120,67 @@ def option_list(raw) -> list[str]:
     return lines_to_values(raw)
 
 
-def _stylesheet() -> str:
+def accent_of(params: dict) -> QColor:
+    """A control's accent: its own `accent` param, or the blue every
+    control has always used. A garbled colour falls back rather than
+    painting black."""
+    colour = QColor(str((params or {}).get("accent") or ""))
+    return colour if colour.isValid() else QColor(CHECK_ON)
+
+
+def _stylesheet(accent: Optional[QColor] = None) -> str:
     """Controls sit on a node card, not on the desktop, so their chrome has
     to match the card rather than the OS default."""
+    accent = QColor(accent) if accent is not None else QColor(CHECK_ON)
+    on = accent.name()
     return (
         # by object name, not a bare QWidget rule: that would cascade into
         # every child and repaint the spin box and combo popup too
         f"QWidget#control_root {{ background: {theme.NODE_BODY.name()}; }}"
         f"QLabel {{ color: {theme.NODE_TEXT.name()}; font-size: 9pt;"
         f" background: transparent; }}"
+        # the caption names the control, so it reads as a label rather than
+        # as a footnote: full size, a touch of weight, quieter colour
         f"QLabel#caption {{ color: {theme.NODE_SUBTEXT.name()};"
-        f" font-size: 8pt; }}"
+        f" font-size: 9pt; font-weight: 600; }}"
+        f"QLabel#control_help {{ color: {theme.NODE_SUBTEXT.name()};"
+        f" font-size: 9pt; }}"
+        f"QLabel#control_help:hover {{ color: {on}; }}"
+        # Drawn rather than left to the platform: a stock QSlider on a dark
+        # card is a grey line with a grey nub, and nothing says how far
+        # along it is. The filled part is the value; the knob matches Between.
+        f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px;"
+        f" background: {theme.NODE_HEADER.name()}; }}"
+        f"QSlider::sub-page:horizontal {{ height: 4px; border-radius: 2px;"
+        f" background: {on}; }}"
+        f"QSlider::handle:horizontal {{ width: 13px; height: 13px;"
+        f" margin: -5px 0; border-radius: 7px;"
+        f" background: {theme.NODE_TEXT.name()};"
+        f" border: 1px solid {theme.NODE_BORDER.name()}; }}"
+        f"QSlider::handle:horizontal:focus, QSlider::handle:horizontal:hover"
+        f" {{ border: 2px solid {on}; }}"
+        # a choice shown as buttons: a segmented row, the pick filled in
+        f"QToolButton#choice_button {{ color: {theme.NODE_TEXT.name()};"
+        f" background: {theme.NODE_HEADER.name()};"
+        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" border-radius: 3px; padding: 2px 8px; font-size: 9pt; }}"
+        f"QToolButton#choice_button:hover {{ border-color: {on}; }}"
+        f"QToolButton#choice_button:checked {{ background: {on};"
+        f" border-color: {on}; color: {_ink_on(accent)}; }}"
+        f"QRadioButton {{ color: {theme.NODE_TEXT.name()}; font-size: 9pt;"
+        f" background: transparent; spacing: 6px; }}"
+        # drawn for the tick box's reason: the platform's ring vanishes on a
+        # dark card, and an empty ring is what says "you could pick this"
+        f"QRadioButton::indicator {{ width: 12px; height: 12px;"
+        f" border-radius: 7px; border: 1px solid {theme.NODE_SUBTEXT.name()};"
+        f" background: {theme.NODE_HEADER.name()}; }}"
+        f"QRadioButton::indicator:hover {{ border-color: {on}; }}"
+        # same border width as unpicked, or the label jumps sideways
+        f"QRadioButton::indicator:checked {{ border-color: {on};"
+        f" background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,"
+        f" fx:0.5, fy:0.5, stop:0 {on}, stop:0.55 {on},"
+        f" stop:0.65 {theme.NODE_HEADER.name()},"
+        f" stop:1 {theme.NODE_HEADER.name()}); }}"
         # the range ends sit quietly beside the track; the value under the
         # handle is the number being read, so it stays full contrast
         f"QLabel#bound {{ color: {theme.NODE_SUBTEXT.name()};"
@@ -132,6 +193,13 @@ def _stylesheet() -> str:
         f" color: {theme.NODE_TEXT.name()};"
         f" border: 1px solid {theme.NODE_BORDER.name()};"
         f" border-radius: 3px; padding: 2px 4px; font-size: 9pt; }}"
+        # where the keyboard is, in the control's own colour
+        f"QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus,"
+        f" QDoubleSpinBox:focus, QDateEdit:focus, QComboBox:focus"
+        f" {{ border-color: {on}; }}"
+        # set on an editor whose value is refused (a required box left
+        # empty, text that misses its pattern) — after :focus, so it wins
+        f"*[invalid=\"true\"] {{ border: 1px solid {INVALID.name()}; }}"
         f"QCheckBox {{ color: {theme.NODE_TEXT.name()}; font-size: 9pt;"
         f" background: transparent; spacing: 6px; }}"
         # The box is drawn explicitly. Left to the platform style on a dark
@@ -141,9 +209,9 @@ def _stylesheet() -> str:
         f"QCheckBox::indicator {{ width: 14px; height: 14px;"
         f" border-radius: 3px; border: 1px solid {theme.NODE_SUBTEXT.name()};"
         f" background: {theme.NODE_HEADER.name()}; }}"
-        f"QCheckBox::indicator:hover {{ border-color: {CHECK_ON.name()}; }}"
-        f"QCheckBox::indicator:checked {{ background: {CHECK_ON.name()};"
-        f" border-color: {CHECK_ON.name()}; }}"
+        f"QCheckBox::indicator:hover {{ border-color: {on}; }}"
+        f"QCheckBox::indicator:checked {{ background: {on};"
+        f" border-color: {on}; }}"
         f"QCheckBox::indicator:disabled {{ border-color:"
         f" {theme.NODE_BORDER.name()}; }}"
         # Apply / Reset ride the caption row: small, flat until hovered, so
@@ -226,7 +294,8 @@ class ControlWidget(QWidget):
         # widget with no node behind it (a test) never offers a reset.
         self.value_default = _NO_DEFAULT
         self.setObjectName("control_root")
-        self.setStyleSheet(_stylesheet())
+        self._accent = QColor(CHECK_ON)
+        self.setStyleSheet(_stylesheet(self._accent))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 3, 4, 3)
@@ -242,7 +311,14 @@ class ControlWidget(QWidget):
         self._caption = QLabel("")
         self._caption.setObjectName("caption")
         self._caption.setWordWrap(True)
+        self._caption.setTextFormat(Qt.RichText)
         row.addWidget(self._caption, 1)
+        # the author's explanation, for whoever uses the dashboard: one
+        # glyph that says "there is more to know", the words on hover
+        self._help = QLabel("ⓘ")
+        self._help.setObjectName("control_help")
+        self._help.hide()
+        row.addWidget(self._help)
         self._pending = QLabel("\u25cf")
         self._pending.setObjectName("control_pending")
         self._pending.setToolTip("Changed — not applied to the flow yet")
@@ -305,13 +381,64 @@ class ControlWidget(QWidget):
         shown = ca.shown_params(self._params)
         self._syncing = True
         try:
-            caption = str(self._params.get("caption", "") or "").strip()
-            self._caption.setText(caption)
-            self._caption.setVisible(bool(caption))
+            accent = accent_of(self._params)
+            if accent != self._accent:
+                self._accent = accent
+                self.setStyleSheet(_stylesheet(accent))
+            self._sync_caption()
             self._apply(shown)
             self._sync_buttons(shown)
+            self.refresh_validity()
         finally:
             self._syncing = False
+
+    def _sync_caption(self) -> None:
+        import html
+
+        caption = str(self._params.get("caption", "") or "").strip()
+        required = bool(self._params.get("required"))
+        text = html.escape(caption)
+        if required:
+            # the asterisk is how every form says it, so say it that way
+            text += f' <span style="color:{INVALID.name()}">*</span>'
+        self._caption.setText(text)
+        self._caption.setVisible(bool(caption) or required)
+        help_text = str(self._params.get("help", "") or "").strip()
+        self._help.setVisible(bool(help_text))
+        self._help.setToolTip(help_text)
+        self._caption.setToolTip(help_text)
+
+    # ----------------------------------------------------------- validity
+
+    def _primary(self) -> Optional[QWidget]:
+        """The editor an invalid value is marked on; None for a shape that
+        can never hold one."""
+        return None
+
+    def problem(self) -> Optional[str]:
+        """Why the value on the control would be refused, or None. The base
+        knows "required"; a shape adds its own (Text's pattern)."""
+        from flograph.core import control_apply as ca
+
+        if (self._params.get("required")
+                and ca.is_blank(self._read())):
+            return "Required — fill this in"
+        return None
+
+    def refresh_validity(self) -> None:
+        """Outline the editor red, and say why on hover, when the value
+        showing would be refused — before anyone runs anything."""
+        editor = self._primary()
+        if editor is None:
+            return
+        problem = self.problem()
+        bad = problem is not None
+        if bool(editor.property("invalid")) != bad:
+            editor.setProperty("invalid", bad)
+            # a dynamic-property selector only re-applies on a re-polish
+            editor.style().unpolish(editor)
+            editor.style().polish(editor)
+        editor.setToolTip(problem or "")
 
     def _sync_buttons(self, shown: dict) -> None:
         from flograph.core import control_apply as ca
@@ -530,6 +657,7 @@ class RangeSlider(QWidget):
         self._high = 100
         self._active = 1          # which handle the keyboard drives
         self._dragging = False
+        self.accent = QColor(CHECK_ON)   # the span and the focus ring
 
     # -------------------------------------------------------------- values
 
@@ -594,7 +722,7 @@ class RangeSlider(QWidget):
         painter.drawRoundedRect(track, self.TRACK_H / 2, self.TRACK_H / 2)
 
         low_x, high_x = self.handle_centres()
-        painter.setBrush(CHECK_ON)
+        painter.setBrush(self.accent)
         painter.drawRoundedRect(
             QRectF(low_x, track.top(), max(0.0, high_x - low_x), track.height()),
             self.TRACK_H / 2, self.TRACK_H / 2)
@@ -606,7 +734,7 @@ class RangeSlider(QWidget):
             # a ring instead — the keyboard has to move a handle the user can
             # see it is about to move.
             focused = self.hasFocus() and i == self._active
-            painter.setPen(QPen(CHECK_ON, 2) if focused
+            painter.setPen(QPen(self.accent, 2) if focused
                            else QPen(theme.NODE_BORDER, 1))
             painter.setBrush(theme.NODE_TEXT)
             painter.drawEllipse(QPointF(x, mid), self.HANDLE_R, self.HANDLE_R)
@@ -774,6 +902,9 @@ class RangeControl(ControlWidget):
         self._decimals = max(0, int(params.get("decimals", 0) or 0))
         if maximum < self._minimum:
             maximum = self._minimum
+        if self._slider.accent != self._accent:
+            self._slider.accent = QColor(self._accent)
+            self._slider.update()
         self._slider.setMaximum(
             max(0, round((maximum - self._minimum) / self._step)))
 
@@ -848,12 +979,16 @@ class NumberControl(ControlWidget):
         self._spin.setSingleStep(float(params.get("step", 1) or 1) or 1.0)
         self._spin.setPrefix(str(params.get("prefix", "") or ""))
         self._spin.setSuffix(str(params.get("suffix", "") or ""))
+        self._spin.setGroupSeparatorShown(bool(params.get("thousands", False)))
         self._spin.setValue(
             clamp(as_number(params.get("value"), low), low, high))
 
     def _read(self):
         value = self._spin.value()
         return value if self._spin.decimals() else int(round(value))
+
+    def _primary(self):
+        return self._spin
 
     def focus_editor(self) -> None:
         self._spin.setFocus()
@@ -863,19 +998,42 @@ class NumberControl(ControlWidget):
 class TextControl(ControlWidget):
     """Free text. `multiline` swaps the line edit for a text box."""
 
+    #: how long typing must pause before "Search as you type" commits —
+    #: long enough that a word is one run, short enough to feel live
+    LIVE_TYPING_MS = 400
+
     def _build(self) -> None:
+        from PySide6.QtCore import QTimer
+
         self._edit = QLineEdit()
         self._edit.setObjectName("control_text")
         self._edit.setMaxLength(UNCAPPED_TEXT)  # a Text node may carry base64
+        # an ✕ inside the box: emptying a search is the commonest edit there
+        # is, and select-all-delete is three gestures for it
+        self._edit.setClearButtonEnabled(True)
         # editingFinished, not textEdited: one undo step per edit, not one
         # per keystroke, and no re-run of the whole flow per character
         self._edit.editingFinished.connect(self._commit)
+        self._edit.textChanged.connect(lambda *_: self.refresh_validity())
+        self._edit.textEdited.connect(self._typed)
         self._box = QPlainTextEdit()
         self._box.setObjectName("control_text_multiline")
         self._box.hide()
         self._box.focusOutEvent = self._box_focus_out
+        self._box.textChanged.connect(self.refresh_validity)
         self._layout.addWidget(self._edit)
         self._layout.addWidget(self._box, 1)
+        self._live = False
+        self._pause = QTimer(self)
+        self._pause.setSingleShot(True)
+        self._pause.setInterval(self.LIVE_TYPING_MS)
+        self._pause.timeout.connect(self._commit)
+
+    def _typed(self, *_args) -> None:
+        """A keystroke in the one-line box. Only "Search as you type" acts
+        on it — and then only once typing pauses, so a word is one run."""
+        if self._live:
+            self._pause.start()
 
     def _box_focus_out(self, event) -> None:
         QPlainTextEdit.focusOutEvent(self._box, event)
@@ -893,6 +1051,9 @@ class TextControl(ControlWidget):
         self._edit.setVisible(not multiline)
         self._box.setVisible(multiline)
         self._set_tail_stretch(0 if multiline else 1)
+        self._live = bool(params.get("live_typing", False)) and not multiline
+        self._edit.setEchoMode(QLineEdit.Password if params.get("mask")
+                               else QLineEdit.Normal)
         placeholder = str(
             self._wired("placeholder", params.get("placeholder", "")) or "")
         self._edit.setPlaceholderText(placeholder)
@@ -910,6 +1071,16 @@ class TextControl(ControlWidget):
         return self._edit.text() if self._box.isHidden() \
             else self._box.toPlainText()
 
+    def _primary(self):
+        return self._edit if self._box.isHidden() else self._box
+
+    def problem(self):
+        from flograph.core.controls import pattern_problem
+
+        return super().problem() or pattern_problem(
+            self._read(), self._params.get("pattern", ""),
+            self._params.get("pattern_message", ""))
+
     def focus_editor(self) -> None:
         target = self._edit if self._box.isHidden() else self._box
         target.setFocus()
@@ -925,23 +1096,70 @@ class DateControl(ControlWidget):
         self._edit.setDisplayFormat(ISO_FORMAT)
         self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._edit.dateChanged.connect(self._commit)
-        self._layout.addWidget(self._edit)
+        # "No date" is Qt's special value: the picker's minimum, shown as
+        # words. The ✕ sets it; only offered when Allow no date is ticked.
+        self._clear = QToolButton()
+        self._clear.setObjectName("control_reset")
+        self._clear.setText("✕")
+        self._clear.setToolTip("No date")
+        self._clear.setFocusPolicy(Qt.NoFocus)
+        self._clear.clicked.connect(self._to_blank)
+        self._clear.hide()
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(self._edit, 1)
+        row.addWidget(self._clear)
+        self._layout.addLayout(row)
+        self._blank_ok = False
+
+    #: the earliest date Qt's calendar can show; "No date" sits on it when
+    #: no lower bound is set
+    _FIRST = QDate(1752, 9, 14)
 
     def _apply(self, params: dict) -> None:
+        from flograph.core.controls import date_value
+
         low = iso_to_qdate(self._wired("minimum", params.get("minimum")))
         high = iso_to_qdate(self._wired("maximum", params.get("maximum")))
+        self._blank_ok = bool(params.get("allow_blank", False))
         # set wide first: a new minimum above the old maximum is rejected
-        self._edit.setDateRange(QDate(1752, 9, 14), QDate(7999, 12, 31))
-        if low is not None:
-            self._edit.setMinimumDate(low)
+        self._edit.setDateRange(self._FIRST, QDate(7999, 12, 31))
+        floor = low
+        if self._blank_ok:
+            # the blank is the day before the earliest real one, so it can
+            # never be confused with a date someone could pick
+            floor = low.addDays(-1) if low is not None else self._FIRST
+            self._edit.setSpecialValueText("No date")
+        else:
+            self._edit.setSpecialValueText("")
+        if floor is not None:
+            self._edit.setMinimumDate(floor)
         if high is not None:
             self._edit.setMaximumDate(high)
-        stored = iso_to_qdate(params.get("value"))
-        self._edit.setDate(stored if stored is not None
-                           else QDate.currentDate())
+        # what the flow will get: a picked day, else what the preset means
+        shown = date_value(params.get("value"), params.get("preset", "fixed"),
+                           params.get("days", 0), self._blank_ok)
+        stored = iso_to_qdate(shown)
+        if stored is None and self._blank_ok:
+            self._edit.setDate(self._edit.minimumDate())
+        else:
+            self._edit.setDate(stored if stored is not None
+                               else QDate.currentDate())
+        self._clear.setVisible(self._blank_ok and not self._is_blank())
+
+    def _is_blank(self) -> bool:
+        return (self._blank_ok
+                and self._edit.date() == self._edit.minimumDate())
+
+    def _to_blank(self) -> None:
+        self._edit.setDate(self._edit.minimumDate())
 
     def _read(self):
-        return qdate_to_iso(self._edit.date())
+        return "" if self._is_blank() else qdate_to_iso(self._edit.date())
+
+    def _primary(self):
+        return self._edit
 
     def focus_editor(self) -> None:
         self._edit.setFocus()
@@ -951,21 +1169,52 @@ class ToggleControl(ControlWidget):
     """A single tick box reporting True/False."""
 
     def _build(self) -> None:
+        from .switch import Switch
+
         self._check = _TickBox("")
         self._check.setObjectName("control_toggle")
         self._check.toggled.connect(self._commit)
         self._layout.addWidget(self._check)
+        # the same value, drawn as an on/off switch — for a setting that
+        # reads as "on" rather than as an item ticked off a list
+        # The label is its own QLabel: the Switch paints its text with the
+        # chrome's metrics, which on a card's stylesheet font land on top of
+        # the track. Clicking the label still flips it, as a tick box's does.
+        self._switch_row = QWidget()
+        self._switch_row.setObjectName("readout_row")
+        row = QHBoxLayout(self._switch_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        self._switch = Switch("")
+        self._switch.setObjectName("control_switch")
+        self._switch.toggled.connect(self._commit)
+        self._switch_label = QLabel("")
+        self._switch_label.mousePressEvent = \
+            lambda _e: self._switch.click()
+        row.addWidget(self._switch)
+        row.addWidget(self._switch_label, 1)
+        self._switch_row.hide()
+        self._layout.addWidget(self._switch_row)
+
+    def _shown(self):
+        return self._check if self._switch_row.isHidden() else self._switch
 
     def _apply(self, params: dict) -> None:
-        self._check.setText(
-            str(self._wired("text", params.get("text", "")) or ""))
-        self._check.setChecked(bool(params.get("value", False)))
+        switch = params.get("style") == "switch"
+        self._check.setVisible(not switch)
+        self._switch_row.setVisible(switch)
+        text = str(self._wired("text", params.get("text", "")) or "")
+        checked = bool(params.get("value", False))
+        self._check.setText(text)
+        self._switch_label.setText(text)
+        for box in (self._check, self._switch):
+            box.setChecked(checked)
 
     def _read(self):
-        return self._check.isChecked()
+        return self._shown().isChecked()
 
     def focus_editor(self) -> None:
-        self._check.setFocus()
+        self._shown().setFocus()
 
 
 class ChoiceControl(ControlWidget):
@@ -983,31 +1232,99 @@ class ChoiceControl(ControlWidget):
         self._combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._combo.activated.connect(self._commit)  # user choice only
         self._layout.addWidget(self._combo)
+        # "buttons" and "radio": every option on show at once. Rebuilt only
+        # when the options change, so a pick doesn't recreate what was
+        # clicked while its own signal is still running.
+        from PySide6.QtWidgets import QButtonGroup
+        self._buttons = QWidget()
+        self._buttons.setObjectName("choice_buttons")
+        self._buttons.hide()
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        self._group.buttonClicked.connect(self._commit)
+        self._layout.addWidget(self._buttons)
+        self._built: tuple = ()
 
-    def _apply(self, params: dict) -> None:
+    def _entries(self, params: dict) -> list[tuple[str, str]]:
+        """(label, value) for every option, in order: "(All)" first when it
+        is on, then the options, then a stored pick no longer offered."""
+        from flograph.core.controls import ALL_LABEL
+
         options = self._upstream.get("options")
         if options is None:
             options = option_list(params.get("items"))
+        entries = [(ALL_LABEL, "")] if params.get("all_option") else []
+        entries += [(str(o), str(o)) for o in options]
         current = str(params.get("value", "") or "")
-        self._combo.clear()
-        self._combo.addItems(options)
-        index = self._combo.findText(current)
-        if index < 0 and current:
+        if current and current not in [v for _l, v in entries]:
             # the stored pick is no longer offered (upstream changed, or the
             # author edited the list) — keep it visible rather than silently
             # switching the dashboard to a different value
-            self._combo.addItem(f"{current}  (not in list)")
-            self._combo.setItemData(self._combo.count() - 1, current,
-                                    Qt.UserRole)
-            index = self._combo.count() - 1
-        self._combo.setCurrentIndex(max(0, index))
+            entries.append((f"{current}  (not in list)", current))
+        return entries
+
+    def _apply(self, params: dict) -> None:
+        style = params.get("style", "dropdown")
+        entries = self._entries(params)
+        current = str(params.get("value", "") or "")
+        values = [v for _l, v in entries]
+        index = values.index(current) if current in values else 0
+        dropdown = style not in ("buttons", "radio")
+        self._combo.setVisible(dropdown)
+        self._buttons.setVisible(not dropdown)
+        if dropdown:
+            self._combo.clear()
+            for label, value in entries:
+                self._combo.addItem(label, value)
+            self._combo.setCurrentIndex(index if entries else -1)
+            return
+        if self._built != (style, tuple(entries)):
+            self._rebuild_buttons(style, entries)
+        buttons = self._group.buttons()
+        if buttons:
+            buttons[min(index, len(buttons) - 1)].setChecked(True)
+
+    def _rebuild_buttons(self, style: str, entries) -> None:
+        from PySide6.QtWidgets import QRadioButton
+
+        for button in self._group.buttons():
+            self._group.removeButton(button)
+            button.deleteLater()
+        old = self._buttons.layout()
+        if old is not None:
+            QWidget().setLayout(old)    # the only way to drop a layout
+        layout = QHBoxLayout(self._buttons) if style == "buttons" \
+            else QVBoxLayout(self._buttons)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3 if style == "buttons" else 2)
+        for i, (label, value) in enumerate(entries):
+            if style == "buttons":
+                button = QToolButton()
+                button.setObjectName("choice_button")
+                button.setCheckable(True)
+                button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            else:
+                button = QRadioButton()
+            button.setText(label)
+            button.setProperty("choice_value", value)
+            self._group.addButton(button, i)
+            layout.addWidget(button)
+        if style == "radio":
+            layout.addStretch(1)
+        self._built = (style, tuple(entries))
 
     def _read(self):
+        if not self._buttons.isHidden():
+            button = self._group.checkedButton()
+            return str(button.property("choice_value")) if button else ""
         stored = self._combo.currentData(Qt.UserRole)
         return stored if stored is not None else self._combo.currentText()
 
     def focus_editor(self) -> None:
-        self._combo.setFocus()
+        if self._buttons.isHidden():
+            self._combo.setFocus()
+        elif self._group.checkedButton() is not None:
+            self._group.checkedButton().setFocus()
 
 
 _CONTROLS = {

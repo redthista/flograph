@@ -1108,6 +1108,9 @@ class ParamsPanel(QWidget):
         if spec.type == "date":
             return self._make_date_widget(spec, value)
 
+        if spec.type == "range":
+            return self._make_range_widget(spec, value)
+
         if spec.type == "columns":
             return self._make_columns_widget(spec, value)
 
@@ -1579,6 +1582,70 @@ class ParamsPanel(QWidget):
         text.setTextCursor(cursor)
         # carry on typing where the name landed rather than back in the menu
         text.setFocus()
+
+    def _make_range_widget(self, spec: ParamSpec, value: Any):
+        """Low and high as two boxes — a range typed as `[10, 50]` was the
+        one setting in the panel you had to know JSON to change. Both
+        empty is the whole range (stored ""), which is what an untouched
+        Between means."""
+        import json
+
+        name = spec.name
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        low, high = QLineEdit(), QLineEdit()
+        for edit, hint in ((low, "low"), (high, "high")):
+            edit.setObjectName(f"param_{name}_{hint}")
+            edit.setPlaceholderText(f"{hint} (whole range)")
+        dash = QLabel("–")
+        row.addWidget(low, 1)
+        row.addWidget(dash)
+        row.addWidget(high, 1)
+
+        def show(v) -> None:
+            pair = None
+            try:
+                parsed = json.loads(v) if isinstance(v, str) and v.strip() else v
+                if isinstance(parsed, (list, tuple)) and len(parsed) == 2:
+                    pair = parsed
+            except ValueError:
+                pass
+            for edit, part in zip((low, high), pair or ("", "")):
+                text = "" if part in ("", None) else f"{part:g}" \
+                    if isinstance(part, (int, float)) else str(part)
+                if edit.text() != text:
+                    self._silently(edit.setText, text)
+
+        def commit() -> None:
+            texts = [low.text().strip(), high.text().strip()]
+            if not any(texts):
+                self._commit(name, "")
+                return
+            numbers = []
+            for text in texts:
+                try:
+                    number = float(text) if text else None
+                except ValueError:
+                    return          # leave a half-typed number alone
+                numbers.append(number)
+            # one end left empty: that end is where the control's own
+            # range ends (its minimum / maximum)
+            from flograph.core.controls import as_number, range_values
+            params = self._graph.node(self._node_id).params
+            current = range_values(
+                "", as_number(params.get("minimum"), 0.0),
+                as_number(params.get("maximum"), 100.0))
+            pair = [current[i] if numbers[i] is None else numbers[i]
+                    for i in (0, 1)]
+            pair = [int(p) if float(p).is_integer() else p for p in pair]
+            self._commit(name, json.dumps(sorted(pair)))
+
+        low.editingFinished.connect(commit)
+        high.editingFinished.connect(commit)
+        show(value)
+        return box, show
 
     def _make_date_widget(self, spec: ParamSpec, value: Any):
         """Calendar picker storing an ISO "YYYY-MM-DD" string. A blank param

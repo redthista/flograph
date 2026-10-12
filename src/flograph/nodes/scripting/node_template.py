@@ -55,7 +55,7 @@ the handbook page "Writing a Node" (F1) is the same ground in prose.
 NODE = {
     "label": "Node Template",
     "category": "Scripting",
-    "version": "1.0",
+    "version": "1.1",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }
@@ -154,6 +154,10 @@ PARAMS = [
      "section": "Reference — types"},
     {"name": "ref_color", "type": "color", "label": "Colour", "default": "",
      "placeholder": "Theme", "section": "Reference — types"},
+    # a low/high pair: two boxes in the panel, stored as JSON "[10, 50]"
+    # ("" when both are empty) — read it with core.controls.range_values
+    {"name": "ref_range", "type": "range", "label": "Range", "default": "",
+     "section": "Reference — types"},
     {"name": "ref_password", "type": "password", "label": "Password",
      "default": "", "placeholder": "or ${API_KEY} from .env",
      "section": "Reference — types"},
