@@ -131,6 +131,7 @@ CONTROL_KINDS = frozenset({
     "datetime",  # a date and time, "YYYY-MM-DDTHH:MM"
     "colour",    # a swatch + picker -> "#rrggbb"
     "file",      # pick a file -> its path
+    "panel",     # several of the above in one card (core.input_panel)
 })
 
 

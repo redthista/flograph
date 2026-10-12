@@ -75,11 +75,12 @@ class TestBundledExamples:
             "34_plotly_colors.flograph",
             "35_chart_rules.flograph",
             "36_table_totals.flograph",
+            "37_input_panel.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 36
+        assert len(window._examples_menu.actions()) == 37
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -123,6 +124,8 @@ class TestBundledExamples:
         "35_chart_rules.flograph",
         # 36's data is its own Table node; totals are pure pandas
         "36_table_totals.flograph",
+        # 37's two tables are its own; the panel and Apply Filters are pandas
+        "37_input_panel.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from

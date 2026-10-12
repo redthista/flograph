@@ -1,0 +1,649 @@
+{
+  "flograph_version": "0.1.25",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "ip_sales",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"city\", \"type\": \"text\"}, {\"name\": \"ordered\", \"type\": \"text\"}, {\"name\": \"price\", \"type\": \"number\"}, {\"name\": \"in_stock\", \"type\": \"auto\"}], \"rows\": [[\"North\", \"Hull\", \"2026-01-01\", 64.89, true], [\"North\", \"Hull\", \"2026-02-08\", 93.54, true], [\"North\", \"Hull\", \"2026-03-15\", 46.12, true], [\"West\", \"Gloucester\", \"2026-04-22\", 44.95, true], [\"North\", \"Leeds\", \"2026-05-02\", 42.18, true], [\"East\", \"Norwich\", \"2026-06-09\", 79.42, true], [\"North\", \"Hull\", \"2026-07-16\", 60.75, true], [\"North\", \"Leeds\", \"2026-08-23\", 5.68, true], [\"East\", \"Ely\", \"2026-09-03\", 68.64, false], [\"East\", \"Norwich\", \"2026-01-10\", 52.48, true], [\"North\", \"Hull\", \"2026-02-17\", 6.22, true], [\"East\", \"Ely\", \"2026-03-24\", 50.96, true], [\"North\", \"York\", \"2026-04-04\", 29.53, false], [\"South\", \"Bath\", \"2026-05-11\", 28.97, true], [\"West\", \"Gloucester\", \"2026-06-18\", 14.45, true], [\"East\", \"Ely\", \"2026-07-25\", 12.94, true], [\"East\", \"Norwich\", \"2026-08-05\", 7.65, true], [\"North\", \"Hull\", \"2026-09-12\", 19.07, true], [\"South\", \"Exeter\", \"2026-01-19\", 30.97, false], [\"South\", \"Exeter\", \"2026-02-26\", 84.03, false], [\"North\", \"Hull\", \"2026-03-06\", 19.93, true], [\"North\", \"York\", \"2026-04-13\", 29.96, true], [\"North\", \"Leeds\", \"2026-05-20\", 72.86, true], [\"East\", \"Ely\", \"2026-06-27\", 22.5, true], [\"North\", \"Leeds\", \"2026-07-07\", 78.93, true], [\"West\", \"Gloucester\", \"2026-08-14\", 72.97, false], [\"North\", \"Hull\", \"2026-09-21\", 65.61, false], [\"East\", \"Ely\", \"2026-01-01\", 90.62, true], [\"North\", \"York\", \"2026-02-08\", 58.26, true], [\"East\", \"Norwich\", \"2026-03-15\", 91.88, true], [\"East\", \"Ely\", \"2026-04-22\", 81.49, true], [\"North\", \"York\", \"2026-05-02\", 59.3, true], [\"South\", \"Exeter\", \"2026-06-09\", 76.57, true], [\"East\", \"Norwich\", \"2026-07-16\", 8.33, false], [\"North\", \"Hull\", \"2026-08-23\", 70.95, true], [\"North\", \"York\", \"2026-09-03\", 71.52, false], [\"East\", \"Ely\", \"2026-01-10\", 19.89, false], [\"East\", \"Ely\", \"2026-02-17\", 20.26, true], [\"North\", \"York\", \"2026-03-24\", 48.02, false], [\"North\", \"York\", \"2026-04-04\", 54.42, true], [\"South\", \"Truro\", \"2026-05-11\", 83.82, true], [\"North\", \"Hull\", \"2026-06-18\", 54.18, true], [\"South\", \"Truro\", \"2026-07-25\", 27.45, true], [\"North\", \"York\", \"2026-08-05\", 78.79, true], [\"South\", \"Exeter\", \"2026-09-12\", 57.24, true], [\"South\", \"Bath\", \"2026-01-19\", 18.71, true], [\"West\", \"Gloucester\", \"2026-02-26\", 27.1, false], [\"South\", \"Exeter\", \"2026-03-06\", 79.28, false]]}",
+          "apply": "live",
+          "draft": "",
+          "rules": "",
+          "width": 520,
+          "height": 260
+        },
+        "code": null,
+        "label": "Sales",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_orders",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          900
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"sales_region\", \"type\": \"text\"}, {\"name\": \"product\", \"type\": \"text\"}, {\"name\": \"qty\", \"type\": \"number\"}], \"rows\": [[\"West\", \"Gadget\", 11], [\"South\", \"Widget\", 37], [\"West\", \"Widget\", 6], [\"North\", \"Gizmo\", 9], [\"North\", \"Gizmo\", 16], [\"East\", \"Gizmo\", 17], [\"South\", \"Widget\", 32], [\"East\", \"Gadget\", 26], [\"West\", \"Gizmo\", 32], [\"West\", \"Gizmo\", 33], [\"North\", \"Gizmo\", 40], [\"South\", \"Gadget\", 32], [\"East\", \"Gizmo\", 36], [\"North\", \"Gizmo\", 28], [\"North\", \"Widget\", 32], [\"West\", \"Gizmo\", 26], [\"East\", \"Gadget\", 10], [\"West\", \"Widget\", 15], [\"West\", \"Gizmo\", 29], [\"South\", \"Gadget\", 7], [\"West\", \"Gizmo\", 4], [\"South\", \"Widget\", 6], [\"East\", \"Gizmo\", 4], [\"North\", \"Gizmo\", 18], [\"South\", \"Widget\", 39], [\"West\", \"Gadget\", 25], [\"East\", \"Widget\", 36], [\"South\", \"Gizmo\", 6], [\"West\", \"Widget\", 21], [\"West\", \"Widget\", 23]]}",
+          "apply": "live",
+          "draft": "",
+          "rules": "",
+          "width": 420,
+          "height": 240
+        },
+        "code": null,
+        "label": "Orders",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_panel",
+        "type": "flograph.input.input_panel",
+        "pos": [
+          640,
+          0
+        ],
+        "params": {
+          "caption": "Filter the sales",
+          "fields": "Region = choice region style=buttons\nCity = choice city\nPrice = between price step=5\nOrdered = date range ordered\nIn stock = toggle in_stock help=\"Only rows with stock on hand\"\n",
+          "value": "",
+          "cascade": true,
+          "publish": true,
+          "layout": "stacked",
+          "width": 340,
+          "height": 430,
+          "apply": "with an Apply button",
+          "draft": "",
+          "show_reset": false,
+          "variable": "",
+          "required": false,
+          "help": "",
+          "accent": ""
+        },
+        "code": null,
+        "label": "Filters",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_apply",
+        "type": "flograph.util.action_button",
+        "pos": [
+          640,
+          470
+        ],
+        "params": {
+          "action": "Apply inputs",
+          "clear_cache": true,
+          "downstream": false,
+          "frame_title": "",
+          "targets": "",
+          "message": "",
+          "inputs_scope": "on this page",
+          "input_names": "",
+          "page": "",
+          "width": 150,
+          "height": 50
+        },
+        "code": null,
+        "label": "Apply filters",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 3,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_reset",
+        "type": "flograph.util.action_button",
+        "pos": [
+          820,
+          470
+        ],
+        "params": {
+          "action": "Reset inputs",
+          "clear_cache": true,
+          "downstream": false,
+          "frame_title": "",
+          "targets": "",
+          "message": "",
+          "inputs_scope": "on this page",
+          "input_names": "",
+          "page": "",
+          "width": 150,
+          "height": 50
+        },
+        "code": null,
+        "label": "Reset filters",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 4,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_view",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1060,
+          0
+        ],
+        "params": {
+          "mode": "table",
+          "group_by": "",
+          "groups_start": "open",
+          "subtotals": "on the group row",
+          "matrix_rows": "",
+          "matrix_columns": "",
+          "matrix_values": "",
+          "matrix_agg": "sum",
+          "matrix_order": "as they appear",
+          "matrix_headings": "nested",
+          "totals": "off",
+          "totals_at": "bottom",
+          "total_label": "Total",
+          "totals_out": false,
+          "on_click": "nothing",
+          "select_by": "cell",
+          "selected": "",
+          "format_rules": "",
+          "show": "",
+          "hide": "",
+          "sort": "",
+          "sort_dir": "ascending",
+          "row_index": false,
+          "missing": "NaN",
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Sales in view",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 5,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_also",
+        "type": "flograph.transform.apply_filters",
+        "pos": [
+          640,
+          900
+        ],
+        "params": {
+          "mapping": "region = sales_region",
+          "missing": "skip"
+        },
+        "code": null,
+        "label": "Same filters on orders",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 6,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_minqty",
+        "type": "flograph.input.slider",
+        "pos": [
+          640,
+          1120
+        ],
+        "params": {
+          "caption": "Smallest order to show",
+          "value": 5,
+          "minimum": 0,
+          "maximum": 40,
+          "step": 1.0,
+          "decimals": 0,
+          "width": 240,
+          "height": 96,
+          "apply": "instantly",
+          "draft": "",
+          "show_reset": true,
+          "variable": "min_qty",
+          "required": false,
+          "help": "",
+          "accent": ""
+        },
+        "code": null,
+        "label": "Min quantity",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 7,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_big",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          1060,
+          900
+        ],
+        "params": {
+          "column": "",
+          "match": "contains",
+          "value": "",
+          "value_to": "",
+          "case_sensitive": false,
+          "keep_rejected": true,
+          "conditions": "",
+          "query": "qty >= ${min_qty}"
+        },
+        "code": null,
+        "label": "Big orders",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 8,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_orders_view",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1400,
+          900
+        ],
+        "params": {
+          "mode": "table",
+          "group_by": "",
+          "groups_start": "open",
+          "subtotals": "on the group row",
+          "matrix_rows": "",
+          "matrix_columns": "",
+          "matrix_values": "",
+          "matrix_agg": "sum",
+          "matrix_order": "as they appear",
+          "matrix_headings": "nested",
+          "totals": "off",
+          "totals_at": "bottom",
+          "total_label": "Total",
+          "totals_out": false,
+          "on_click": "nothing",
+          "select_by": "cell",
+          "selected": "",
+          "format_rules": "",
+          "show": "",
+          "hide": "",
+          "sort": "",
+          "sort_dir": "ascending",
+          "row_index": false,
+          "missing": "NaN",
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Orders in view",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 9,
+        "extra_inputs": []
+      },
+      {
+        "id": "ip_note",
+        "type": "flograph.util.note",
+        "pos": [
+          -40,
+          340
+        ],
+        "params": {
+          "text": "## One panel, many filters\n\n**Filters** is an *Input Panel*: each line of its **Fields** setting is a field, and a field with a column filters **Sales** on it:\n\n```\nRegion = choice region style=buttons\nCity = choice city\nPrice = between price step=5\nOrdered = date range ordered\nIn stock = toggle in_stock\n```\n\n- **Cascade** \u2014 City only offers the picked Region's cities, and Price spans their prices.\n- **Apply** \u2014 the panel's *Apply changes* is *with an Apply button*, so set every field, then press **Apply filters**: one run. **Reset filters** puts them back.\n- **Same picks, second table** \u2014 the panel's **filters** output feeds **Same filters on orders**, which maps `region` to the orders table's `sales_region`.\n- **A control as a variable** \u2014 **Min quantity** publishes `${min_qty}`, and **Big orders** filters with `qty >= ${min_qty}`. No wire.\n",
+          "width": 560,
+          "height": 0
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 10,
+        "extra_inputs": []
+      }
+    ],
+    "connections": [
+      {
+        "id": "ef5bb17ad06844b3a787ae38507208c2",
+        "src": [
+          "ip_sales",
+          "table"
+        ],
+        "dst": [
+          "ip_panel",
+          "data"
+        ]
+      },
+      {
+        "id": "38ecef63fc574a29b8aa4b8c99df0215",
+        "src": [
+          "ip_panel",
+          "filtered"
+        ],
+        "dst": [
+          "ip_view",
+          "table"
+        ]
+      },
+      {
+        "id": "7c0da83041aa46e68d7a98db84224adc",
+        "src": [
+          "ip_orders",
+          "table"
+        ],
+        "dst": [
+          "ip_also",
+          "table"
+        ]
+      },
+      {
+        "id": "a3ea09f6cded4a269517cee257256c7f",
+        "src": [
+          "ip_panel",
+          "filters"
+        ],
+        "dst": [
+          "ip_also",
+          "filters"
+        ]
+      },
+      {
+        "id": "740e96e6cdc54c81ad85c7340a6d4a05",
+        "src": [
+          "ip_also",
+          "filtered"
+        ],
+        "dst": [
+          "ip_big",
+          "table"
+        ]
+      },
+      {
+        "id": "3c0c793461f64205a6388ba8a0d2e995",
+        "src": [
+          "ip_big",
+          "filtered"
+        ],
+        "dst": [
+          "ip_orders_view",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "ip_frame",
+        "title": "Input Panel",
+        "rect": [
+          -80,
+          -80,
+          1900,
+          1420
+        ],
+        "color": "#2f4a3a",
+        "z": 0,
+        "active": true,
+        "manual": false,
+        "collapsed": false,
+        "expanded_size": null,
+        "members": [],
+        "member_frames": [],
+        "source": "",
+        "source_fingerprint": ""
+      }
+    ],
+    "shapes": [],
+    "pages": [
+      {
+        "id": "ip_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "body": "",
+        "color": null,
+        "maximized_tile": null,
+        "view_mode": false,
+        "fit_to_window": false,
+        "setup": {},
+        "preview_mode": "pages",
+        "tiles": [
+          {
+            "id": "t_panel",
+            "node": "ip_panel",
+            "port": null,
+            "rect": [
+              40,
+              40,
+              340,
+              470
+            ],
+            "z": 0
+          },
+          {
+            "id": "t_apply",
+            "node": "ip_apply",
+            "port": null,
+            "rect": [
+              40,
+              530,
+              160,
+              50
+            ],
+            "z": 1
+          },
+          {
+            "id": "t_reset",
+            "node": "ip_reset",
+            "port": null,
+            "rect": [
+              220,
+              530,
+              160,
+              50
+            ],
+            "z": 2
+          },
+          {
+            "id": "t_view",
+            "node": "ip_view",
+            "port": "table",
+            "rect": [
+              400,
+              40,
+              640,
+              300
+            ],
+            "z": 3
+          },
+          {
+            "id": "t_qty",
+            "node": "ip_minqty",
+            "port": null,
+            "rect": [
+              400,
+              360,
+              300,
+              110
+            ],
+            "z": 4
+          },
+          {
+            "id": "t_orders",
+            "node": "ip_orders_view",
+            "port": "table",
+            "rect": [
+              720,
+              360,
+              320,
+              220
+            ],
+            "z": 5
+          }
+        ]
+      }
+    ],
+    "env_path": ""
+  }
+}

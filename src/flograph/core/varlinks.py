@@ -99,10 +99,29 @@ def published_name(node) -> str:
     return name if name.isidentifier() else ""
 
 
+def is_panel(node) -> bool:
+    return node.spec.card == CONTROL_CARD and node.spec.control == "panel"
+
+
+class _Key(tuple):
+    """A published name read from one key of a dict output — an Input
+    Panel's field, out of its `values`. A tuple so it is hashable and
+    plain, a class so it can't be taken for a multi-output's port list."""
+
+    @property
+    def port(self) -> str:
+        return self[0]
+
+    @property
+    def key(self) -> str:
+        return self[1]
+
+
 def is_provider(node) -> bool:
     """Does this node supply `${name}` values? A Variables node, or an
-    input control with a Variable name."""
-    return is_vars(node) or bool(published_name(node))
+    input control with a Variable name (or an Input Panel publishing its
+    fields)."""
+    return is_vars(node) or bool(_control_names(node))
 
 
 def provided_names(node) -> list[str]:
@@ -114,8 +133,18 @@ def provided_names(node) -> list[str]:
 
 def _control_names(node) -> dict[str, Any]:
     """name -> the output port it reads, or a tuple of ports for the
-    list-of-everything name of a multi-output control."""
+    list-of-everything name of a multi-output control, or a _Key for one
+    field of an Input Panel."""
+    if node.spec.card != CONTROL_CARD:
+        return {}
     name = published_name(node)
+    if is_panel(node):
+        if not node.params.get("publish", True):
+            return {}
+        from .input_panel import field_names
+        prefix = f"{name}_" if name else ""
+        return {f"{prefix}{field}": _Key(("values", field))
+                for field in field_names(node.params.get("fields"))}
     if not name:
         return {}
     ports = [p.name for p in node.spec.outputs]
@@ -134,7 +163,11 @@ def provided_values(node, outputs: dict) -> dict[str, Any]:
         return dict(produced) if hasattr(produced, "items") else {}
     values: dict[str, Any] = {}
     for name, port in _control_names(node).items():
-        if isinstance(port, tuple):
+        if isinstance(port, _Key):
+            produced = outputs.get(port.port)
+            if hasattr(produced, "items") and port.key in produced:
+                values[name] = produced[port.key]
+        elif isinstance(port, tuple):
             if all(p in outputs for p in port):
                 values[name] = [outputs[p] for p in port]
         elif port in outputs:
@@ -377,12 +410,15 @@ def declared_values(graph: "Graph") -> dict[str, str]:
     for node in graph.nodes.values():
         if is_vars(node):
             values.update(parse_assignments(node.params.get(ASSIGNMENTS_PARAM))[0])
-        elif published_name(node):
+        elif node.spec.card == CONTROL_CARD:
             for name, port in _control_names(node).items():
-                values[name] = (str(node.params.get("value", ""))
-                                if not isinstance(port, str)
-                                or len(node.spec.outputs) == 1
-                                else f"{port} of {node.label}")
+                if isinstance(port, _Key):
+                    values[name] = f"{port.key} of {node.label}"
+                else:
+                    values[name] = (str(node.params.get("value", ""))
+                                    if not isinstance(port, str)
+                                    or len(node.spec.outputs) == 1
+                                    else f"{port} of {node.label}")
     return values
 
 

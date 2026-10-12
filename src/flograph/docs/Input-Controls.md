@@ -20,6 +20,7 @@ other follows.
 | **Multi Choice** | a list of any number of a set, as chips |
 | **Colour** | a colour, `#rrggbb`, with optional preset swatches |
 | **File** | the path of a file or folder the person chooses |
+| **Input Panel** | several of the above in one card, filtering a table — see below |
 
 Options and bounds can come from the control's own input ports: wire a
 column into a Choice's or Multi Choice's `options` and the picks are that
@@ -99,6 +100,68 @@ Type a **Variable name** in a control's Behaviour settings and its value is
 `${name}` everywhere in the flow — a Filter's query, a file path, a chart
 title — and, through **Use Variable**, any number, tick-box, dropdown or
 date setting. See [[Flow Variables]].
+
+## Input Panel — several fields in one card
+
+An **Input Panel** is a filter panel built by writing one line per field.
+Wire a table into its **data** input and each field can filter it on a
+column; the **filtered** output is the rows every field lets through.
+
+```
+Region   = choice region
+City     = choice city
+Price    = between price step=5
+Ordered  = date range order_date
+Customer = text customer contains
+In stock = toggle in_stock
+Top N    = number min=1 max=50 default=10
+```
+
+Each line is `Label = shape [column] [comparison] [option=value …]`:
+
+- **shape** — `choice`, `multi`, `slider`, `number`, `between`, `date`,
+  `date range`, `text`, `toggle`, `time`, `datetime` or `colour`. Each is
+  drawn with the same widget as the control of that name.
+- **column** — the column of **data** the field filters. Leave it out and
+  the field is just a value. Put a name with spaces in quotes:
+  `"unit price"`.
+- **comparison** — `>=` `<=` `>` `<` `=` for a number or a date (`>=` unless
+  you say), `contains` `startswith` `=` for text (`contains`). A choice
+  matches exactly, a multi keeps any ticked value, a between or a date range
+  keeps the window, and a toggle keeps rows where the column is true while
+  it is on.
+- **options** — `step=` `decimals=` `min=` `max=` `default=`
+  `style=buttons` `all=no` `required=yes` `help="…"` `placeholder="…"`
+  `options=a|b|c` (a choice with no column) and `name=` (see below).
+
+A line that can't be read is shown in red on the card and named in the
+node's error; the other fields keep working.
+
+**Nothing set filters nothing.** A new panel passes every row — a choice
+starts on "(All)", a slider and a date at the end of their column's range, a
+between and a date range on the whole range — and each field narrows the
+table only once someone uses it.
+
+**Cascade** (on by default) makes each field's options come from the rows
+the fields above it left: City only offers the picked Region's cities, and
+Price spans their prices.
+
+**Using the picks elsewhere:**
+
+- **values** is a dict of every field's value, keyed by its name — the label
+  made into an identifier (`In stock` is `in_stock`), or `name=` on the
+  line.
+- **Fields are variables** (on by default) makes each field `${name}`
+  anywhere in the flow. A **Variable name** under Behaviour becomes a
+  prefix: `f` makes them `${f_region}`, `${f_price}` and so on.
+- **filters** describes what the panel filtered. Wire it into **Apply
+  Filters** (Transform) with a second table and the same picks filter that
+  one too. Where the second table names a column differently, map it in
+  **Column names**: `region = sales_region`.
+
+The panel is one control, so **Apply changes** holds every field at once:
+set five of them, press Apply, and the flow runs once. The example
+**37 Input panel** (File ▸ Open Example) puts all of this on a dashboard.
 
 ## Resetting
 

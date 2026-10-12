@@ -139,7 +139,10 @@ def control_upstream(graph: Graph, cache: OutputCache,
             resolved[port.name] = as_iso_date(bound) if is_date else bound
         else:
             resolved[port.name] = source
-    return {k: v for k, v in resolved.items() if v is not None and v != ""}
+    # `v != ""` only for text: on a DataFrame (an Input Panel's data) it is
+    # an elementwise comparison, whose truth is an error
+    return {k: v for k, v in resolved.items()
+            if v is not None and not (isinstance(v, str) and v == "")}
 
 
 def choice_options(graph: Graph, cache: OutputCache,

@@ -341,7 +341,7 @@ search box narrows the whole tree to favorites only. Favorites persist
 per-machine in settings.
 
 **Input** — Slider, Between Slider, Number, Text, Date, Date Range, Time,
-Date & Time, Toggle, Choice, Multi Choice, Colour, File.
+Date & Time, Toggle, Choice, Multi Choice, Colour, File, Input Panel.
 
 **IO** — **Read File** reads CSV, Excel, JSON (incl. JSONL), Parquet and
 SQLite through one node: pick the **Format** (or leave it on *auto* and let
@@ -363,7 +363,7 @@ with formulas (`=SUM(A1:A9)`, plus `AVERAGE`, `ROUND`, `POWER`, `CONCAT`,
 copy/paste, and an optional linked input that keeps its contents when you
 disconnect.
 
-**Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
+**Transform** — Select Columns, Filter Rows, Apply Filters, Sort, Join, Group By,
 AsOf Join (match on the nearest timestamp), Expression, Concatenate,
 Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,

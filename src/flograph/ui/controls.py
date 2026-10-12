@@ -96,6 +96,7 @@ CONTROL_SIZES: dict[str, tuple[float, float]] = {
     "datetime": (220.0, 84.0),
     "colour": (200.0, 104.0),
     "file": (260.0, 84.0),
+    "panel": (300.0, 320.0),
 }
 DEFAULT_CONTROL_SIZE = (220.0, 90.0)
 
@@ -1718,7 +1719,134 @@ class FileControl(ControlWidget):
         self._button.setFocus()
 
 
+class PanelControl(ControlWidget):
+    """An Input Panel: one card of fields, each drawn by the widget its
+    shape's own control uses — build_control("slider") for a slider field —
+    fed the params core.input_panel.widget_params works out for it.
+
+    The fields' stored values travel together as one JSON object in the
+    panel's `value`, so a held panel holds all of them, Apply sends all of
+    them, and Ctrl+Z undoes one field's change at a time. The cascade (a
+    City list narrowed by the Region picked above it) is recomputed from
+    the panel's wired table on every sync, by the same function the node's
+    run() calls, so the card offers exactly what the flow will accept.
+    """
+
+    def _build(self) -> None:
+        from PySide6.QtWidgets import QFrame, QScrollArea
+
+        self._problem = QLabel("")
+        self._problem.setObjectName("control_panel_problem")
+        self._problem.setWordWrap(True)
+        self._problem.setStyleSheet(f"color: {INVALID.name()};")
+        self._problem.hide()
+        self._layout.addWidget(self._problem)
+        self._hint = QLabel("Write one field per line in Properties ▸ "
+                            "Fields — e.g.  Region = choice region")
+        self._hint.setObjectName("bound")
+        self._hint.setWordWrap(True)
+        self._layout.addWidget(self._hint)
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("control_panel_scroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet(
+            "QScrollArea, QScrollArea > QWidget > QWidget"
+            " { background: transparent; }")
+        self._layout.addWidget(self._scroll, 1)
+        self._fields: list[dict] = []
+        self._subs: dict[str, ControlWidget] = {}
+        self._stored: dict = {}
+        self._shape_key: tuple = ()
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.input_panel import (parse_fields, parse_values,
+                                               run_panel)
+
+        # the panel fills its card, so the base's trailing stretch (always
+        # the last item, added after _build) gives way to the scroll area
+        self._layout.setStretch(self._layout.count() - 1, 0)
+        fields, problems = parse_fields(params.get("fields"))
+        self._problem.setText("; ".join(problems))
+        self._problem.setVisible(bool(problems))
+        self._hint.setVisible(not fields and not problems)
+        self._fields = fields
+        self._stored = parse_values(params.get("value"))
+        layout = str(params.get("layout", "stacked"))
+        key = (layout, tuple((f["name"], f["shape"]) for f in fields))
+        if key != self._shape_key:
+            self._rebuild(fields, layout)
+            self._shape_key = key
+        try:
+            _rows, _values, _filters, contexts = run_panel(
+                fields, self._stored, self._upstream.get("data"),
+                bool(params.get("cascade", True)))
+        except Exception as exc:    # a column of odd types: say so, draw on
+            self._problem.setText(f"{type(exc).__name__}: {exc}")
+            self._problem.show()
+            contexts = {}
+        for field in fields:
+            sub = self._subs.get(field["name"])
+            if sub is not None and field["name"] in contexts:
+                sub.sync(contexts[field["name"]][1])
+
+    def _rebuild(self, fields, layout: str) -> None:
+        from PySide6.QtWidgets import QGridLayout
+
+        old = self._scroll.takeWidget()
+        if old is not None:
+            old.deleteLater()
+        self._subs = {}
+        body = QWidget()
+        body.setObjectName("readout_row")
+        if layout == "row":
+            grid = QHBoxLayout(body)
+        elif layout in ("2 columns", "3 columns"):
+            grid = QGridLayout(body)
+        else:
+            grid = QVBoxLayout(body)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        columns = 3 if layout == "3 columns" else 2
+        for i, field in enumerate(fields):
+            sub = build_control(field["shape"])
+            if sub is None:
+                continue
+            sub.value_committed.connect(
+                lambda value, name=field["name"]: self._field_committed(
+                    name, value))
+            if isinstance(grid, QGridLayout):
+                grid.addWidget(sub, i // columns, i % columns)
+            else:
+                grid.addWidget(sub)
+            self._subs[field["name"]] = sub
+        if isinstance(grid, QVBoxLayout):
+            grid.addStretch(1)
+        self._scroll.setWidget(body)
+
+    def _field_committed(self, name: str, value) -> None:
+        if self._syncing:
+            return
+        self._stored[name] = value
+        self._commit()
+
+    def _read(self):
+        import json
+        return json.dumps(self._stored)
+
+    def field_widget(self, name: str) -> Optional[ControlWidget]:
+        """One field's widget, by the field's name (for tests and hosts)."""
+        return self._subs.get(name)
+
+    def focus_editor(self) -> None:
+        for sub in self._subs.values():
+            sub.focus_editor()
+            return
+
+
 _CONTROLS = {
+    "panel": PanelControl,
     "slider": SliderControl,
     "range": RangeControl,
     "number": NumberControl,

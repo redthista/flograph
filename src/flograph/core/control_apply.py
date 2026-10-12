@@ -69,7 +69,9 @@ COMMON_PARAMS: list[dict] = [
 # dropdown nobody touched shows (and emits) its first option, a tick box is
 # always ticked or not, a number is always a number.
 _NEVER_BLANK = frozenset({"slider", "range", "number", "toggle", "choice",
-                          "colour"})
+                          "colour", "date_range", "time", "datetime",
+                          # a panel's fields say required one by one
+                          "panel"})
 
 
 def is_blank(value: Any) -> bool:

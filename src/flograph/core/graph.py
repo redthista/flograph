@@ -754,6 +754,8 @@ class Graph:
         if (spec.name == varlinks.VARIABLE_PARAM
                 and node.spec.card == varlinks.CONTROL_CARD):
             return True     # a control published, renamed or withdrew one
+        if varlinks.is_panel(node) and spec.name in ("fields", "publish"):
+            return True     # an Input Panel's fields are its variables
         if (spec.type not in varlinks.SUBSTITUTABLE
                 and spec.type not in varlinks.BINDABLE):
             return False
