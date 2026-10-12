@@ -1443,6 +1443,15 @@ class MainWindow(QMainWindow):
                 f"{names} {'has' if len(held) == 1 else 'have'} edits not "
                 "submitted — this run uses the table as last submitted. "
                 "Press Submit (F9) on the table to send them on.", 8000)
+            return
+        # ...and an input control holding a change until Apply, likewise
+        from flograph.core.control_apply import held_controls
+        waiting = [self.graph.nodes[i].label for i in held_controls(self.graph)]
+        if waiting:
+            names = ", ".join(f"‘{name}’" for name in waiting[:3])
+            self.show_status(
+                f"{names} {'has a change' if len(waiting) == 1 else 'have changes'}"
+                " not applied — this run uses the value as last applied.", 8000)
 
     def _on_memory_pressure(self, message: str) -> None:
         """Said once, when the project becomes the reason memory is tight.
@@ -3787,6 +3796,9 @@ class MainWindow(QMainWindow):
         if action == "Go to page":
             self._go_to_page(node)
             return
+        if action in ("Apply inputs", "Reset inputs"):
+            self._apply_inputs(node, reset=action == "Reset inputs")
+            return
         if action != "Show message" and self._cache_still_writing():
             return
         self._flush_pending_edits()
@@ -3830,6 +3842,47 @@ class MainWindow(QMainWindow):
                 if record is not None else None)
         return AppState(file_path=self._project_path or "",
                         running=self.engine.active, last_run=last)
+
+    def _button_input_ids(self, node) -> list[str]:
+        """The input controls an Apply/Reset inputs button reaches."""
+        controls = [i for i, n in self.graph.nodes.items()
+                    if card_kind(n) == "control"]
+        scope = node.params.get("inputs_scope", "on this page")
+        if scope == "named inputs":
+            named = set(self._named_node_ids(node.params.get("input_names", "")))
+            return [i for i in controls if i in named]
+        if scope == "every input":
+            return controls
+        # the form this button sits in: every page it has a tile on
+        pages = [p for p in self.graph.pages.values()
+                 if any(t.node_id == node.id for t in p.tiles.values())]
+        if not pages:
+            return controls
+        on_pages = {t.node_id for p in pages for t in p.tiles.values()}
+        return [i for i in controls if i in on_pages]
+
+    def _apply_inputs(self, node, reset: bool = False) -> None:
+        """An Action Button set to Apply inputs / Reset inputs: every held
+        change in its scope goes on in one undo step, and one run covers
+        all of them — the point of a form's Apply button."""
+        from . import control_binding as cb
+
+        ids = self._button_input_ids(node)
+        changed = (cb.reset_many if reset else cb.apply_many)(
+            self.graph, self.undo_stack, ids)
+        if not reset and not changed:
+            self.show_status(f"{node.label}: no changes waiting", 4000)
+        self._rerun_controls(changed)
+
+    def _rerun_controls(self, ids) -> None:
+        """One run over these controls and everything they feed."""
+        targets: list[str] = []
+        for node_id in ids:
+            for target in (node_id, *self.graph.downstream(node_id)):
+                if target not in targets:
+                    targets.append(target)
+        if targets:
+            self.engine.request_run(targets)
 
     def _go_to_page(self, node) -> None:
         """An Action Button set to Go to page (AB2): the way round a
@@ -4816,6 +4869,19 @@ class MainWindow(QMainWindow):
         if (not many and card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
+        control_apply_action = control_discard_action = None
+        control_reset_action = None
+        if not many and card_kind(node) == "control":
+            from flograph.core import control_apply as ca
+            if ca.has_draft(node):
+                control_apply_action = menu.addAction("Apply Change")
+                control_apply_action.setToolTip(
+                    "Send the value shown on the control on to the flow.")
+                control_discard_action = menu.addAction("Discard Change")
+                control_discard_action.setToolTip(
+                    "Put the control back to the value the flow has.")
+            control_reset_action = menu.addAction("Reset to Default")
+            control_reset_action.setEnabled(ca.differs_from_default(node))
         embed_image_action = None
         if not many and self._image_node_links_a_file(node_id):
             embed_image_action = menu.addAction("Embed Image in the File")
@@ -5021,6 +5087,15 @@ class MainWindow(QMainWindow):
                 item._open_table_editor()
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
+        elif chosen is not None and chosen in (
+                control_apply_action, control_discard_action,
+                control_reset_action):
+            from . import control_binding as cb
+            op = {control_apply_action: cb.apply,
+                  control_discard_action: cb.discard,
+                  control_reset_action: cb.reset}[chosen]
+            if op(self.graph, self.undo_stack, node_id):
+                self._rerun_controls([node_id])
         elif embed_image_action is not None and chosen is embed_image_action:
             self._embed_node_image(node_id)
         elif browser_action is not None and chosen is browser_action:

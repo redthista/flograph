@@ -234,7 +234,9 @@ The other half of a dashboard: a node category you *set* rather than compute.
 carry a caption you write, are typed properly so wires still validate, and
 re-run everything downstream when you change them. A control's options can
 come from its own input ports — wire a column into a Choice node and its
-dropdown is that column's values.
+dropdown is that column's values. A control can also hold a change until
+**Apply** is pressed, on itself or on an Action Button for the whole page —
+see [[Input Controls]].
 
 A **Slicer** picks values out of a column — or out of several. Name more than
 one column and it becomes a **tree**: regions at the top, their stores

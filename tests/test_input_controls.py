@@ -701,7 +701,7 @@ class TestRunning:
         control = add_control(window, "toggle", value=True)
         item = window.scene.node_items[control.id]
         before = window.undo_stack.index()
-        item._on_control_committed(True)
+        item._control_widget.value_committed.emit(True)
         assert window.undo_stack.index() == before
 
 

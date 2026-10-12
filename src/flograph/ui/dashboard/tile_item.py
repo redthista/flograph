@@ -742,30 +742,29 @@ class TileItem(QGraphicsObject):
         places and neither host knows what a slider is. None for a shape
         this build doesn't know, which leaves the tile on its placeholder
         rather than refusing to open the project."""
-        from ..controls import build_control
+        from ..controls import connect_control, host_control
 
         node = self._node()
-        widget = build_control(node.spec.control or "") if node else None
+        widget = host_control(node) if node else None
         if widget is None:
             return None
-        widget.sync(node.params)
-        widget.value_committed.connect(self._commit_control_value)
+        connect_control(
+            widget,
+            lambda: self._graph if self.scene() is not None else None,
+            lambda: getattr(self.scene(), "undo_stack", None),
+            lambda: getattr(self._node(), "id", None),
+            self._on_control_changed)
         self._control_widget = widget
         return widget
 
-    def _commit_control_value(self, value) -> None:
-        """One undo step per adjustment, then re-run so the visuals beside
-        the control catch up. A dashboard where you move a slider and then
-        go hunting for a Run button is not a dashboard."""
+    def _on_control_changed(self, node_id: str) -> None:
+        """The value reached the flow: re-run so the visuals beside the
+        control catch up. A dashboard where you move a slider and then go
+        hunting for a Run button is not a dashboard. A held change never
+        gets here — it waits for Apply (ui.control_binding)."""
         scene = self.scene()
-        node = self._node()
-        if scene is None or node is None:
-            return
-        if value != node.params.get("value"):
-            from ..commands import SetParamCommand
-            scene.undo_stack.push(SetParamCommand(
-                self._graph, node.id, "value", value, merge=False))
-        scene.control_changed.emit(node.id)
+        if scene is not None:
+            scene.control_changed.emit(node_id)
 
     def _on_view_param_written(self, name: str, payload: str) -> None:
         """A page on this tile called flograph.set(...). Same verdict and

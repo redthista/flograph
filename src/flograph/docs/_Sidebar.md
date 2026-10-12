@@ -13,6 +13,7 @@
   - [[Node Packs]]
 - **Sharing results**
   - [[Dashboards and Reports]]
+  - [[Input Controls]]
   - [[Conditional Formatting]]
   - [[Chart Rules]]
   - [[Running Headless]]

@@ -1,0 +1,51 @@
+# Input Controls
+
+The **Input** category holds the nodes you *set* rather than compute: a
+Slider, a Number box, a Text box, a Date picker, a Toggle, a Choice dropdown
+and Between, a two-handled range. Each one is a card on the canvas and a
+tile on a [[Dashboards and Reports|dashboard]], and both are the same
+control: move it in either place and the other follows.
+
+Every control carries the same **Behaviour** settings in its Properties,
+folded under their own heading, whatever its shape — including a control
+you wrote yourself from the **Control Template**.
+
+## Applying a change
+
+**Apply changes** decides when a change reaches the flow:
+
+| Setting | What happens when you move the control |
+|---|---|
+| **instantly** | Everything downstream re-runs straight away. The default, and how controls have always behaved. |
+| **with ✓ on the control** | The new value waits. An amber dot and a **✓ Apply** button appear on the control's caption row; press it and the flow re-runs once. |
+| **with an Apply button** | The new value waits, with only the amber dot. An **Action Button** set to **Apply inputs** sends it on, together with every other waiting control it reaches. |
+
+A waiting change is shown on the control but not used by the flow: a run
+started in the meantime uses the value as last applied, and the status bar
+says so. It is saved with the project, and it undoes like any edit. Right-
+click a control on the canvas for **Apply Change** and **Discard Change**.
+
+### A form with one Apply button
+
+Put four filters on a dashboard page with **Apply changes** set to *with an
+Apply button*, then add an **Action Button** with **On click** set to
+**Apply inputs**. Picking a region, a price range and two dates now costs one
+run — when Apply is pressed — instead of four.
+
+The button's **Inputs** setting says which controls it applies:
+
+- **on this page** — the controls with a tile on the same page as the
+  button (on every page the button is on). A button on no page reaches every
+  control.
+- **named inputs** — the controls whose names you list, one per line.
+- **every input** — every control in the flow.
+
+All of them go on as one undo step and one run.
+
+## Resetting
+
+**Reset inputs** on an Action Button puts the same set of controls back to
+their defaults. Tick **Show reset button** on a control and a small **↺**
+appears on it while its value differs from the default; right-click ▸
+**Reset to Default** does the same on the canvas. A control set to wait
+holds its reset too, until it is applied.

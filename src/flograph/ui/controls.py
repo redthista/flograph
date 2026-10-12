@@ -44,7 +44,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox, QHBoxLayout, QLabel,
     QLineEdit, QPlainTextEdit, QSizePolicy, QSlider, QStyle,
-    QStyleOptionButton, QStyleOptionSlider, QVBoxLayout, QWidget,
+    QStyleOptionButton, QStyleOptionSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import theme
@@ -64,6 +64,10 @@ UNCAPPED_TEXT = 2_000_000_000  # ~INT_MAX; QLineEdit allocates nothing up front
 # Ticked colour for a Toggle's box — the theme has no accent of its own, and
 # the wire colour for a bool port is a warning red, wrong for "on".
 CHECK_ON = QColor("#3b82f6")
+
+# A change waiting for Apply: the same amber as a dirty node's LED, so
+# "not reached the flow yet" reads the same everywhere it is said.
+PENDING = QColor("#f59e0b")
 
 # Natural size for a control card on the canvas and a tile on a dashboard.
 # Chosen so the widget plus its caption fits without scrolling.
@@ -142,6 +146,19 @@ def _stylesheet() -> str:
         f" border-color: {CHECK_ON.name()}; }}"
         f"QCheckBox::indicator:disabled {{ border-color:"
         f" {theme.NODE_BORDER.name()}; }}"
+        # Apply / Reset ride the caption row: small, flat until hovered, so
+        # a control that has nothing pending looks as it always did
+        f"QWidget#caption_row {{ background: transparent; }}"
+        f"QToolButton#control_apply, QToolButton#control_reset {{"
+        f" color: {theme.NODE_TEXT.name()}; background: transparent;"
+        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" border-radius: 3px; padding: 0px 5px; font-size: 8pt; }}"
+        f"QToolButton#control_apply {{ border-color: {PENDING.name()};"
+        f" color: {PENDING.name()}; font-weight: bold; }}"
+        f"QToolButton#control_apply:hover, QToolButton#control_reset:hover"
+        f" {{ background: {theme.NODE_HEADER.name()}; }}"
+        f"QLabel#control_pending {{ color: {PENDING.name()};"
+        f" font-size: 9pt; }}"
     )
 
 
@@ -180,6 +197,9 @@ class _TickBox(QCheckBox):
         ])
 
 
+_NO_DEFAULT = object()
+
+
 class ControlWidget(QWidget):
     """Base for every control shape.
 
@@ -192,23 +212,60 @@ class ControlWidget(QWidget):
 
     # the node's new "value" param — a JSON-safe scalar
     value_committed = Signal(object)
+    # the ✓ and ↺ on the caption row: the host decides what they mean
+    # (ui.control_binding), the widget only says they were pressed
+    apply_requested = Signal()
+    reset_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._syncing = False
         self._params: dict = {}
         self._upstream: dict = {}
+        # what Reset puts back; the host sets it from the node's spec. A
+        # widget with no node behind it (a test) never offers a reset.
+        self.value_default = _NO_DEFAULT
         self.setObjectName("control_root")
         self.setStyleSheet(_stylesheet())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 3, 4, 3)
         layout.setSpacing(2)
+        # The caption row carries the Apply/Reset buttons too, so a held
+        # control costs no height: the card sizes every script declares
+        # were chosen before there were any buttons to fit.
+        self._caption_row = QWidget()
+        self._caption_row.setObjectName("caption_row")
+        row = QHBoxLayout(self._caption_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
         self._caption = QLabel("")
         self._caption.setObjectName("caption")
         self._caption.setWordWrap(True)
-        self._caption.hide()
-        layout.addWidget(self._caption)
+        row.addWidget(self._caption, 1)
+        self._pending = QLabel("\u25cf")
+        self._pending.setObjectName("control_pending")
+        self._pending.setToolTip("Changed — not applied to the flow yet")
+        row.addWidget(self._pending)
+        self._reset_button = QToolButton()
+        self._reset_button.setObjectName("control_reset")
+        self._reset_button.setText("\u21ba")
+        self._reset_button.setToolTip("Reset to the default value")
+        self._reset_button.setFocusPolicy(Qt.NoFocus)
+        self._reset_button.clicked.connect(self.reset_requested)
+        row.addWidget(self._reset_button)
+        self._apply_button = QToolButton()
+        self._apply_button.setObjectName("control_apply")
+        self._apply_button.setText("\u2713 Apply")
+        self._apply_button.setToolTip("Send this change on to the flow")
+        self._apply_button.setFocusPolicy(Qt.NoFocus)
+        self._apply_button.clicked.connect(self.apply_requested)
+        row.addWidget(self._apply_button)
+        self._pending.hide()
+        self._reset_button.hide()
+        self._apply_button.hide()
+        self._caption_row.hide()
+        layout.addWidget(self._caption_row)
         self._layout = layout
         self._build()
         # the trailing stretch pins a short control to the top of its card.
@@ -240,15 +297,44 @@ class ControlWidget(QWidget):
         """Re-read everything from the node's params: the value, the caption
         and the shape's own settings (range, options, ...). Called on build,
         on undo/redo, and whenever the properties panel edits the node."""
+        from flograph.core import control_apply as ca
+
         self._params = dict(params or {})
+        # the card draws a held change, not the applied value: what you set
+        # is what you see, and the pending dot says the flow has not got it
+        shown = ca.shown_params(self._params)
         self._syncing = True
         try:
             caption = str(self._params.get("caption", "") or "").strip()
             self._caption.setText(caption)
             self._caption.setVisible(bool(caption))
-            self._apply(self._params)
+            self._apply(shown)
+            self._sync_buttons(shown)
         finally:
             self._syncing = False
+
+    def _sync_buttons(self, shown: dict) -> None:
+        from flograph.core import control_apply as ca
+
+        mode = self._params.get("apply")
+        pending = bool(ca.draft_text(self._params))
+        self._pending.setVisible(pending)
+        # "wait" leaves applying to a page's Apply button, so the field
+        # stays a field; "button" puts the ✓ on the control itself
+        self._apply_button.setVisible(pending and mode == ca.BUTTON)
+        self._reset_button.setVisible(
+            bool(self._params.get("show_reset"))
+            and self.value_default is not _NO_DEFAULT
+            and shown.get("value") != self.value_default)
+        self._caption_row.setVisible(
+            not self._caption.isHidden()
+            or not self._pending.isHidden()
+            or not self._apply_button.isHidden()
+            or not self._reset_button.isHidden())
+
+    def pending(self) -> bool:
+        """Is a change waiting for Apply? (What the dot is showing.)"""
+        return not self._pending.isHidden()
 
     def set_upstream(self, values: dict) -> None:
         """Settings a run supplied through this control's own input ports,
@@ -940,3 +1026,41 @@ def build_control(kind: str, parent=None) -> Optional[ControlWidget]:
     know — a project saved by a newer flograph must still open."""
     factory = _CONTROLS.get(kind)
     return factory(parent) if factory is not None else None
+
+
+def host_control(node, parent=None) -> Optional[ControlWidget]:
+    """A node's control widget, ready to place: built for its shape, told
+    its default (for Reset) and synced to its params. The canvas card and
+    the dashboard tile both build theirs here, then wire it with
+    `connect_control`, so the two can't differ in what a press does."""
+    widget = build_control(node.spec.control or "", parent)
+    if widget is None:
+        return None
+    from flograph.core.control_apply import default_value
+    widget.value_default = default_value(node)
+    widget.sync(node.params)
+    return widget
+
+
+def connect_control(widget: ControlWidget, graph_of, stack_of, node_id_of,
+                    changed) -> None:
+    """Wire a hosted control's three signals through ui.control_binding.
+
+    The host passes callables rather than objects because a card or tile
+    can outlive the scene it was built in (a page torn down mid-run) —
+    each press asks for the graph and stack as they are now, and does
+    nothing when either has gone. `changed(node_id)` is the host's cue that
+    the flow's value moved and a re-run is wanted.
+    """
+    from . import control_binding as cb
+
+    def run(op, *args) -> None:
+        graph, stack, node_id = graph_of(), stack_of(), node_id_of()
+        if graph is None or stack is None or node_id is None:
+            return
+        if op(graph, stack, node_id, *args):
+            changed(node_id)
+
+    widget.value_committed.connect(lambda value: run(cb.commit_value, value))
+    widget.apply_requested.connect(lambda: run(cb.apply))
+    widget.reset_requested.connect(lambda: run(cb.reset))

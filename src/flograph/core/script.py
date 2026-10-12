@@ -325,6 +325,16 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
             raise NodeScriptError(f"PARAMS: duplicate param name {spec.name!r}")
         seen_params.add(spec.name)
         params.append(spec)
+    if card == "control":
+        # Apply/Reset (and the rest of core.control_apply.COMMON_PARAMS)
+        # come with being a control, the way a flow port comes with being a
+        # node: a control written for oneself gets them without declaring
+        # them. A script's own param of the same name wins.
+        from .control_apply import COMMON_PARAMS
+        for entry in COMMON_PARAMS:
+            if entry["name"] not in seen_params:
+                seen_params.add(entry["name"])
+                params.append(ParamSpec.from_dict(entry))
 
     if reads_report and not any(p.name == reads_report and p.type == "page_ref"
                                 for p in params):

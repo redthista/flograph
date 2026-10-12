@@ -2697,13 +2697,17 @@ class NodeItem(QGraphicsObject):
         """One card path for every control shape — the widget knows what it
         is, this only hosts it. An unknown shape (a project from a newer
         flograph) leaves the card empty rather than refusing to load."""
-        from ..controls import build_control
+        from ..controls import connect_control, host_control
 
-        widget = build_control(self.node.spec.control or "")
+        widget = host_control(self.node)
         if widget is None:
             return
-        widget.sync(self.node.params)
-        widget.value_committed.connect(self._on_control_committed)
+        connect_control(
+            widget,
+            lambda: getattr(self.scene(), "graph", None),
+            lambda: getattr(self.scene(), "undo_stack", None),
+            lambda: self.node.id,
+            self._on_control_changed)
         proxy = self._card_proxy(widget)
         self._control_widget = widget
         self._control_proxy = proxy
@@ -2721,21 +2725,16 @@ class NodeItem(QGraphicsObject):
         if self._control_widget is not None:
             self._control_widget.sync(self.node.params)
 
-    def _on_control_committed(self, value) -> None:
-        """The user moved the control: commit its new value (which dirties
-        this node and everything downstream) and ask the window to re-run
-        from here, so the visuals follow live. Same contract as a slicer
-        tick — a control you have to leave to go press Run is not a
-        control."""
+    def _on_control_changed(self, node_id: str) -> None:
+        """The control's value reached the flow (ui.control_binding has
+        already pushed it, dirtying this node and everything downstream):
+        ask the window to re-run from here, so the visuals follow live.
+        Same contract as a slicer tick — a control you have to leave to go
+        press Run is not a control. A held change never gets here; it
+        waits in the draft until Apply."""
         scene = self.scene()
-        if scene is None:
-            return
-        if value != self.node.params.get("value"):
-            from ..commands import SetParamCommand
-            # merge=False: one Ctrl+Z undoes one adjustment, not the session
-            scene.undo_stack.push(SetParamCommand(
-                scene.graph, self.node.id, "value", value, merge=False))
-        scene.control_changed.emit(self.node.id)
+        if scene is not None:
+            scene.control_changed.emit(node_id)
 
     @staticmethod
     def _next_column_name(columns: list[str]) -> str:
