@@ -1526,7 +1526,8 @@ class _Resolver:
         The JSON is taken now, on the UI thread, because the figure is the
         flow's cached output and the rest of the render may run elsewhere.
         No size goes with it: the page draws the chart over its picture,
-        which was taken at the shape `ratio=`/`height=` asked for.
+        which was taken at the shape `ratio=`/`height=` asked for — and
+        `shaped` says one was asked for, so a theme's shape gives way.
 
         The web page must work with nothing to fetch — one file, no CDN. A
         geo map is live because its outlines travel in the page with it
@@ -1547,7 +1548,10 @@ class _Resolver:
                                      self._aspect)[:2]
             self.live_charts[index] = {"json": figure.to_json(),
                                        "outlines": outlines,
-                                       "design": list(design)}
+                                       "design": list(design),
+                                       # asked for its own shape: a theme's
+                                       # --chart-shape must not undo it
+                                       "shaped": bool(self._aspect)}
         except Exception:
             pass        # it stays the picture — still a report
 

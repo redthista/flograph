@@ -106,17 +106,23 @@ def _chart_box(img: str, index: int, chart: dict, shape: str = "") -> str:
     auto-sized cell, Firefox laid the box out before the picture had
     decoded and Plotly drew a chart a few pixels tall. With both stated
     the box has a size before anything loads. (A theme's `--chart-shape`
-    overrides the shape — it says `!important`.) The picture stays in the
-    box, invisible, as the fallback and for print.
+    overrides the shape — it says `!important` — unless the embed asked
+    for one with `ratio=`/`height=`: then the box is `fg-shaped` and
+    carries its shape as `--fg-shape`, which outranks the theme's.) The
+    picture stays in the box, invisible, as the fallback and for print.
     """
     width = re.search(r'\bwidth="(\d+)"', img)
     size = (f"width:{width.group(1)}px;" if width else "") + shape
+    own = chart.get("shaped") and shape
+    if own:
+        size += "--fg-shape:" + shape.split(":", 1)[1]
     # `</` would end the script element early — a label with "</b>" in it
     data = chart["json"].replace("</", "<\\/")
     design = chart.get("design") or ()
     design = (f' data-fg-design="{int(design[0])},{int(design[1])}"'
               if len(design) == 2 else "")
-    return (f'<div class="fg-chart" data-fg-chart="{index}"{design} '
+    kind = "fg-chart fg-shaped" if own else "fg-chart"
+    return (f'<div class="{kind}" data-fg-chart="{index}"{design} '
             f'style="{size}">{img}</div>'
             f'<script type="application/json" id="fg-fig-{index}">'
             f"{data}</script>")
@@ -341,6 +347,11 @@ tr.fg-hidden { display: none; }
    A live chart re-laid out for the printed page came out squashed in a
    column layout — Plotly resizes to a box that is mid-reflow — and a
    chart someone has zoomed into is not the one the report is about. */
+/* `ratio=`/`height=` on the embed: its own shape beats a theme's
+   --chart-shape, in a ```columns cell too, but not full screen */
+.fg-chart.fg-shaped.fg-shaped:not(.fg-full) {
+  aspect-ratio: var(--fg-shape) !important;
+}
 /* full screen: the box fills the screen (or the window, where full screen
    is refused), whatever shape a theme gave it; the chart redraws to fit */
 /* the class twice: it must beat a theme's !important column shape */

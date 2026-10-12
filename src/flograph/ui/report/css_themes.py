@@ -17,7 +17,8 @@ a ```columns block the borderless table.
 `--fg-chart-font` and lays them over the figure's layout, so a dark page
 gets a dark chart. `--chart-shape` is the shape the theme gives a chart
 box (the chart redraws to fit, labels at their real size); delete that
-line to keep each chart's own shape.
+line to keep each chart's own shape. A chart whose embed says `height=`
+or `ratio=` keeps that shape regardless.
 
 **A table's own cells are not the theme's to repaint.** Only the live
 table's outer cells are styled (`.flograph-table > tbody > tr > td`), and

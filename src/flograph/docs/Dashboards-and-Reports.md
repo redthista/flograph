@@ -506,7 +506,9 @@ loses its white ground — through variables any stylesheet can set:
 list that recolours the series: a colour the chart took from its palette
 becomes the theme's colour in the same place, and one a chart set on
 purpose is left alone. They also give every chart the same wide shape
-(`--chart-shape`); delete that line to keep each chart's own.
+(`--chart-shape`); delete that line to keep each chart's own. A chart
+whose embed says `height=` or `ratio=` keeps that shape whatever the
+theme says.
 
 #### Sections that fold, and tabs
 

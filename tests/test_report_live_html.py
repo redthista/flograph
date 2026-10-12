@@ -301,6 +301,28 @@ class TestLiveCharts:
         assert not re.search(r'(?:src|href)="(?:https?:)?//', page)
         assert "@import" not in page and "url(http" not in page
 
+    @pytest.mark.parametrize("option", ["height=150", "ratio=4:1"])
+    def test_an_asked_for_shape_outranks_the_theme(self, qapp, monkeypatch,
+                                                   option):
+        # every starter theme forces `aspect-ratio: var(--chart-shape)
+        # !important` on a chart box, which undid `height=` on a live one
+        rendered = render(f"![[C|{option}|live]]", {"C": figure()},
+                          monkeypatch=monkeypatch)
+        html = report_html(rendered, plotly_src="plotly.js")
+        box = re.search(r'<div class="fg-chart fg-shaped"[^>]*>', html).group(0)
+        w, h = map(int, re.search(r"--fg-shape:(\d+) / (\d+)", box).groups())
+        image = rendered.images[0]
+        assert (w, h) == (image.width(), image.height())
+        assert w / h > 3        # letterbox, not the default shape
+        assert ".fg-chart.fg-shaped.fg-shaped:not(.fg-full)" in html
+
+    def test_a_chart_with_no_shape_takes_the_theme_s(self, qapp,
+                                                     monkeypatch):
+        rendered = render("![[C|live]]", {"C": figure()},
+                          monkeypatch=monkeypatch)
+        html = report_html(rendered, plotly_src="plotly.js")
+        assert "fg-shaped\"" not in html and "--fg-shape:" not in html
+
     def test_a_plain_chart_stays_a_picture(self, qapp, monkeypatch):
         rendered = render("![[C]]", {"C": figure()},
                           monkeypatch=monkeypatch)
