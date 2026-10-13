@@ -1095,16 +1095,22 @@ class ParamsPanel(QWidget):
             browse.setText("…")
 
             def pick() -> None:
+                from ..file_start import remember, start_path
+                start = start_path(edit.text(),
+                                   folder=spec.type == "folder_open")
                 if spec.type == "file_open":
-                    path, _ = QFileDialog.getOpenFileName(self, spec.label or name)
+                    path, _ = QFileDialog.getOpenFileName(
+                        self, spec.label or name, start)
                 elif spec.type == "folder_open":
                     # a folder param wants the directory itself, so the file
                     # dialog must not offer files that would never be valid
                     path = QFileDialog.getExistingDirectory(
-                        self, spec.label or name, edit.text().strip())
+                        self, spec.label or name, start)
                 else:
-                    path, _ = QFileDialog.getSaveFileName(self, spec.label or name)
+                    path, _ = QFileDialog.getSaveFileName(
+                        self, spec.label or name, start)
                 if path:
+                    remember(path)
                     edit.setText(path)
                     self._commit(name, path)
 

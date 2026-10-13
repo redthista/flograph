@@ -107,12 +107,14 @@ class PackSettingsDialog(QDialog):
             lambda v: line.setText(str(v))
 
     def _browse(self, s: packs.PackSetting, line: QLineEdit) -> None:
-        start = line.text().strip() or str(Path.home())
+        from .file_start import remember, start_path
+        start = start_path(line.text(), folder=s.type == "folder")
         if s.type == "folder":
             got = QFileDialog.getExistingDirectory(self, s.label, start)
         else:
             got, _ = QFileDialog.getOpenFileName(self, s.label, start)
         if got:
+            remember(got)
             line.setText(got)
 
     def showEvent(self, event) -> None:

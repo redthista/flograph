@@ -1777,10 +1777,11 @@ class FileControl(ControlWidget):
 
     def _pick(self) -> None:
         from PySide6.QtWidgets import QFileDialog
-        import os
+        from .file_start import remember, start_path
 
-        start = os.path.dirname(self._path) if self._path else ""
-        if self._params.get("mode") == "folder":
+        folder = self._params.get("mode") == "folder"
+        start = start_path(self._path, folder=folder)
+        if folder:
             path = QFileDialog.getExistingDirectory(
                 self.window(), "Choose a folder", start)
         else:
@@ -1788,6 +1789,7 @@ class FileControl(ControlWidget):
                 self.window(), "Choose a file", start,
                 str(self._params.get("filter") or ""))
         if path:
+            remember(path)
             self._path = path
             self._commit()
 
