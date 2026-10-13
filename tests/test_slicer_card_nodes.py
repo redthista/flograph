@@ -1123,6 +1123,31 @@ class TestSlicerAccent:
         assert "#16a34a" in _cards(green.view)[0].styleSheet()
 
 
+class TestVanishedValues:
+    """A tick on a value the column no longer has — a store picked under
+    one region, then the region changed upstream. The card has no row to
+    draw it on, but the node still filters on it."""
+
+    def _stuck(self, qtbot, **params):
+        return _panel(qtbot, [("store B",), ("store C",)], columns=("store",),
+                      params=dict({"selected": '["store A"]'}, **params))
+
+    def test_none_clears_it_and_commits(self, qtbot):
+        panel = self._stuck(qtbot)
+        got = []
+        panel.selection_committed.connect(got.append)
+        panel.toolbar._on_none()
+        assert panel.model.paths == []
+        assert got == [""]
+
+    def test_single_mode_keeps_a_value_it_can_show(self, qtbot):
+        panel = self._stuck(qtbot)
+        panel.model.paths = [("store A",), ("store C",)]
+        panel.model.mode = "single"
+        assert panel.model.trim_to_single()
+        assert panel.model.paths == [("store C",)]
+
+
 class TestStandaloneSlicer:
     def test_a_hierarchy_of_typed_values(self, qtbot, window):
         """With no table wired in, a line is a path: "north > alpha"."""

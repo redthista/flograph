@@ -260,7 +260,11 @@ class _Selection:
         are active. True when something was dropped."""
         if len(self.paths) <= 1:
             return False
-        self.paths = self.paths[:1]
+        # the first one the card can draw: a tick on a value the data no
+        # longer has would leave single mode showing nothing picked while
+        # the node still filtered on it
+        shown = [p for p in self.paths if self._reachable(p)]
+        self.paths = (shown or self.paths)[:1]
         return True
 
     def select_all(self) -> bool:
@@ -273,8 +277,12 @@ class _Selection:
         return self.paths != before
 
     def clear_all(self) -> bool:
-        """Untick everything the search currently matches."""
+        """Untick everything the search currently matches — and any tick
+        on a value the data no longer has. Those draw nowhere, so no search
+        matches them, yet the node still filters on them: left in, None
+        changed nothing and the card stayed stuck on rows it couldn't show."""
         before = list(self.paths)
+        self.paths = [p for p in self.paths if self._reachable(p)]
         for path in self.matching_paths():
             if self.is_checked(path):
                 self._untick(path)
