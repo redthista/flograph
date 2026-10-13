@@ -13,7 +13,8 @@ from flograph.ui import mainwindow as mod
 from flograph.ui.canvas.node_item import IMAGE_TYPE
 from flograph.ui.commands import AddPageCommand, AddTileCommand
 from flograph.ui.image_paste import (
-    copy_figure, copy_picture, is_figure, picture_mime,
+    copy_base64, copy_figure, copy_picture, is_figure, picture_as_base64,
+    picture_mime,
 )
 from flograph.ui.mainwindow import MainWindow
 
@@ -156,3 +157,35 @@ class TestFigureView:
         figs = [_figure(), _figure()]
         view.set_figure(figs)
         assert view.shown_figures() == figs
+
+
+class TestCopyAsBase64:
+    def test_a_file_is_copied_byte_for_byte_as_a_data_uri(self, png_file):
+        from flograph.core.images import parse_data_uri
+        assert copy_base64("source", png_file)
+        text = QApplication.clipboard().text()
+        data, kind = parse_data_uri(text)
+        assert kind == "image/png"
+        with open(png_file, "rb") as handle:
+            assert data == handle.read()
+
+    def test_an_embedded_gif_comes_back_unchanged(self):
+        uri = to_data_uri(ANIMATED_GIF, "image/gif")
+        assert picture_as_base64("source", uri) == uri
+
+    def test_a_chart_as_png(self):
+        text = picture_as_base64("figure", _figure())
+        assert text.startswith("data:image/png;base64,")
+
+    def test_nothing_to_give(self):
+        assert picture_as_base64("source", "") is None
+        assert picture_as_base64("source", "/no/such/file.png") is None
+        assert not copy_base64("figure", None)
+
+    def test_from_the_node_menu(self, window, png_file):
+        node = window.registry.instantiate(IMAGE_TYPE, pos=(0, 0))
+        node.params["path"] = png_file
+        window.graph.add_node(node)
+        window._copy_node_picture(node.id, as_base64=True)
+        assert QApplication.clipboard().text().startswith(
+            "data:image/png;base64,")

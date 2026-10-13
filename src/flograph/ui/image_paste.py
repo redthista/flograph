@@ -270,17 +270,16 @@ def is_figure(value) -> bool:
     return hasattr(value, "savefig")
 
 
-def copy_figure(value) -> bool:
-    """Put a matplotlib figure — or a list of them, one beneath the other
-    as the card stacks them — on the clipboard as a picture."""
+def figure_picture(value) -> Optional[QImage]:
+    """A matplotlib figure — or a list of them, one beneath the other as
+    the card stacks them — as one picture, or None."""
     from PySide6.QtGui import QColor, QPainter
-    from PySide6.QtWidgets import QApplication
     if not is_figure(value):
-        return False
+        return None
     figures = list(value) if isinstance(value, (list, tuple)) else [value]
     images = [image for image in map(_figure_image, figures) if image]
     if not images:
-        return False
+        return None
     if len(images) == 1:
         picture = images[0]
     else:
@@ -294,7 +293,45 @@ def copy_figure(value) -> bool:
             painter.drawImage(0, top, image)
             top += image.height()
         painter.end()
+    return picture
+
+
+def copy_figure(value) -> bool:
+    """Put a matplotlib figure (or a stack of them) on the clipboard as a
+    picture."""
+    from PySide6.QtWidgets import QApplication
+    picture = figure_picture(value)
+    if picture is None:
+        return False
     mime = QMimeData()
     mime.setImageData(picture)
     QApplication.clipboard().setMimeData(mime)
+    return True
+
+
+def picture_as_base64(kind: str, value) -> Optional[str]:
+    """The picture Copy Image would copy, as a `data:` URI string — for
+    pasting into HTML, CSS, a Plotly layout or another Image node. A
+    picture's own bytes as they are (a GIF stays animated); a chart as a
+    PNG. None when there is no picture to give."""
+    from flograph.core.images import resolve_source
+    if kind == "source":
+        try:
+            data, mime, _path = resolve_source(str(value or ""))
+        except (OSError, ValueError):
+            return None
+        return to_data_uri(data, mime) if data else None
+    picture = figure_picture(value)
+    if picture is None:
+        return None
+    return to_data_uri(_encode_png(picture), "image/png")
+
+
+def copy_base64(kind: str, value) -> bool:
+    """Put `picture_as_base64` on the clipboard as plain text."""
+    from PySide6.QtWidgets import QApplication
+    text = picture_as_base64(kind, value)
+    if text is None:
+        return False
+    QApplication.clipboard().setText(text)
     return True

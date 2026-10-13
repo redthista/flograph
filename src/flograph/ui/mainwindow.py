@@ -2054,14 +2054,21 @@ class MainWindow(QMainWindow):
             return ("figure", value) if is_figure(value) else None
         return None
 
-    def _copy_node_picture(self, node_id: str) -> None:
-        from .image_paste import copy_figure, copy_picture
+    def _copy_node_picture(self, node_id: str,
+                           as_base64: bool = False) -> None:
+        from .image_paste import copy_base64, copy_figure, copy_picture
         found = self._node_picture(node_id)
         if found is None:
             return
         kind, value = found
-        ok = copy_picture(value) if kind == "source" else copy_figure(value)
-        self.show_status("Copied the image" if ok
+        if as_base64:
+            ok = copy_base64(kind, value)
+            done = "Copied the image as base64 text"
+        else:
+            ok = copy_picture(value) if kind == "source" \
+                else copy_figure(value)
+            done = "Copied the image"
+        self.show_status(done if ok
                          else "Couldn't copy the image — it can't be read",
                          4000)
 
@@ -4980,13 +4987,19 @@ class MainWindow(QMainWindow):
                     "Put the control back to the value the flow has.")
             control_reset_action = menu.addAction("Reset to Default")
             control_reset_action.setEnabled(ca.differs_from_default(node))
-        copy_image_action = None
+        copy_image_action = copy_base64_action = None
         if not many and self._node_picture(node_id) is not None:
             copy_image_action = menu.addAction("Copy Image")
             copy_image_action.setToolTip(
                 "Put the picture on the clipboard, to paste into another "
                 "app. An animated GIF stays animated where the app can "
                 "show one.")
+            copy_base64_action = menu.addAction("Copy as Base64")
+            copy_base64_action.setToolTip(
+                "Put the picture on the clipboard as text — a "
+                "data:image/…;base64,… string, for HTML, CSS, a Plotly "
+                "layout or another Image node. The base64 itself is "
+                "everything after the comma.")
         embed_image_action = None
         if not many and self._image_node_links_a_file(node_id):
             embed_image_action = menu.addAction("Embed Image in the File")
@@ -5205,6 +5218,8 @@ class MainWindow(QMainWindow):
                 self._rerun_controls([node_id])
         elif copy_image_action is not None and chosen is copy_image_action:
             self._copy_node_picture(node_id)
+        elif copy_base64_action is not None and chosen is copy_base64_action:
+            self._copy_node_picture(node_id, as_base64=True)
         elif embed_image_action is not None and chosen is embed_image_action:
             self._embed_node_image(node_id)
         elif browser_action is not None and chosen is browser_action:

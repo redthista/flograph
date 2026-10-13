@@ -564,11 +564,15 @@ class DashboardView(ZoomPanGraphicsView):
             browser_action = menu.addAction("Open in Browser")
         menu.addSeparator()
         picture = item.copyable_picture()
-        copy_image_action = None
+        copy_image_action = copy_base64_action = None
         if picture is not None:
             copy_image_action = menu.addAction("Copy Image")
             copy_image_action.setToolTip(
                 "Put the picture on the clipboard, to paste into another app")
+            copy_base64_action = menu.addAction("Copy as Base64")
+            copy_base64_action.setToolTip(
+                "Put the picture on the clipboard as a "
+                "data:image/…;base64,… string")
         copy_action = menu.addAction("Copy")
         paste_action = menu.addAction("Paste")
         paste_action.setEnabled(bool(DashboardView._tile_clipboard))
@@ -576,6 +580,9 @@ class DashboardView(ZoomPanGraphicsView):
         chosen = menu.exec(event.globalPos())
         if copy_image_action is not None and chosen is copy_image_action:
             self._copy_picture(picture)
+        elif copy_base64_action is not None and chosen is copy_base64_action:
+            from ..image_paste import copy_base64
+            copy_base64(*picture)
         elif chosen is copy_action:
             self._copy_tiles(item)
         elif chosen is paste_action:
