@@ -13,6 +13,7 @@ flograph.engine.introspect).
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
@@ -98,6 +99,30 @@ def set_wheel_changes_choices(enabled: bool) -> None:
 
 def _store_setting(key: str, value: bool) -> None:
     QSettings(_ORG, _APP).setValue(key, "1" if value else "0")
+
+
+#: A file box holding more than this, all base64 characters, is a bare
+#: base64 blob rather than a path anyone typed.
+_EMBEDDED_MIN = 4096
+_BASE64_HEAD = re.compile(r"[A-Za-z0-9+/=\s]+")
+
+
+def _embedded_summary(text: str) -> str:
+    """"Embedded GIF image · 8.3 MB" for a file box holding a picture's own
+    data (a `data:` URI or bare base64) rather than a path, else ""."""
+    head = text[:64].lstrip()
+    if head[:5].lower() == "data:":
+        kind = head[5:].split(";", 1)[0].split(",", 1)[0]
+        sub = kind.split("/", 1)[-1].split("+", 1)[0].upper() if kind else ""
+        what = f"Embedded {sub} image" if sub else "Embedded data"
+    elif len(text) > _EMBEDDED_MIN and _BASE64_HEAD.fullmatch(head):
+        what = "Embedded image"
+    else:
+        return ""
+    size = len(text) * 3 / 4   # base64 carries 3 bytes in 4 characters
+    shown = (f"{size / 1e6:.1f} MB" if size >= 1e6
+             else f"{max(1, round(size / 1e3))} KB")
+    return f"{what} · {shown} — stored in the flow"
 
 
 def _about(doc: str) -> str:
@@ -1036,13 +1061,35 @@ class ParamsPanel(QWidget):
             host = QWidget()
             row = QHBoxLayout(host)
             row.setContentsMargins(0, 0, 0, 0)
-            edit = QLineEdit(str(value or ""))
+            edit = QLineEdit()
             edit.setObjectName(f"param_{name}")
             # An Image node's "file" may be a whole base64-encoded picture,
             # which the default cap would silently cut to 32767 characters.
             edit.setMaxLength(UNCAPPED_TEXT)
-            if spec.placeholder:
-                edit.setPlaceholderText(spec.placeholder)
+            placeholder = spec.placeholder or ""
+            # An embedded picture is held here rather than shown: laid out as
+            # one line of text, megabytes of base64 took seconds to build
+            # every time the node was selected — and nobody reads it. The box
+            # stays empty with a one-line summary as its placeholder; typing
+            # a path or picking a file replaces the picture as before.
+            held = {"embedded": ""}
+
+            def show(v) -> None:
+                text = str(v or "")
+                summary = _embedded_summary(text)
+                held["embedded"] = text if summary else ""
+                edit.setPlaceholderText(summary or placeholder)
+                shown = "" if summary else text
+                if edit.text() != shown:
+                    edit.setText(shown)
+
+            def finished() -> None:
+                text = edit.text()
+                if not text and held["embedded"]:
+                    return   # left untouched: keep the picture it stands for
+                self._commit(name, text)
+
+            show(value)
             browse = QToolButton()
             browse.setObjectName(f"param_{name}_browse")
             browse.setText("…")
@@ -1062,10 +1109,10 @@ class ParamsPanel(QWidget):
                     self._commit(name, path)
 
             browse.clicked.connect(pick)
-            edit.editingFinished.connect(lambda: self._commit(name, edit.text()))
+            edit.editingFinished.connect(finished)
             row.addWidget(edit, 1)
             row.addWidget(browse)
-            return host, self._line_setter(edit)
+            return host, lambda v: self._silently(show, v)
 
         if spec.type == "password":
             host = QWidget()

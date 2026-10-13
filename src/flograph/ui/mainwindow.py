@@ -4103,27 +4103,56 @@ class MainWindow(QMainWindow):
         self._add_node_at(type_id, center)
 
     def _add_reader_nodes_for_files(
-            self, paths: list[str], scene_pos: QPointF) -> None:
+            self, paths: list[str], scene_pos: QPointF,
+            undo_text: str = "drop") -> int:
+        """A node per usable path — dropped or pasted, the same thing.
+        Returns how many characters of picture were embedded.
+
+        A picture's own bytes go into its Image node as a `data:` URI rather
+        than a link to the file, so it saves with the project like a pasted
+        screenshot does. Byte-for-byte, so transparency and animation
+        survive. Data files (CSV, Excel, …) stay links: their contents are
+        the input, not part of the flow."""
+        from flograph.core.images import embed_source
         targets = [(p, resolve_dropped_path(p)) for p in paths]
         targets = [(p, t) for p, t in targets if t is not None]
         if not targets:
-            return
+            return 0
         self.undo_stack.beginMacro(
-            "drop file" if len(targets) == 1 else "drop files")
+            f"{undo_text} file" if len(targets) == 1
+            else f"{undo_text} files")
         new_ids = []
+        embedded = 0
         for i, (path, (type_id, param_name)) in enumerate(targets):
             node = self.scene.place_here(self.registry.instantiate(
                 type_id,
                 pos=(scene_pos.x() + i * PASTE_OFFSET,
                      scene_pos.y() + i * PASTE_OFFSET)))
+            value = path
+            if type_id == IMAGE_TYPE:
+                value = embed_source(path)
+                if value is not path:
+                    embedded += len(value)
             self.undo_stack.push(AddNodeCommand(self.graph, node))
             self.undo_stack.push(SetParamCommand(
-                self.graph, node.id, param_name, path))
+                self.graph, node.id, param_name, value))
             new_ids.append(node.id)
         self.undo_stack.endMacro()
         self.scene.clearSelection()
         self.scene.select_items(self.scene.node_items.get(node_id)
                                 for node_id in new_ids)
+        what = ({"paste": "Pasted"}.get(undo_text, "Dropped") + " "
+                + ("the file" if len(targets) == 1
+                   else f"{len(targets)} files"))
+        if embedded > 12_000_000:
+            self.show_status(f"{what} — the picture is stored in the flow, "
+                             "which makes the project file large", 6000)
+        elif embedded:
+            self.show_status(f"{what} — the picture is stored in the flow",
+                             4000)
+        elif undo_text == "paste":
+            self.show_status(what, 4000)
+        return embedded
 
     # ---------------------------------------------------------- user nodes
 
@@ -4306,6 +4335,9 @@ class MainWindow(QMainWindow):
         extras = [("Frame", "frame")]
         if self._clipboard_payload() is not None:
             extras.append(("Paste", "paste"))
+        elif files := self._clipboard_files():
+            extras.append(("Paste File" if len(files) == 1
+                           else "Paste Files", "paste"))
         elif self._clipboard_has_image():
             extras.append(("Paste Image", "paste"))
         self._palette_scene_pos = scene_pos
@@ -5853,6 +5885,22 @@ class MainWindow(QMainWindow):
             else "Pasted image from the clipboard", 6000 if big else 4000)
         return True
 
+    def _clipboard_files(self) -> list[str]:
+        """Files copied in a file manager that a drop would turn into nodes.
+
+        Dolphin's or Explorer's Copy puts only the file's address on the
+        clipboard — no picture data at all — so without this a copied PNG
+        pasted nothing, or whatever stale picture the clipboard held beside
+        it. Read as a list of paths it is exactly a drop, and the file keeps
+        everything a re-encode could lose: transparency, animation.
+        """
+        from .canvas.file_drop import resolve_dropped_path
+        mime = QApplication.clipboard().mimeData()
+        if mime is None or not mime.hasUrls():
+            return []
+        paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+        return [p for p in paths if resolve_dropped_path(p)]
+
     def _paste(self, scene_pos: Optional[QPointF] = None) -> None:
         payload = self._clipboard_payload()
         if payload is not None:
@@ -5860,6 +5908,16 @@ class MainWindow(QMainWindow):
             return
         # Only once nothing of ours is on the clipboard, so copying nodes and
         # then pasting never turns into an unexpected picture.
+        files = self._clipboard_files()
+        if files:
+            # before the picture: a file manager can offer a thumbnail beside
+            # the file, and the thumbnail is the worse copy of the same thing
+            if scene_pos is None:
+                scene_pos = self.view.mapToScene(
+                    self.view.viewport().rect().center())
+            self._add_reader_nodes_for_files(
+                files, scene_pos, undo_text="paste")
+            return
         self._paste_clipboard_image(scene_pos)
 
     def _duplicate(self) -> None:

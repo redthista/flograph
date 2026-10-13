@@ -7,8 +7,9 @@ running Qt actually supports.
 import base64
 
 import pytest
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter
+from PySide6.QtWidgets import QLineEdit
 
 from flograph.core import NodeRegistry
 from flograph.ui.canvas.image_card import (
@@ -528,6 +529,51 @@ class TestConnectors:
         assert not _scene.node_items[picker.id].connectors_hidden()
 
 
+class TestEmbeddedPictureInProperties:
+    """An embedded picture is megabytes of base64. The "Image file" box
+    shows a one-line summary instead of laying it all out — which took
+    seconds every time the node was selected — and leaves it untouched."""
+
+    BIG = "data:image/gif;base64," + "R0lGODlh" * 400_000   # ~3.2M chars
+
+    @pytest.fixture
+    def panel(self, qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.ui.properties.params_panel import ParamsPanel
+        graph = Graph()
+        node = graph.add_node(registry.instantiate(IMAGE_TYPE, pos=(0, 0)))
+        node.params["path"] = self.BIG
+        panel = ParamsPanel(graph, QUndoStack())
+        qtbot.addWidget(panel)
+        panel.set_node(node.id)
+        edit = panel.findChild(QLineEdit, "param_path")
+        return panel, node, edit
+
+    def test_summary_not_the_data(self, panel):
+        _panel, _node, edit = panel
+        assert edit.text() == ""
+        assert edit.placeholderText().startswith("Embedded GIF image · 2.4 MB")
+
+    def test_leaving_the_box_keeps_the_picture(self, panel):
+        _panel, node, edit = panel
+        edit.editingFinished.emit()
+        assert node.params["path"] == self.BIG
+
+    def test_typing_a_path_replaces_it(self, panel):
+        _panel, node, edit = panel
+        edit.setText("/pictures/logo.png")
+        edit.editingFinished.emit()
+        assert node.params["path"] == "/pictures/logo.png"
+        assert edit.text() == "/pictures/logo.png"
+
+    def test_a_plain_path_shows_as_itself(self):
+        from flograph.ui.properties.params_panel import _embedded_summary
+        assert _embedded_summary("/home/me/logo.png") == ""
+        assert _embedded_summary("") == ""
+        assert _embedded_summary("A" * 8000).startswith("Embedded image")
+
+
 class TestBigValuesSurviveTheEditors:
     """QLineEdit silently truncates at 32767 characters by default, and a
     base64 image is far longer than that. A truncated PNG/GIF still carries
@@ -717,6 +763,65 @@ class TestPasteOntoCanvas:
         QApplication.clipboard().setText("not a picture")
         assert window._paste_clipboard_image() is False
         assert len(window.graph.nodes) == 0
+
+    def _copy_files_like_dolphin(self, *paths):
+        """A file manager's Copy: the files' addresses, no picture data."""
+        from PySide6.QtCore import QMimeData, QUrl
+        from PySide6.QtWidgets import QApplication
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+        QApplication.clipboard().setMimeData(mime)
+
+    def test_a_copied_png_file_pastes_embedded_with_its_transparency(
+            self, window, tmp_path):
+        """The transparent PNG case: there was no picture on the clipboard
+        to paste at all. Now the file's own bytes go into the flow as a
+        data: URI — byte-for-byte, so every pixel keeps its alpha."""
+        from flograph.core.images import parse_data_uri
+        path = tmp_path / "cutout.png"
+        image = QImage(20, 10, QImage.Format_ARGB32)
+        image.fill(QColor(0, 0, 0, 0))
+        assert image.save(str(path), "PNG")
+        self._copy_files_like_dolphin(path)
+        window._paste()
+        node = next(iter(window.graph.nodes.values()))
+        assert node.type_id == IMAGE_TYPE
+        data, kind = parse_data_uri(node.params["path"])
+        assert kind == "image/png"
+        assert data == path.read_bytes()
+        assert QImage.fromData(data).pixelColor(0, 0).alpha() == 0
+        window.undo_stack.undo()
+        assert not window.graph.nodes
+
+    def test_a_dropped_picture_is_embedded_too(self, window, png_file):
+        from pathlib import Path
+        from flograph.core.images import parse_data_uri
+        window._add_reader_nodes_for_files([png_file], QPointF(0, 0))
+        node = next(iter(window.graph.nodes.values()))
+        data, _kind = parse_data_uri(node.params["path"])
+        assert data == Path(png_file).read_bytes()
+
+    def test_copied_files_paste_like_a_drop(self, window, tmp_path,
+                                            gif_file):
+        csv = tmp_path / "data.csv"
+        csv.write_text("a,b\n1,2\n")
+        self._copy_files_like_dolphin(gif_file, csv)
+        assert window._clipboard_files() == [gif_file, str(csv)]
+        window._paste()
+        nodes = {n.type_id: n for n in window.graph.nodes.values()}
+        assert sorted(nodes) == ["flograph.io.read_csv", IMAGE_TYPE]
+        # the picture is embedded, the data file stays a link
+        assert nodes[IMAGE_TYPE].params["path"].startswith("data:image/gif")
+        assert nodes["flograph.io.read_csv"].params["path"] == str(csv)
+
+    def test_a_copied_file_nothing_reads_pastes_nothing(self, window,
+                                                        tmp_path):
+        other = tmp_path / "notes.txt"
+        other.write_text("hi")
+        self._copy_files_like_dolphin(other)
+        assert window._clipboard_files() == []
+        window._paste()
+        assert not window.graph.nodes
 
     def test_copied_nodes_still_paste_as_nodes(self, window, registry):
         """A picture on the clipboard must never hijack a node copy/paste."""
