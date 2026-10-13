@@ -5,6 +5,7 @@
 | Category | Change | Details |
 | --- | --- | --- |
 | Fix | **Browse opens where your file is** | The **…** button on a file or folder box in Properties always opened the folder flograph was started from. It now opens on the file the box already names, with it selected (or the nearest folder above it that still exists); an empty box opens the last folder you picked a file from, remembered between sessions, or your home folder the first time. The file control card and pack settings do the same. |
+| Fix | **Slicer** | • **No longer sticks on a value with spaces or a `>`** — ticking a value such as `"Sales "` or `"R&D > Labs"` was saved correctly but read back trimmed or split in two, which is a value no row has: the card showed no tick, the node let nothing through, and clicking the value again did the same. Values now come back exactly as ticked. Slicer is version 1.4.<br>• **None clears a value the data no longer has** — a tick on a value that has since gone from the column (a store picked under one region, then the region changed upstream) has no row to draw on, so the card showed nothing ticked while the node still filtered to no rows, and **None** did nothing. None now clears it, and switching to single selection keeps a value the card can show. |
 
 ## 0.1.28
 
