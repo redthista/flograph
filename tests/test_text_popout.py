@@ -1,7 +1,7 @@
 """The pop-out editor for multi-line text params: a bigger box than the
 cramped one in Properties, editing a copy that OK writes back."""
 import pytest
-from PySide6.QtWidgets import QDialog, QPlainTextEdit, QToolButton
+from PySide6.QtWidgets import QDialog, QPlainTextEdit, QPushButton, QToolButton
 
 from flograph.ui.properties.text_popout import TextPopOut
 from tests.test_column_picker_ux import INSERTER, _panel_for
@@ -9,15 +9,18 @@ from tests.test_column_picker_ux import table  # noqa: F401  (fixture)
 
 
 def _drive(monkeypatch, edit=None, accept=True):
-    """Stand in for the modal exec: do `edit` to the open dialog, then close
-    it with OK or Cancel."""
+    """Stand in for the modal exec: do `edit` to the open dialog, press
+    Apply (unless `accept` is False), then close it."""
     seen = {}
 
     def fake_exec(self):
         seen["dialog"] = self
         if edit is not None:
             edit(self)
-        return QDialog.Accepted if accept else QDialog.Rejected
+        if accept:
+            self.apply()
+        # Close is the only way out; what was applied stays applied
+        return QDialog.Rejected
 
     monkeypatch.setattr(TextPopOut, "exec", fake_exec)
     return seen
@@ -60,7 +63,7 @@ class TestTextPopOut:
         text = panel.findChild(QPlainTextEdit, "param_plain")
         assert text.parentWidget().maximumHeight() == text.maximumHeight()
 
-    def test_ok_writes_the_text_back_as_one_step(self, panel, monkeypatch):
+    def test_apply_writes_the_text_back_as_one_step(self, panel, monkeypatch):
         panel, graph, node = panel
         _drive(monkeypatch, lambda d: d.editor.setPlainText("a = b\nc = d"))
         _open(panel, "plain")
@@ -70,7 +73,7 @@ class TestTextPopOut:
         panel._undo_stack.undo()
         assert graph.node(node.id).params["plain"] == ""
 
-    def test_cancel_leaves_the_param_alone(self, panel, monkeypatch):
+    def test_closing_without_apply_leaves_the_param_alone(self, panel, monkeypatch):
         panel, graph, node = panel
         _drive(monkeypatch, lambda d: d.editor.setPlainText("thrown away"),
                accept=False)
@@ -88,7 +91,7 @@ class TestTextPopOut:
         assert seen["dialog"].editor.toPlainText() == "typed"
         assert "Renamer" in seen["dialog"].windowTitle()
 
-    def test_the_column_picker_comes_along_and_waits_for_ok(
+    def test_the_column_picker_comes_along_and_waits_for_apply(
             self, panel, monkeypatch):
         panel, graph, node = panel
 
@@ -490,88 +493,93 @@ class TestTheWindowItself:
         assert code.size().width() == code.DEFAULT_SIZE.width()
 
 
-class TestItEditsTheBox:
-    """The window edits the box behind it as you type, not a copy that only
-    OK hands back — so the text is there however the window is shut."""
+class TestApply:
+    """Apply (and Ctrl+Enter) puts the text in the box and keeps the window
+    open; nothing reaches the box before it, and Close keeps what was
+    applied."""
 
-    def test_typing_lands_in_the_box_while_the_window_is_up(
-            self, panel, monkeypatch):
+    def test_nothing_reaches_the_box_before_apply(self, panel, monkeypatch):
         panel, graph, node = panel
         seen = {}
 
         def type_some(d):
             d.editor.setPlainText("a = b")
-            d.edited.emit("a = b")
-            box = panel.findChild(QPlainTextEdit, "param_plain")
             seen["param"] = graph.node(node.id).params["plain"]
-            seen["box"] = box.toPlainText()
-
-        _drive(monkeypatch, type_some)
-        _open(panel, "plain")
-        assert seen == {"param": "a = b", "box": "a = b"}
-
-    def test_the_visit_is_one_undo_step(self, panel, monkeypatch):
-        panel, graph, node = panel
-
-        def type_some(d):
-            for text in ("a", "a = b", "a = b\nc = d"):
-                d.editor.setPlainText(text)
-                d.edited.emit(text)
-
-        _drive(monkeypatch, type_some)
-        _open(panel, "plain")
-        assert graph.node(node.id).params["plain"] == "a = b\nc = d"
-        assert panel._undo_stack.count() == 1
-        panel._undo_stack.undo()
-        assert graph.node(node.id).params["plain"] == ""
-
-    def test_it_is_its_own_step_after_typing_in_the_box(
-            self, panel, monkeypatch):
-        panel, graph, node = panel
-        panel.findChild(QPlainTextEdit, "param_plain").setPlainText("typed")
-        panel.flush_pending()
-
-        def type_some(d):
-            d.editor.setPlainText("typed more")
-            d.edited.emit("typed more")
-
-        _drive(monkeypatch, type_some)
-        _open(panel, "plain")
-        panel._undo_stack.undo()
-        assert graph.node(node.id).params["plain"] == "typed"
-
-    def test_cancel_puts_the_box_back_and_leaves_no_step(
-            self, panel, monkeypatch):
-        panel, graph, node = panel
-
-        def type_some(d):
-            d.editor.setPlainText("thrown away")
-            d.edited.emit("thrown away")
+            d.apply()
+            seen["applied"] = graph.node(node.id).params["plain"]
+            seen["box"] = panel.findChild(QPlainTextEdit,
+                                          "param_plain").toPlainText()
 
         _drive(monkeypatch, type_some, accept=False)
         _open(panel, "plain")
-        assert graph.node(node.id).params["plain"] == ""
-        assert panel.findChild(QPlainTextEdit,
-                               "param_plain").toPlainText() == ""
-        assert panel._undo_stack.count() == 0
+        assert seen == {"param": "", "applied": "a = b", "box": "a = b"}
 
-    def test_a_pause_follows_typing_on_its_own(self, qtbot):
+    def test_each_apply_is_its_own_step(self, panel, monkeypatch):
+        panel, graph, node = panel
+
+        def apply_twice(d):
+            d.editor.setPlainText("a = b")
+            d.apply()
+            d.editor.setPlainText("a = b\nc = d")
+            d.apply()
+
+        _drive(monkeypatch, apply_twice, accept=False)
+        _open(panel, "plain")
+        assert graph.node(node.id).params["plain"] == "a = b\nc = d"
+        panel._undo_stack.undo()
+        assert graph.node(node.id).params["plain"] == "a = b"
+
+    def test_apply_keeps_the_window_open(self, qtbot):
         dialog = TextPopOut("t", "")
         qtbot.addWidget(dialog, before_close_func=lambda d: d.done(
             QDialog.Rejected))
         dialog.show()
-        with qtbot.waitSignal(dialog.edited, timeout=2000) as got:
-            dialog.editor.setPlainText("x = 1")
-        assert got.args == ["x = 1"]
-
-    def test_nothing_follows_once_the_window_is_shut(self, qtbot):
-        dialog = TextPopOut("t", "")
-        qtbot.addWidget(dialog, before_close_func=lambda d: d.done(
-            QDialog.Rejected))
-        dialog.show()
-        heard = []
-        dialog.edited.connect(heard.append)
+        applied = []
+        dialog.applied.connect(applied.append)
         dialog.editor.setPlainText("x = 1")
-        dialog.done(QDialog.Accepted)
-        qtbot.wait(400)
-        assert heard == []
+        dialog.findChild(QPushButton, "text_popout_apply").click()
+        assert applied == ["x = 1"] and dialog.isVisible()
+        assert "Applied" in dialog.status.text()
+
+    def test_ctrl_enter_applies(self, qtbot):
+        # offscreen there is no active window for a key to reach the
+        # shortcut through, so fire the shortcut itself
+        from PySide6.QtGui import QKeySequence, QShortcut
+
+        dialog = TextPopOut("t", "")
+        qtbot.addWidget(dialog, before_close_func=lambda d: d.done(
+            QDialog.Rejected))
+        dialog.show()
+        applied = []
+        dialog.applied.connect(applied.append)
+        dialog.editor.setPlainText("x = 1")
+        [shortcut] = [s for s in dialog.findChildren(QShortcut)
+                      if s.key() == QKeySequence("Ctrl+Return")]
+        shortcut.activated.emit()
+        assert applied == ["x = 1"] and dialog.isVisible()
+
+    def test_close_after_apply_does_not_ask(self, qtbot, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        asked = []
+        monkeypatch.setattr(QMessageBox, "question",
+                            lambda *a, **k: asked.append(a) or
+                            QMessageBox.Cancel)
+        dialog = TextPopOut("t", "")
+        qtbot.addWidget(dialog, before_close_func=lambda d: d.done(
+            QDialog.Rejected))
+        dialog.show()
+        dialog.editor.setPlainText("x = 1")
+        dialog.apply()
+        dialog.reject()
+        assert not asked and not dialog.isVisible()
+
+    def test_it_has_apply_and_close_but_no_ok(self, qtbot):
+        from PySide6.QtWidgets import QDialogButtonBox
+
+        dialog = TextPopOut("t", "")
+        qtbot.addWidget(dialog)
+        box = dialog.findChild(QDialogButtonBox)
+        assert box.button(QDialogButtonBox.Apply) is not None
+        assert box.button(QDialogButtonBox.Close) is not None
+        assert box.button(QDialogButtonBox.Ok) is None

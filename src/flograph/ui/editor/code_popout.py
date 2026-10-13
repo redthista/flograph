@@ -9,9 +9,8 @@ replace, several carets, and a syntax check as you type.
 
 The check as you type is compile() and nothing more. The node's own check
 (parse_spec) runs the script's top-level code, imports and all, which is too
-much for every keystroke; it runs once, on OK. A script it refuses keeps the
-window open with the reason under the editor, so the work isn't lost to a
-typo the way it would be if the window closed first.
+much for every keystroke; it runs once, on Apply. A script it refuses is not
+applied, and the reason shows under the editor.
 """
 from __future__ import annotations
 
@@ -42,8 +41,8 @@ def python_syntax_lint(text: str, _sample=None) -> list:
 
 
 class CodePopOut(TextPopOut):
-    """`editor` holds the code being edited; `edited` carries it to the Code
-    panel as typing pauses (see TextPopOut)."""
+    """`editor` holds the copy being edited; `applied` hands it to the Code
+    panel each time Apply is pressed (see TextPopOut)."""
 
     UNCHECKED = ""  # there are no columns to check in a script
     DEFAULT_SIZE = QSize(960, 700)      # a script wants more room than rules
@@ -61,16 +60,16 @@ class CodePopOut(TextPopOut):
         # CodeEditor comes with the Python highlighter already
         self.completer = CompletionController(editor)
 
-    def accept(self) -> None:
-        """OK: only a script the node would take. The same check Apply
-        makes, so a refused script stays here to be fixed."""
-        if not self.editor.isReadOnly():
-            try:
-                parse_spec(self.editor.toPlainText(), self._type_id)
-            except NodeScriptError as exc:
-                match = _SYNTAX_LINE.search(str(exc))
-                self.editor.set_error_line(
-                    int(match.group(1)) if match else None)
-                self._say(f"Not applied — {exc}", ERROR_INK)
-                return
-        super().accept()
+    def can_apply(self) -> bool:
+        """Only a script the node would take — the same check the Code
+        panel's own Apply makes, so a refused script stays here to be
+        fixed."""
+        try:
+            parse_spec(self.editor.toPlainText(), self._type_id)
+        except NodeScriptError as exc:
+            match = _SYNTAX_LINE.search(str(exc))
+            self.editor.set_error_line(int(match.group(1)) if match else None)
+            self._say(f"Not applied — {exc}", ERROR_INK)
+            return False
+        self.editor.set_error_line(None)
+        return True

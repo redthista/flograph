@@ -331,11 +331,8 @@ class EditorPanel(QWidget):
     def open_pop_out(self) -> None:
         """The code in a window as big as the work needs (code_popout). It
         opens with what the panel holds, unapplied edits and all, at the same
-        place. What is typed there shows here as you go, unapplied, so the
-        panel never disagrees with the window; OK applies it, one undo step,
-        the way Apply does, and Cancel puts back what the panel held."""
-        from PySide6.QtWidgets import QDialog
-
+        place; its Apply puts the text back here and applies it, one undo
+        step, the way the panel's own Apply does."""
         from .code_popout import CodePopOut
 
         node_id = self._node_id
@@ -352,25 +349,18 @@ class EditorPanel(QWidget):
         dialog.editor.setTextCursor(cursor)
         dialog.editor.centerCursor()
         dialog.editor.set_error_line(self.editor.error_line)
-        original = self.editor.toPlainText()
 
-        def follow(value: str) -> None:
-            if self._node_id == node_id and self.editor.toPlainText() != value:
-                self.editor.setPlainText(value)
+        def apply(new: str) -> None:
+            # the node can go while the window is up (a run's error doesn't
+            # move the panel, but a delete from elsewhere does)
+            if self._node_id != node_id:
+                return
+            self.editor.setPlainText(new)
+            self.apply_code()
         if not read_only:
-            dialog.edited.connect(follow)
-        accepted = dialog.exec() == QDialog.Accepted
-        new = dialog.editor.toPlainText()
+            dialog.applied.connect(apply)
+        dialog.exec()
         dialog.deleteLater()
-        # the node can have gone while the window was up (a run's error
-        # doesn't move the panel, but a delete from elsewhere does)
-        if read_only or self._node_id != node_id:
-            return
-        if not accepted:
-            follow(original)
-            return
-        follow(new)
-        self.apply_code()
 
     def _save_as_user_node(self) -> None:
         if self._node_id is not None:

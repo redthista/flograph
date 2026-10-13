@@ -8,12 +8,11 @@ numbers, several carets (ui/editor/multi_cursor), find and replace (Ctrl+F,
 Ctrl+H), completion of the box's keywords and the columns coming in, and a
 lint that marks the lines the node would refuse (core/text_assist).
 
-What is typed here goes into the box behind it as you go (`edited`, once
-typing pauses), so the box and the window never disagree and nothing
-depends on how the window is closed. The whole visit is one undo step. OK
-keeps it; Cancel puts back what the box held when the window opened. Esc
-asks before doing that, because in a window this size it is easy to have
-done a lot of work before reaching for it.
+It edits a copy, and nothing reaches the box until Apply (or Ctrl+Enter):
+then the text goes in, as one undo step, and the window stays open to carry
+on. Close (or Esc) asks before throwing away edits not yet applied, because
+in a window this size it is easy to have done a lot of work before reaching
+for it.
 """
 from __future__ import annotations
 
@@ -38,8 +37,6 @@ from ..editor.rules_highlighter import RulesHighlighter
 from ..editor.word_completion import WordCompleter
 
 LINT_DELAY_MS = 300
-#: How long typing in the window pauses before the box behind it follows.
-EDITED_DELAY_MS = 250
 _ORG = _APP = "flograph"
 #: Where this window was left, so the next one opens the same size. One
 #: key for every pop-out rather than one each: they are the same window
@@ -76,20 +73,19 @@ def expand_icon(color: QColor, size: int = 16) -> QIcon:
 
 
 class TextPopOut(QDialog):
-    """`editor` holds the text being edited; `edited` carries it to the box
-    behind the window each time typing pauses, and exec() says whether to
-    keep it (OK) or put the original back (Cancel).
+    """`editor` holds the copy being edited; `applied` hands it to the box
+    each time Apply is pressed.
 
     sample: the first rows of the table coming in, for the lint to try the
     text against, or None when nothing upstream has run."""
-
-    #: the editor's text, once typing pauses — never after the window shuts
-    edited = Signal(str)
 
     #: How big a pop-out opens when nothing has been remembered yet. A
     #: subclass says its own — a script wants more room than a box of
     #: rules does — and a geometry saved from either wins over both.
     DEFAULT_SIZE = QSize(820, 560)
+
+    #: the text, each time Apply (or Ctrl+Enter) is pressed
+    applied = Signal(str)
 
     HINT = ("Ctrl+Space completes · Ctrl+F finds · "
             "Alt+Click adds a caret · F11 full screen · Ctrl+Enter applies")
@@ -151,11 +147,15 @@ class TextPopOut(QDialog):
             hint.setObjectName("text_popout_hint")
             hint.setEnabled(False)
             row.addWidget(hint)
-            buttons = QDialogButtonBox(QDialogButtonBox.Ok
-                                       | QDialogButtonBox.Cancel)
+            buttons = QDialogButtonBox(QDialogButtonBox.Apply
+                                       | QDialogButtonBox.Close)
+            apply_button = buttons.button(QDialogButtonBox.Apply)
+            apply_button.setObjectName("text_popout_apply")
+            apply_button.setToolTip("Put this text in the box (Ctrl+Enter)")
+            apply_button.clicked.connect(self.apply)
             for keys in ("Ctrl+Return", "Ctrl+Enter"):
-                QShortcut(QKeySequence(keys), self, activated=self.accept)
-        buttons.accepted.connect(self.accept)
+                QShortcut(QKeySequence(keys), self, activated=self.apply)
+        # Close, not Cancel: what was applied stays applied
         buttons.rejected.connect(self._discard)
         row.addWidget(buttons)
         layout.addLayout(row)
@@ -175,13 +175,6 @@ class TextPopOut(QDialog):
         self._lint_timer.timeout.connect(self.run_lint)
         editor.textChanged.connect(self._lint_timer.start)
         self.run_lint()
-
-        self._edited_timer = QTimer(self)
-        self._edited_timer.setSingleShot(True)
-        self._edited_timer.setInterval(EDITED_DELAY_MS)
-        self._edited_timer.timeout.connect(self._emit_edited)
-        if not read_only:
-            editor.textChanged.connect(self._edited_timer.start)
 
         self.resize(self.DEFAULT_SIZE)
         self._restore_geometry()
@@ -213,20 +206,12 @@ class TextPopOut(QDialog):
             self.showMaximized()
 
     def done(self, result: int) -> None:
-        # the caller settles the final text from exec()'s answer; a pause
-        # still pending would land after it, undoing a Cancel
-        self._edited_timer.stop()
         settings = QSettings(_ORG, _APP)
         settings.setValue(MAXIMIZED_KEY, self.isMaximized())
         # the *normal* geometry, so un-maximizing lands back on a sensible
         # window rather than on whatever size it was before it was grown
         settings.setValue(GEOMETRY_KEY, self.saveGeometry())
         super().done(result)
-
-    def _emit_edited(self) -> None:
-        # a shut window's text is the caller's to settle, not this timer's
-        if self.isVisible():
-            self.edited.emit(self.editor.toPlainText())
 
     def _assist_editor(self, editor: CodeEditor, columns: list) -> None:
         """Highlighting and completion for what is being edited: the box's
@@ -278,6 +263,27 @@ class TextPopOut(QDialog):
         else:
             self.find_bar.find_next(backwards=backwards)
 
+    def apply(self) -> None:
+        """Apply / Ctrl+Enter: the text goes into the box, and the window
+        stays open. What was applied is what Close no longer asks about."""
+        if self.editor.isReadOnly() or not self.can_apply():
+            return
+        text = self.editor.toPlainText()
+        self._original = text
+        self.applied.emit(text)
+        self._say("✓ Applied", OK_INK)
+
+    def can_apply(self) -> bool:
+        """Whether the text may go in. A subclass refuses what its box
+        would (the code pop-out: a script the node won't load), saying why
+        in the status line."""
+        return True
+
+    def accept(self) -> None:
+        # Enter on a default button, or anything else that would accept the
+        # dialog, applies rather than closing: Close is the only way out
+        self.apply()
+
     def reject(self) -> None:
         """Esc: shut the find bar first if it's open, then ask before losing
         edits."""
@@ -292,7 +298,7 @@ class TextPopOut(QDialog):
                 and self.editor.toPlainText() != self._original):
             answer = QMessageBox.question(
                 self, "Discard changes?",
-                "Close without keeping the changes you made here?",
+                "Close without applying the changes you made here?",
                 QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
             if answer != QMessageBox.Discard:
                 return

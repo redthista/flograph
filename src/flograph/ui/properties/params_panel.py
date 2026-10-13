@@ -1364,8 +1364,6 @@ class ParamsPanel(QWidget):
         return host
 
     def _open_pop_out(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
-        from PySide6.QtWidgets import QDialog
-
         from .text_popout import TextPopOut
 
         from flograph.core.text_assist import assist_for
@@ -1397,33 +1395,23 @@ class ParamsPanel(QWidget):
             columns=columns, sample=self._upstream_sample(node_id),
             picker=picker, read_only=read_only, parent=self)
         editor = dialog.editor
-        # The window edits the box live, not a copy: each pause in typing
-        # lands in the param, and the box follows through param_changed.
-        # Through the graph rather than the box, since a run finishing can
-        # rebuild the panel (and the box) while the window is up. One token
-        # for the visit, so it is one undo step of its own.
-        original = node.params.get(spec.name)
-        visit = object()
 
-        def follow(value: str) -> None:
+        def apply(new: str) -> None:
+            # through _commit rather than the box: a run finishing while the
+            # window is up can rebuild the panel, and the box with it — and
+            # if the panel has moved to another node, this text isn't its
             if self._node_id == node_id:
-                self._commit(spec.name, value, merge=visit)
+                self._commit(spec.name, new, merge=False)
         if not read_only:
-            dialog.edited.connect(follow)
+            dialog.applied.connect(apply)
         if menu is not None:
             menu.aboutToShow.connect(
                 lambda: self._fill_pop_out_menu(menu, editor, spec))
         if spec.rule_wizard:
             from flograph.ui.emoji_font import apply_emoji_font
             apply_emoji_font(editor)
-        accepted = dialog.exec() == QDialog.Accepted
-        new = editor.toPlainText()
+        dialog.exec()
         dialog.deleteLater()
-        # the panel moving to another node while the window was up leaves
-        # the text as far as it got; it isn't the new node's to change
-        if read_only or self._node_id != node_id:
-            return
-        self._commit(spec.name, new if accepted else original, merge=visit)
 
     def _attach_assist(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
         """The pop-out's help, in the box itself: completion of the box's

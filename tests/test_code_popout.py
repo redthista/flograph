@@ -39,8 +39,8 @@ def env(qtbot, registry):
 
 
 def _drive(monkeypatch, edit=None, accept=True):
-    """Stand in for the modal exec: do `edit` to the open dialog, then close
-    it with OK or Cancel."""
+    """Stand in for the modal exec: do `edit` to the open dialog, press
+    Apply (unless `accept` is False), then close it."""
     seen = {}
 
     def fake_exec(self):
@@ -49,7 +49,10 @@ def _drive(monkeypatch, edit=None, accept=True):
         seen["read_only"] = self.editor.isReadOnly()
         if edit is not None:
             edit(self)
-        return QDialog.Accepted if accept else QDialog.Rejected
+        if accept:
+            self.apply()
+        # Close is the only way out; what was applied stays applied
+        return QDialog.Rejected
 
     monkeypatch.setattr(CodePopOut, "exec", fake_exec)
     return seen
@@ -81,7 +84,7 @@ class TestCodePanelPopOut:
         _open(panel)
         assert seen["text"] == "x = 1\n"
 
-    def test_ok_applies_as_one_undo_step(self, env, monkeypatch):
+    def test_apply_applies_as_one_undo_step(self, env, monkeypatch):
         panel, _graph, stack, node = env
         _drive(monkeypatch, lambda d: d.editor.setPlainText(VALID))
         _open(panel)
@@ -90,7 +93,7 @@ class TestCodePanelPopOut:
         stack.undo()
         assert not node.forked
 
-    def test_cancel_changes_nothing(self, env, monkeypatch):
+    def test_closing_without_apply_changes_nothing(self, env, monkeypatch):
         panel, _graph, stack, node = env
         before = panel.editor.toPlainText()
         index = stack.index()
@@ -99,34 +102,6 @@ class TestCodePanelPopOut:
         _open(panel)
         assert panel.editor.toPlainText() == before
         assert stack.index() == index and not node.forked
-
-    def test_typing_shows_in_the_panel_unapplied(self, env, monkeypatch):
-        panel, _graph, stack, node = env
-        index = stack.index()
-        seen = {}
-
-        def type_some(d):
-            d.editor.setPlainText(VALID)
-            d.edited.emit(VALID)
-            seen["panel"] = panel.editor.toPlainText()
-            seen["index"] = stack.index()
-
-        _drive(monkeypatch, type_some)
-        _open(panel)
-        assert seen == {"panel": VALID, "index": index}
-
-    def test_cancel_puts_the_panel_back(self, env, monkeypatch):
-        panel, _graph, stack, node = env
-        before = panel.editor.toPlainText()
-
-        def type_some(d):
-            d.editor.setPlainText(VALID)
-            d.edited.emit(VALID)
-
-        _drive(monkeypatch, type_some, accept=False)
-        _open(panel)
-        assert panel.editor.toPlainText() == before
-        assert not node.forked
 
     def test_a_locked_node_opens_read_only(self, env, monkeypatch):
         panel, graph, stack, node = env
@@ -139,22 +114,22 @@ class TestCodePanelPopOut:
 
 
 class TestCodePopOut:
-    def test_a_script_the_node_refuses_keeps_the_window_open(self, qtbot):
+    def test_a_script_the_node_refuses_is_not_applied(self, qtbot):
         dialog = _real_dialog(qtbot, "NODE = {}\ndef run(ctx):\n    pass\n")
-        accepted = []
-        dialog.accepted.connect(lambda: accepted.append(True))
-        dialog.accept()
-        assert not accepted
+        applied = []
+        dialog.applied.connect(applied.append)
+        dialog.apply()
+        assert not applied
         assert "Not applied" in dialog.status.text()
         assert "label" in dialog.status.text()
 
         dialog.editor.setPlainText(VALID)
-        dialog.accept()
-        assert accepted
+        dialog.apply()
+        assert applied == [VALID]
 
-    def test_a_syntax_error_on_ok_marks_its_line(self, qtbot):
+    def test_a_syntax_error_on_apply_marks_its_line(self, qtbot):
         dialog = _real_dialog(qtbot, "a = 1\nb = (\n")
-        dialog.accept()
+        dialog.apply()
         assert dialog.editor.error_line == 2
 
     def test_syntax_is_checked_as_you_type(self, qtbot):
