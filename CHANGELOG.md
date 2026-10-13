@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | Feature | **Click a cell to put it in a formula** | In the Table, type `=` and click a cell and its reference is typed in for you (`=B3`); drag, or Shift+click, for a range (`=SUM(B2:B9`). Clicking another cell straight after replaces the reference rather than adding one, and the pointed-at cells get a dashed box. It works wherever a reference could go next — after `=`, a bracket, a comma or an operator; anywhere else a click ends the edit as before. |
 | Fix | **No double scroll bars on a maximized dashboard tile** | With the canvas scroll bars turned on, maximizing a tile left the page's own bars showing beside it — and a table, which scrolls itself, got two sets. The page's bars now step aside while a tile fills the page and come back when it is restored. |
+| Fix | **The pop-out editor edits the box** | What you type in the bigger editor opened from a Properties text box (the ⤢ button) now goes into the box as you type, instead of into a copy that only OK handed back — clicking OK could lose the edit where Ctrl+Enter kept it. The whole visit is one undo step; Cancel puts back what the box held when the window opened. The Code panel's pop-out does the same: your typing shows in the panel as an unapplied edit, OK applies it, Cancel puts the panel back. |
 
 ## 0.1.27
 
