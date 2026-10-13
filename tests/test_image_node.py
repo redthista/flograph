@@ -416,6 +416,118 @@ class TestImageCardPainting:
         assert item._card_image().error
 
 
+class TestTitleBar:
+    """"Title bar" off: the card is the picture, and the picture drags."""
+
+    def _top_strip_is_picture(self, item) -> bool:
+        image = _render(item)
+        got = QColor(image.pixelColor(int(item.width / 2), 10))
+        return got.name() == "#3366cc"
+
+    def test_declared_and_on_by_default(self, registry):
+        spec = registry.get(IMAGE_TYPE)
+        param = spec.param("title_bar")
+        assert param is not None and param.default is True
+        assert spec.version == "1.1"
+
+    def test_off_the_picture_fills_where_the_bar_was(self, registry,
+                                                     png_file):
+        item = _make_item(registry, path=png_file, fit="Stretch",
+                          width=300, height=240)
+        assert not self._top_strip_is_picture(item)
+        item.node.params["title_bar"] = False
+        item.on_params_changed("title_bar")
+        assert self._top_strip_is_picture(item)
+
+    def test_off_with_no_background_too(self, registry, png_file):
+        item = _make_item(registry, path=png_file, fit="Stretch",
+                          width=300, height=240, background=False,
+                          title_bar=False)
+        assert self._top_strip_is_picture(item)
+
+    def test_the_whole_picture_is_the_drag_bar(self, registry, png_file):
+        for bar in (True, False):
+            item = _make_item(registry, path=png_file, title_bar=bar)
+            assert item._header_h() == item.body_height
+
+    def test_no_hidden_fold_chevron_without_a_bar(self, registry, png_file):
+        item = _make_item(registry, path=png_file)
+        assert item._fold_toggle_rect() is not None
+        item.node.params["title_bar"] = False
+        assert item._fold_toggle_rect() is None
+
+
+class TestConnectors:
+    """"Connectors" off: unwired pins hide, wired ones stay, all come back
+    while a wire is being dragged."""
+
+    @pytest.fixture
+    def env(self, qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.ui.canvas.scene import NodeGraphScene
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        node = registry.instantiate(IMAGE_TYPE, pos=(0.0, 0.0))
+        graph.add_node(node)
+        return graph, scene, scene.node_items[node.id]
+
+    @staticmethod
+    def _shown(item):
+        return ({n for n, p in item.input_ports.items() if p.isVisible()},
+                {n for n, p in item.output_ports.items() if p.isVisible()})
+
+    def _hide(self, item):
+        item.node.params["connectors"] = False
+        item.on_params_changed("connectors")
+
+    def test_declared_and_on_by_default(self, registry):
+        param = registry.get(IMAGE_TYPE).param("connectors")
+        assert param is not None and param.default is True
+
+    def test_off_hides_unwired_pins_and_on_brings_them_back(self, env):
+        _graph, _scene, item = env
+        assert self._shown(item) == ({"source"}, {"image"})
+        self._hide(item)
+        assert self._shown(item) == (set(), set())
+        item.node.params["connectors"] = True
+        item.on_params_changed("connectors")
+        assert self._shown(item) == ({"source"}, {"image"})
+
+    def test_a_wired_pin_stays(self, env, registry):
+        graph, _scene, item = env
+        self._hide(item)
+        picker = registry.instantiate("flograph.input.file_pick",
+                                      pos=(-300.0, 0.0))
+        graph.add_node(picker)
+        out = picker.spec.outputs[0].name
+        conn, _replaced = graph.connect(picker.id, out, item.node.id, "source")
+        assert self._shown(item) == ({"source"}, set())
+        graph.disconnect(conn.id)
+        assert self._shown(item) == (set(), set())
+
+    def test_a_wire_drag_reveals_them(self, env, registry):
+        graph, scene, item = env
+        self._hide(item)
+        picker = registry.instantiate("flograph.input.file_pick",
+                                      pos=(-300.0, 0.0))
+        graph.add_node(picker)
+        out = scene.node_items[picker.id].output_ports[
+            picker.spec.outputs[0].name]
+        scene.begin_wire_drag(out)
+        assert self._shown(item) == ({"source"}, {"image"})
+        scene.cancel_wire_drag()
+        assert self._shown(item) == (set(), set())
+
+    def test_other_nodes_never_hide(self, env, registry):
+        graph, _scene, _item = env
+        picker = registry.instantiate("flograph.input.file_pick",
+                                      pos=(-300.0, 0.0))
+        picker.params["connectors"] = False   # not its param: no effect
+        graph.add_node(picker)
+        assert not _scene.node_items[picker.id].connectors_hidden()
+
+
 class TestBigValuesSurviveTheEditors:
     """QLineEdit silently truncates at 32767 characters by default, and a
     base64 image is far longer than that. A truncated PNG/GIF still carries

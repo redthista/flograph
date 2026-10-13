@@ -37,6 +37,10 @@ it came from, or None when it came from a string).
 To take the picture back out — into an email, a document, a chat —
 right-click the card (or its dashboard tile) and pick **Copy Image**.
 
+Turn off "Title bar", "Card background" and "Connectors" and the card is
+just the picture (a connector with a wire on it stays, and they all come
+back while you drag a wire). Drag the picture itself to move it, and its edges to resize.
+
 Animated GIF/WebP play on the card when "Animate" is on. Playback stops by
 itself whenever the card isn't really being looked at — zoomed out past the
 detail threshold, or with the canvas preview switched off — so a canvas
@@ -46,7 +50,7 @@ full of animations costs nothing while you work elsewhere on it.
 NODE = {
     "label": "Image",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "image",
     # The optional input lets an upstream node supply the picture: a path it
     # built, or base64 straight out of an API or a blob column.
@@ -65,6 +69,14 @@ PARAMS = [
     {"name": "animate", "type": "bool", "label": "Animate", "default": True},
     {"name": "background", "type": "bool", "label": "Card background",
      "default": True},
+    # Cosmetic, canvas only: off, the card is the picture and nothing else.
+    # The picture itself is the drag handle either way.
+    {"name": "title_bar", "type": "bool", "label": "Title bar",
+     "default": True, "cosmetic": True},
+    # Cosmetic, canvas only: off, the pins with no wire on them are hidden
+    # (they come back while a wire is being dragged, to drop it on).
+    {"name": "connectors", "type": "bool", "label": "Connectors",
+     "default": True, "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
      "default": 320, "min": 60, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",

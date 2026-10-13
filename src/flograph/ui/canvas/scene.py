@@ -314,6 +314,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # pin shows itself for the duration — you cannot aim at a pin that
         # is not on screen. Set by begin_wire_drag, cleared by _cleanup_drag.
         self.drawing_order_edge = False
+        # a wire is being dragged: pins a node has hidden come back so there
+        # is something to drop it on (see NodeItem.connectors_hidden)
+        self.drawing_wire = False
 
         # Canvas-wide "draw plain nodes as squares" preference; the main
         # window is the sole writer (MainWindow.set_compact_nodes). Card
@@ -503,6 +506,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self.addItem(item)
         self.connection_items[conn.id] = item
         dst.refresh_connected()  # input pin becomes filled
+        self._refresh_hidden_connectors(conn)
         if item.is_order:
             # both ends: an order edge is what keeps an otherwise hidden flow
             # pin on screen, at the source as much as the destination
@@ -528,6 +532,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                 port.refresh_connected()
             if dst_item.table:
                 dst_item.refresh_table_link()
+        # after the pin above has re-read itself: that is what it hides by
+        self._refresh_hidden_connectors(conn)
         self._refresh_collapsed_frames()   # the orphaned pin must go
 
     def _on_node_moved(self, node_id: str, pos: tuple[float, float]) -> None:
@@ -1581,6 +1587,22 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self.drawing_order_edge = drawing
         self._refresh_flow_pins()
 
+    def set_drawing_wire(self, drawing: bool) -> None:
+        if drawing == self.drawing_wire:
+            return
+        self.drawing_wire = drawing
+        for item in self.node_items.values():
+            if item.connectors_hidden():
+                item._apply_port_visibility()
+
+    def _refresh_hidden_connectors(self, conn: Connection) -> None:
+        """A wire appeared or went: the pins at its ends may be hidden ones
+        that it alone was keeping on screen."""
+        for node_id in (conn.src_node, conn.dst_node):
+            item = self.node_items.get(node_id)
+            if item is not None and item.connectors_hidden():
+                item._apply_port_visibility()
+
     def _refresh_flow_pins(self) -> None:
         for item in self.node_items.values():
             item._apply_port_visibility()
@@ -2575,6 +2597,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             # bring every other node's flow pins up, so there is something
             # to aim at
             self.set_drawing_order_edge(True)
+        else:
+            self.set_drawing_wire(True)
         self._pending = PendingConnectionItem(fixed)
         self.addItem(self._pending)
         self._pending.update_drag(port.scenePos(), None)
@@ -2636,6 +2660,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     def _cleanup_drag(self) -> None:
         had_pending = self._pending is not None
         self.set_drawing_order_edge(False)
+        self.set_drawing_wire(False)
         if self._pending is not None:
             self.removeItem(self._pending)
             self._pending = None

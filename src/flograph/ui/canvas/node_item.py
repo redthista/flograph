@@ -1358,6 +1358,8 @@ class NodeItem(QGraphicsObject):
         # only in the *previously* painted rect.
         before = self._painted_scene_rect or self.sceneBoundingRect()
         self._params_changed_impl(name)
+        if name in (None, "connectors"):
+            self._apply_port_visibility()
         self._painted_scene_rect = self.sceneBoundingRect()
         scene = self.scene()
         if scene is not None:
@@ -2538,23 +2540,33 @@ class NodeItem(QGraphicsObject):
             self._sync_card_image()
             self.update()
 
+    def _image_title_bar(self) -> bool:
+        """Whether a picture card draws its title bar. "Title bar" off (an
+        Image node param) leaves just the picture — with "Card background"
+        off too, a cut-out PNG with nothing of the node around it at all."""
+        return (not self.image_card or self.pdf_card
+                or bool(self.node.params.get("title_bar", True)))
+
     def _paint_image(self, painter: QPainter) -> None:
         """The image card: chrome, then the artwork painted straight in."""
+        header = self._image_title_bar()
         if self.node.params.get("background", True):
-            self._paint_widget_card(painter)
+            self._paint_widget_card(painter, header=header)
         else:
             # "Card background" off: just the header and the selection
             # outline, so a cut-out PNG sits on the canvas without a slab
             # of card behind it.
-            self._paint_header(painter, self.width)
+            if header:
+                self._paint_header(painter, self.width)
             if self.isSelected():
                 painter.setPen(QPen(theme.SELECTION_OUTLINE, 2.0))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(
                     QRectF(0, 0, self.width, self.body_height), 7, 7)
 
-        rect = QRectF(2, HEADER_H, self.width - 4,
-                      max(0.0, self.body_height - HEADER_H - 2))
+        top = HEADER_H if header else 2.0
+        rect = QRectF(2, top, self.width - 4,
+                      max(0.0, self.body_height - top - 2))
         if rect.isEmpty():
             return
         image = self._card_image()
@@ -3213,6 +3225,23 @@ class NodeItem(QGraphicsObject):
         return self._card_ports() and (len(self.input_ports) > 1
                                        or len(self.output_ports) > 1)
 
+    def connectors_hidden(self) -> bool:
+        """Whether this node's own "Connectors" setting is off — a param
+        only a node that wants the choice declares (the Image node), so
+        every other node answers no without looking further."""
+        if self.node.spec.param("connectors") is None:
+            return False
+        return not self.node.params.get("connectors", True)
+
+    def _wired_outputs(self) -> set:
+        """Names of this node's output ports a wire leaves from. Asked of
+        the graph, since output pins keep no connected state — only for a
+        node hiding its connectors, so nobody else pays for it."""
+        graph = getattr(self.scene(), "graph", None)
+        if graph is None:
+            return set()
+        return {c.src_port for c in graph.out_connections(self.node.id)}
+
     def _apply_port_visibility(self) -> None:
         """The single place port visibility is decided.
 
@@ -3231,11 +3260,19 @@ class NodeItem(QGraphicsObject):
             # terminate somewhere, and hiding the pin under it would leave a
             # dashed line running into the side of a node.
             pin.setVisible(not self._flat and (shown or pin.has_edge))
+        hidden = (self.connectors_hidden()
+                  and not getattr(self.scene(), "drawing_wire", False))
+        wired_out = self._wired_outputs() if hidden else set()
         for ports in (self.input_ports, self.output_ports):
             items = list(ports.values())
             for i, port in enumerate(items):
                 gathered = collapsed and len(items) > 1 and i > 0
-                port.setVisible(not self._flat and not gathered)
+                # "Connectors" off hides a pin with nothing on it; one with a
+                # wire stays, for the same reason a flow pin does above
+                wired = (port.has_edge if ports is self.input_ports
+                         else port.spec.name in wired_out)
+                port.setVisible(not self._flat and not gathered
+                                and (not hidden or wired))
             if not items:
                 continue
             # The one pin left showing has to admit what it is: a wire
@@ -3758,6 +3795,10 @@ class NodeItem(QGraphicsObject):
             return None
         if self._folded:
             return QRectF(4, 4, 11, 10)
+        if not self._image_title_bar():
+            # no bar to sit in: an unseen chevron would fold the picture
+            # out from under a click meant to drag it
+            return None
         return QRectF(7, HEADER_H / 2 - 5, 11, 10)
 
     def _collapse_toggle_rect(self) -> Optional[QRectF]:
@@ -3996,7 +4037,8 @@ class NodeItem(QGraphicsObject):
         painter.setPen(outline)
         painter.drawPath(body)
 
-        self._paint_header(painter, self.width)
+        if header:
+            self._paint_header(painter, self.width)
 
         if self.isSelected():
             painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
@@ -4126,7 +4168,8 @@ class NodeItem(QGraphicsObject):
             QRectF(8, self.body_height - 20, self.width - 16, 16),
             Qt.AlignHCenter | Qt.AlignVCenter, caption)
 
-    def _paint_widget_card(self, painter: QPainter) -> None:
+    def _paint_widget_card(self, painter: QPainter,
+                           header: bool = True) -> None:
         """Shared chrome for cards that embed a proxied widget (figure/table
         viewers): rounded body, header strip, resize handle when selected."""
         rect = QRectF(0, 0, self.width, self.body_height)
@@ -4241,6 +4284,10 @@ class NodeItem(QGraphicsObject):
         too and drags the node along with it — which is what you expect of a
         label attached to a box."""
         if self.compact or self.button or self._square:
+            return self.body_height
+        if self.image_card and not self.pdf_card:
+            # nothing on a picture to click but the picture, so it is all
+            # drag bar — the only way to move one whose title bar is off
             return self.body_height
         return HEADER_H
 
