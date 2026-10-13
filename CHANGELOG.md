@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Browse opens where your file is** | The **…** button on a file or folder box in Properties always opened the folder flograph was started from. It now opens on the file the box already names, with it selected (or the nearest folder above it that still exists); an empty box opens the last folder you picked a file from, remembered between sessions, or your home folder the first time. The file control card and pack settings do the same. |
 
 ## 0.1.28
 
