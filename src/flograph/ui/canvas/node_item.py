@@ -4037,8 +4037,7 @@ class NodeItem(QGraphicsObject):
         painter.setPen(outline)
         painter.drawPath(body)
 
-        if header:
-            self._paint_header(painter, self.width)
+        self._paint_header(painter, self.width)
 
         if self.isSelected():
             painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
@@ -4183,7 +4182,8 @@ class NodeItem(QGraphicsObject):
         painter.setPen(outline)
         painter.drawPath(body)
 
-        self._paint_header(painter, self.width)
+        if header:
+            self._paint_header(painter, self.width)
 
         if self.isSelected():
             painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))

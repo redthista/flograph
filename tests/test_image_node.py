@@ -446,6 +446,23 @@ class TestTitleBar:
                           title_bar=False)
         assert self._top_strip_is_picture(item)
 
+    def test_off_with_a_background_draws_no_bar_either(self, registry,
+                                                       png_file):
+        # Fit leaves a band above a wide picture, where the bar would show
+        item = _make_item(registry, path=png_file, fit="Fit",
+                          width=300, height=240, title_bar=False)
+        header = QColor(item._header_color()).name()
+        image = _render(item)
+        assert image.pixelColor(int(item.width / 2), 10).name() != header
+        item.node.params["title_bar"] = True
+        image = _render(item)
+        assert image.pixelColor(int(item.width / 2), 10).name() == header
+
+    def test_other_cards_keep_painting_their_bar(self, registry):
+        # the Table grid card shares the chrome code the switch went into
+        node = registry.instantiate("flograph.io.table", pos=(0.0, 0.0))
+        _render(NodeItem(node))
+
     def test_the_whole_picture_is_the_drag_bar(self, registry, png_file):
         for bar in (True, False):
             item = _make_item(registry, path=png_file, title_bar=bar)
