@@ -13,12 +13,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QVBoxLayout, QWidget,
 )
 
 from flograph.core import packs
+
+from .number_box import NumberBox
 
 
 class PackSettingsDialog(QDialog):
@@ -82,7 +84,7 @@ class PackSettingsDialog(QDialog):
             spin.setRange(-2**31, 2**31 - 1)
             return spin, spin.value, lambda v: spin.setValue(int(v))
         if s.type == "float":
-            spin = QDoubleSpinBox()
+            spin = NumberBox()
             spin.setRange(-1e12, 1e12)
             spin.setDecimals(4)
             return spin, spin.value, lambda v: spin.setValue(float(v))

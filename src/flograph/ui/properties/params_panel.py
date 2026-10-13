@@ -22,7 +22,7 @@ from PySide6.QtGui import (
     QTextCursor, QUndoStack,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QComboBox,
     QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
     QSizePolicy, QSpinBox, QToolButton, QTreeWidget, QTreeWidgetItem,
@@ -36,6 +36,7 @@ from . import var_completion
 from .colour_row import ColourRow
 from ..canvas.node_item import card_kind
 from ..controls import UNCAPPED_TEXT
+from ..number_box import NumberBox
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
 
 # How long typing has to pause before a text param reaches the graph. Long
@@ -992,11 +993,13 @@ class ParamsPanel(QWidget):
             spin.setRange(int(spec.minimum) if spec.minimum is not None else -2**31,
                           int(spec.maximum) if spec.maximum is not None else 2**31 - 1)
             spin.setValue(int(value or 0))
+            # one commit per number typed, not one per digit
+            spin.setKeyboardTracking(False)
             spin.valueChanged.connect(lambda v: self._commit(name, int(v)))
             return spin, lambda v: self._silently(spin.setValue, int(v or 0))
 
         if spec.type == "float":
-            spin = QDoubleSpinBox()
+            spin = NumberBox()
             spin.setDecimals(6)
             spin.setRange(spec.minimum if spec.minimum is not None else -1e18,
                           spec.maximum if spec.maximum is not None else 1e18)
