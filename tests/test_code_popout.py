@@ -100,6 +100,34 @@ class TestCodePanelPopOut:
         assert panel.editor.toPlainText() == before
         assert stack.index() == index and not node.forked
 
+    def test_typing_shows_in_the_panel_unapplied(self, env, monkeypatch):
+        panel, _graph, stack, node = env
+        index = stack.index()
+        seen = {}
+
+        def type_some(d):
+            d.editor.setPlainText(VALID)
+            d.edited.emit(VALID)
+            seen["panel"] = panel.editor.toPlainText()
+            seen["index"] = stack.index()
+
+        _drive(monkeypatch, type_some)
+        _open(panel)
+        assert seen == {"panel": VALID, "index": index}
+
+    def test_cancel_puts_the_panel_back(self, env, monkeypatch):
+        panel, _graph, stack, node = env
+        before = panel.editor.toPlainText()
+
+        def type_some(d):
+            d.editor.setPlainText(VALID)
+            d.edited.emit(VALID)
+
+        _drive(monkeypatch, type_some, accept=False)
+        _open(panel)
+        assert panel.editor.toPlainText() == before
+        assert not node.forked
+
     def test_a_locked_node_opens_read_only(self, env, monkeypatch):
         panel, graph, stack, node = env
         graph.set_locked(node.id, True)

@@ -215,11 +215,16 @@ class SetParamCommand(QUndoCommand):
 
     Pass merge=False for edits that must stay individual undo steps
     (e.g. spreadsheet cell edits, where one Ctrl+Z should revert one cell).
+    Pass a token of your own (any object) to merge only with edits carrying
+    that same token: the text pop-out's live edits are one step of their
+    own, not folded into whatever was typed in the box before it opened.
+    A token's edits that merge back to where they started drop out of the
+    stack, so a pop-out cancelled leaves no empty step behind.
     """
 
     def __init__(self, graph: Graph, node_id: str, name: str, new_value: Any,
                  parent: Optional[QUndoCommand] = None, *,
-                 merge: bool = True) -> None:
+                 merge: Any = True) -> None:
         super().__init__(f"set {name}", parent)
         self._graph = graph
         self._node_id = node_id
@@ -240,10 +245,13 @@ class SetParamCommand(QUndoCommand):
     def mergeWith(self, other: QUndoCommand) -> bool:
         if (not isinstance(other, SetParamCommand)
                 or not self._merge or not other._merge
+                or self._merge is not other._merge
                 or other._node_id != self._node_id
                 or other._name != self._name):
             return False
         self._new = other._new
+        if self._merge is not True and self._new == self._old:
+            self.setObsolete(True)
         return True
 
 

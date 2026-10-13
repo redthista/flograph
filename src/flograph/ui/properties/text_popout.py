@@ -8,16 +8,20 @@ numbers, several carets (ui/editor/multi_cursor), find and replace (Ctrl+F,
 Ctrl+H), completion of the box's keywords and the columns coming in, and a
 lint that marks the lines the node would refuse (core/text_assist).
 
-It edits a copy — OK writes it back as one undo step, Cancel leaves the
-param as it was — the same contract as the Rules… manager. Esc asks before
-throwing edits away, because in a window this size it is easy to have
+What is typed here goes into the box behind it as you go (`edited`, once
+typing pauses), so the box and the window never disagree and nothing
+depends on how the window is closed. The whole visit is one undo step. OK
+keeps it; Cancel puts back what the box held when the window opened. Esc
+asks before doing that, because in a window this size it is easy to have
 done a lot of work before reaching for it.
 """
 from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from PySide6.QtCore import QByteArray, QPointF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import (
+    QByteArray, QPointF, QSettings, QSize, Qt, QTimer, Signal,
+)
 from PySide6.QtGui import (
     QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QPolygonF, QShortcut,
     QTextCursor,
@@ -34,6 +38,8 @@ from ..editor.rules_highlighter import RulesHighlighter
 from ..editor.word_completion import WordCompleter
 
 LINT_DELAY_MS = 300
+#: How long typing in the window pauses before the box behind it follows.
+EDITED_DELAY_MS = 250
 _ORG = _APP = "flograph"
 #: Where this window was left, so the next one opens the same size. One
 #: key for every pop-out rather than one each: they are the same window
@@ -70,10 +76,15 @@ def expand_icon(color: QColor, size: int = 16) -> QIcon:
 
 
 class TextPopOut(QDialog):
-    """`editor` holds the copy being edited; read it back after exec().
+    """`editor` holds the text being edited; `edited` carries it to the box
+    behind the window each time typing pauses, and exec() says whether to
+    keep it (OK) or put the original back (Cancel).
 
     sample: the first rows of the table coming in, for the lint to try the
     text against, or None when nothing upstream has run."""
+
+    #: the editor's text, once typing pauses — never after the window shuts
+    edited = Signal(str)
 
     #: How big a pop-out opens when nothing has been remembered yet. A
     #: subclass says its own — a script wants more room than a box of
@@ -165,6 +176,13 @@ class TextPopOut(QDialog):
         editor.textChanged.connect(self._lint_timer.start)
         self.run_lint()
 
+        self._edited_timer = QTimer(self)
+        self._edited_timer.setSingleShot(True)
+        self._edited_timer.setInterval(EDITED_DELAY_MS)
+        self._edited_timer.timeout.connect(self._emit_edited)
+        if not read_only:
+            editor.textChanged.connect(self._edited_timer.start)
+
         self.resize(self.DEFAULT_SIZE)
         self._restore_geometry()
         cursor = editor.textCursor()
@@ -195,12 +213,20 @@ class TextPopOut(QDialog):
             self.showMaximized()
 
     def done(self, result: int) -> None:
+        # the caller settles the final text from exec()'s answer; a pause
+        # still pending would land after it, undoing a Cancel
+        self._edited_timer.stop()
         settings = QSettings(_ORG, _APP)
         settings.setValue(MAXIMIZED_KEY, self.isMaximized())
         # the *normal* geometry, so un-maximizing lands back on a sensible
         # window rather than on whatever size it was before it was grown
         settings.setValue(GEOMETRY_KEY, self.saveGeometry())
         super().done(result)
+
+    def _emit_edited(self) -> None:
+        # a shut window's text is the caller's to settle, not this timer's
+        if self.isVisible():
+            self.edited.emit(self.editor.toPlainText())
 
     def _assist_editor(self, editor: CodeEditor, columns: list) -> None:
         """Highlighting and completion for what is being edited: the box's

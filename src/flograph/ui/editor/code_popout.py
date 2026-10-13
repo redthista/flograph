@@ -42,7 +42,8 @@ def python_syntax_lint(text: str, _sample=None) -> list:
 
 
 class CodePopOut(TextPopOut):
-    """`editor` holds the copy being edited; read it back after exec()."""
+    """`editor` holds the code being edited; `edited` carries it to the Code
+    panel as typing pauses (see TextPopOut)."""
 
     UNCHECKED = ""  # there are no columns to check in a script
     DEFAULT_SIZE = QSize(960, 700)      # a script wants more room than rules

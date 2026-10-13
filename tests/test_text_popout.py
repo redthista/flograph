@@ -488,3 +488,90 @@ class TestTheWindowItself:
         qtbot.addWidget(code)
         assert code.DEFAULT_SIZE.width() > TextPopOut.DEFAULT_SIZE.width()
         assert code.size().width() == code.DEFAULT_SIZE.width()
+
+
+class TestItEditsTheBox:
+    """The window edits the box behind it as you type, not a copy that only
+    OK hands back — so the text is there however the window is shut."""
+
+    def test_typing_lands_in_the_box_while_the_window_is_up(
+            self, panel, monkeypatch):
+        panel, graph, node = panel
+        seen = {}
+
+        def type_some(d):
+            d.editor.setPlainText("a = b")
+            d.edited.emit("a = b")
+            box = panel.findChild(QPlainTextEdit, "param_plain")
+            seen["param"] = graph.node(node.id).params["plain"]
+            seen["box"] = box.toPlainText()
+
+        _drive(monkeypatch, type_some)
+        _open(panel, "plain")
+        assert seen == {"param": "a = b", "box": "a = b"}
+
+    def test_the_visit_is_one_undo_step(self, panel, monkeypatch):
+        panel, graph, node = panel
+
+        def type_some(d):
+            for text in ("a", "a = b", "a = b\nc = d"):
+                d.editor.setPlainText(text)
+                d.edited.emit(text)
+
+        _drive(monkeypatch, type_some)
+        _open(panel, "plain")
+        assert graph.node(node.id).params["plain"] == "a = b\nc = d"
+        assert panel._undo_stack.count() == 1
+        panel._undo_stack.undo()
+        assert graph.node(node.id).params["plain"] == ""
+
+    def test_it_is_its_own_step_after_typing_in_the_box(
+            self, panel, monkeypatch):
+        panel, graph, node = panel
+        panel.findChild(QPlainTextEdit, "param_plain").setPlainText("typed")
+        panel.flush_pending()
+
+        def type_some(d):
+            d.editor.setPlainText("typed more")
+            d.edited.emit("typed more")
+
+        _drive(monkeypatch, type_some)
+        _open(panel, "plain")
+        panel._undo_stack.undo()
+        assert graph.node(node.id).params["plain"] == "typed"
+
+    def test_cancel_puts_the_box_back_and_leaves_no_step(
+            self, panel, monkeypatch):
+        panel, graph, node = panel
+
+        def type_some(d):
+            d.editor.setPlainText("thrown away")
+            d.edited.emit("thrown away")
+
+        _drive(monkeypatch, type_some, accept=False)
+        _open(panel, "plain")
+        assert graph.node(node.id).params["plain"] == ""
+        assert panel.findChild(QPlainTextEdit,
+                               "param_plain").toPlainText() == ""
+        assert panel._undo_stack.count() == 0
+
+    def test_a_pause_follows_typing_on_its_own(self, qtbot):
+        dialog = TextPopOut("t", "")
+        qtbot.addWidget(dialog, before_close_func=lambda d: d.done(
+            QDialog.Rejected))
+        dialog.show()
+        with qtbot.waitSignal(dialog.edited, timeout=2000) as got:
+            dialog.editor.setPlainText("x = 1")
+        assert got.args == ["x = 1"]
+
+    def test_nothing_follows_once_the_window_is_shut(self, qtbot):
+        dialog = TextPopOut("t", "")
+        qtbot.addWidget(dialog, before_close_func=lambda d: d.done(
+            QDialog.Rejected))
+        dialog.show()
+        heard = []
+        dialog.edited.connect(heard.append)
+        dialog.editor.setPlainText("x = 1")
+        dialog.done(QDialog.Accepted)
+        qtbot.wait(400)
+        assert heard == []

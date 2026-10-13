@@ -1397,6 +1397,19 @@ class ParamsPanel(QWidget):
             columns=columns, sample=self._upstream_sample(node_id),
             picker=picker, read_only=read_only, parent=self)
         editor = dialog.editor
+        # The window edits the box live, not a copy: each pause in typing
+        # lands in the param, and the box follows through param_changed.
+        # Through the graph rather than the box, since a run finishing can
+        # rebuild the panel (and the box) while the window is up. One token
+        # for the visit, so it is one undo step of its own.
+        original = node.params.get(spec.name)
+        visit = object()
+
+        def follow(value: str) -> None:
+            if self._node_id == node_id:
+                self._commit(spec.name, value, merge=visit)
+        if not read_only:
+            dialog.edited.connect(follow)
         if menu is not None:
             menu.aboutToShow.connect(
                 lambda: self._fill_pop_out_menu(menu, editor, spec))
@@ -1406,11 +1419,11 @@ class ParamsPanel(QWidget):
         accepted = dialog.exec() == QDialog.Accepted
         new = editor.toPlainText()
         dialog.deleteLater()
-        # through _commit rather than the box: a run finishing while the
-        # dialog was up can rebuild the panel, and the box with it — and if
-        # the panel has moved to another node, this text isn't that node's
-        if accepted and not read_only and self._node_id == node_id:
-            self._commit(spec.name, new, merge=False)
+        # the panel moving to another node while the window was up leaves
+        # the text as far as it got; it isn't the new node's to change
+        if read_only or self._node_id != node_id:
+            return
+        self._commit(spec.name, new if accepted else original, merge=visit)
 
     def _attach_assist(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
         """The pop-out's help, in the box itself: completion of the box's
