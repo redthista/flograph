@@ -34,6 +34,9 @@ report:
 The emitted dict carries `bytes`, `mime`, `data_uri`, and `path` (the file
 it came from, or None when it came from a string).
 
+To take the picture back out — into an email, a document, a chat —
+right-click the card (or its dashboard tile) and pick **Copy Image**.
+
 Animated GIF/WebP play on the card when "Animate" is on. Playback stops by
 itself whenever the card isn't really being looked at — zoomed out past the
 detail threshold, or with the canvas preview switched off — so a canvas

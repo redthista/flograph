@@ -206,3 +206,95 @@ def icon_source(mime: QMimeData) -> Optional[str]:
         return icon_picture(found[0]) if found else None
     except (OSError, ValueError):
         return None
+
+
+# ------------------------------------------------- the other way: Copy Image
+
+#: Formats whose own bytes go on the clipboard beside the decoded picture.
+#: An app that takes image/gif gets the animation; one that only takes a
+#: plain picture still gets the first frame.
+_VERBATIM = ("image/gif", "image/webp", "image/jpeg", "image/svg+xml")
+
+
+def picture_mime(data: bytes) -> Optional[QMimeData]:
+    """Encoded picture bytes as clipboard data, or None if they are not a
+    picture Qt can draw."""
+    image = QImage.fromData(QByteArray(data))
+    if image.isNull():
+        return None
+    mime = QMimeData()
+    mime.setImageData(image)
+    kind = sniff_mime(data)
+    if kind in _VERBATIM:
+        mime.setData(kind, QByteArray(data))
+    return mime
+
+
+def copy_picture(source: str) -> bool:
+    """Put the picture `source` names — a path, a `data:` URI or base64,
+    as an Image node holds it — on the clipboard. False if it names no
+    picture."""
+    from PySide6.QtWidgets import QApplication
+    from flograph.core.images import resolve_source
+    if not str(source or "").strip():
+        return False
+    try:
+        data, _kind, _path = resolve_source(str(source))
+    except (OSError, ValueError):
+        return False
+    mime = picture_mime(data)
+    if mime is None:
+        return False
+    QApplication.clipboard().setMimeData(mime)
+    return True
+
+
+def _figure_image(figure) -> Optional[QImage]:
+    import io
+    buffer = io.BytesIO()
+    try:
+        # twice the figure's own resolution: sharp when pasted into a
+        # document, without the size of a print-quality render
+        figure.savefig(buffer, format="png", dpi=figure.dpi * 2,
+                       facecolor=figure.get_facecolor())
+    except Exception:   # a figure is whatever a node's script built
+        return None
+    image = QImage.fromData(QByteArray(buffer.getvalue()))
+    return None if image.isNull() else image
+
+
+def is_figure(value) -> bool:
+    """A matplotlib figure, or a list of them (a stacked figure card)."""
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(hasattr(v, "savefig") for v in value)
+    return hasattr(value, "savefig")
+
+
+def copy_figure(value) -> bool:
+    """Put a matplotlib figure — or a list of them, one beneath the other
+    as the card stacks them — on the clipboard as a picture."""
+    from PySide6.QtGui import QColor, QPainter
+    from PySide6.QtWidgets import QApplication
+    if not is_figure(value):
+        return False
+    figures = list(value) if isinstance(value, (list, tuple)) else [value]
+    images = [image for image in map(_figure_image, figures) if image]
+    if not images:
+        return False
+    if len(images) == 1:
+        picture = images[0]
+    else:
+        picture = QImage(max(i.width() for i in images),
+                         sum(i.height() for i in images),
+                         QImage.Format_ARGB32)
+        picture.fill(QColor("white"))
+        painter = QPainter(picture)
+        top = 0
+        for image in images:
+            painter.drawImage(0, top, image)
+            top += image.height()
+        painter.end()
+    mime = QMimeData()
+    mime.setImageData(picture)
+    QApplication.clipboard().setMimeData(mime)
+    return True

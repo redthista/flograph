@@ -129,6 +129,28 @@ class FigureView(QWidget):
         if self._figures:
             self._set_figures(self._figures)
 
+    def shown_figures(self):
+        """The figure on show — or the stacked list — or None."""
+        if self._figures:
+            return list(self._figures)
+        return self._canvas.figure if self._canvas is not None else None
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click on a chart: Copy Image, to paste it into another app.
+        The chart on show is copied as it is drawn — a stack as one tall
+        picture, the way it reads here."""
+        from PySide6.QtWidgets import QMenu
+        from ..image_paste import copy_figure
+        figures = self.shown_figures()
+        if figures is None:
+            super().contextMenuEvent(event)
+            return
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy Image")
+        if menu.exec(event.globalPos()) is copy_action:
+            copy_figure(figures)
+        event.accept()
+
     def set_render_ratio(self, ratio: float | None) -> None:
         """Absolute device pixels per logical pixel to render figures at
         (screen DPR × canvas zoom × card scale), or None to trust Qt's

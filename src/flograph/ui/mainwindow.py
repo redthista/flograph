@@ -2032,6 +2032,39 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError):
             return False
 
+    def _node_picture(self, node_id: str):
+        """What Copy Image would copy for this node — ("source", str) for an
+        Image node showing something, ("figure", value) for a matplotlib
+        card that has drawn — or None. Cheap: the node menu asks it on
+        every right-click, so it reads what the card already holds and
+        never decodes or loads anything."""
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return None
+        if node.type_id == IMAGE_TYPE:
+            item = self.scene.node_items.get(node_id)
+            source = item._image_source() if item is not None else str(
+                node.params.get("path", "") or "")
+            return ("source", source) if source.strip() else None
+        if card_kind(node) == "figure":
+            from .image_paste import is_figure
+            entry = self.engine.cache.get(node_id)
+            port = node.spec.outputs[0].name if node.spec.outputs else "figure"
+            value = entry.outputs.get(port) if entry else None
+            return ("figure", value) if is_figure(value) else None
+        return None
+
+    def _copy_node_picture(self, node_id: str) -> None:
+        from .image_paste import copy_figure, copy_picture
+        found = self._node_picture(node_id)
+        if found is None:
+            return
+        kind, value = found
+        ok = copy_picture(value) if kind == "source" else copy_figure(value)
+        self.show_status("Copied the image" if ok
+                         else "Couldn't copy the image — it can't be read",
+                         4000)
+
     def _embed_node_image(self, node_id: str) -> None:
         """Replace an Image node's file path with the picture itself, as a
         base64 data: URI, so the flow carries it. One undoable step."""
@@ -4915,6 +4948,13 @@ class MainWindow(QMainWindow):
                     "Put the control back to the value the flow has.")
             control_reset_action = menu.addAction("Reset to Default")
             control_reset_action.setEnabled(ca.differs_from_default(node))
+        copy_image_action = None
+        if not many and self._node_picture(node_id) is not None:
+            copy_image_action = menu.addAction("Copy Image")
+            copy_image_action.setToolTip(
+                "Put the picture on the clipboard, to paste into another "
+                "app. An animated GIF stays animated where the app can "
+                "show one.")
         embed_image_action = None
         if not many and self._image_node_links_a_file(node_id):
             embed_image_action = menu.addAction("Embed Image in the File")
@@ -5131,6 +5171,8 @@ class MainWindow(QMainWindow):
                   control_reset_action: cb.reset}[chosen]
             if op(self.graph, self.undo_stack, node_id):
                 self._rerun_controls([node_id])
+        elif copy_image_action is not None and chosen is copy_image_action:
+            self._copy_node_picture(node_id)
         elif embed_image_action is not None and chosen is embed_image_action:
             self._embed_node_image(node_id)
         elif browser_action is not None and chosen is browser_action:

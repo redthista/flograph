@@ -485,6 +485,15 @@ class DashboardView(ZoomPanGraphicsView):
 
     # --------------------------------------------------------- context menu
 
+    @staticmethod
+    def _copy_picture(picture) -> None:
+        from ..image_paste import copy_figure, copy_picture
+        kind, value = picture
+        if kind == "source":
+            copy_picture(value)
+        else:
+            copy_figure(value)
+
     def contextMenuEvent(self, event) -> None:
         """Right-click on a dashboard page.
 
@@ -513,12 +522,20 @@ class DashboardView(ZoomPanGraphicsView):
             event.accept()
             return
         if self._view_mode:
-            # A locked page has no layout to act on, so there is no menu to
-            # show — and accepting is the point: passed up, the event walks
-            # the parent chain to the main window, which answers a bare
-            # right-click with its own dock-and-toolbar menu. That is the
-            # menu "of whatever is underneath" appearing over a finished
-            # dashboard.
+            # A locked page has no layout to act on, so the only menu is
+            # Copy Image over a picture — the one thing someone looking at
+            # a finished dashboard may want to take away. Accepting either
+            # way is the point: passed up, the event walks the parent chain
+            # to the main window, which answers a bare right-click with its
+            # own dock-and-toolbar menu. That is the menu "of whatever is
+            # underneath" appearing over a finished dashboard.
+            item = self._tile_at(event.pos())
+            picture = item.copyable_picture() if item is not None else None
+            if picture is not None and self._fs_tile is None:
+                menu = QMenu(self)
+                copy_image = menu.addAction("Copy Image")
+                if menu.exec(event.globalPos()) is copy_image:
+                    self._copy_picture(picture)
             event.accept()
             return
         item = self._tile_at(event.pos())
@@ -546,12 +563,20 @@ class DashboardView(ZoomPanGraphicsView):
             menu.addSeparator()
             browser_action = menu.addAction("Open in Browser")
         menu.addSeparator()
+        picture = item.copyable_picture()
+        copy_image_action = None
+        if picture is not None:
+            copy_image_action = menu.addAction("Copy Image")
+            copy_image_action.setToolTip(
+                "Put the picture on the clipboard, to paste into another app")
         copy_action = menu.addAction("Copy")
         paste_action = menu.addAction("Paste")
         paste_action.setEnabled(bool(DashboardView._tile_clipboard))
         delete_action = menu.addAction("Delete")
         chosen = menu.exec(event.globalPos())
-        if chosen is copy_action:
+        if copy_image_action is not None and chosen is copy_image_action:
+            self._copy_picture(picture)
+        elif chosen is copy_action:
             self._copy_tiles(item)
         elif chosen is paste_action:
             self._paste_tiles(anchor=item)

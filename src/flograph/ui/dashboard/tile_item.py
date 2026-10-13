@@ -1286,6 +1286,25 @@ class TileItem(QGraphicsObject):
         )
         image.set_playing(self.isVisible())
 
+    def copyable_picture(self):
+        """What Copy Image takes from this tile — ("source", str) for an
+        Image tile showing something, ("figure", value) for a matplotlib
+        tile that has drawn — or None."""
+        node = self._node()
+        if node is None:
+            return None
+        if self._kind() == "image":
+            from ..canvas.image_card import image_source
+            entry = self._engine.cache.get(self.tile.node_id)
+            payload = (entry.outputs.get(self.tile.port)
+                       if entry is not None and self.tile.port else None)
+            source = image_source(node, payload)
+            return ("source", source) if source.strip() else None
+        if self._kind() == "figure" and self._figure_view is not None:
+            figures = self._figure_view.shown_figures()
+            return ("figure", figures) if figures is not None else None
+        return None
+
     @staticmethod
     def _image_scale(node) -> float:
         try:
