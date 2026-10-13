@@ -191,6 +191,13 @@ class SheetDelegate(ConditionalFormatDelegate):
     ctrl_enter = False   # the editor was closed with Ctrl+Enter (fill all)
 
     def eventFilter(self, editor, event):
+        if (event.type() == QEvent.FocusOut and isinstance(editor, CellEdit)
+                and event.reason() == Qt.MouseFocusReason):
+            # a click on the grid mid-formula may be pointing at a cell:
+            # keep the edit open for it (see pointing.py)
+            pointer = getattr(editor.grid, "ref_pointer", None)
+            if pointer is not None and pointer.hold(editor):
+                return True
         if (event.type() == QEvent.KeyPress and event.key() == Qt.Key_F4
                 and isinstance(editor, CellEdit)):
             cycle_reference(editor)      # F4: B2 → $B$2 → B$2 → $B2

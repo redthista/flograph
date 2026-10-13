@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (QApplication, QHeaderView, QStyle,
                                QToolTip, QWidget)
 
 _OUTLINE = QColor("#60a5fa")
+_POINTED = QColor("#4ade80")   # Point mode's box round a pointed range
 _HANDLE = 7          # the square's side, in px
 _GRAB = 5            # how far round it still counts as on it
 _EDGE = 18           # how close to the grid's edge a drag starts scrolling
@@ -72,6 +73,15 @@ class _Overlay(QWidget):
                 painter.setBrush(_OUTLINE)
                 painter.drawRect(handle)
                 painter.setClipRect(cells)
+        pointer = getattr(view, "ref_pointer", None)
+        pointed = pointer.pointed if pointer is not None else None
+        if pointed is not None:
+            # the cells a formula being typed was just pointed at
+            box = view.cells_grid_rect(*pointed)
+            if box is not None:
+                painter.setPen(QPen(_POINTED, 2, Qt.DashLine))
+                painter.setBrush(QColor(74, 222, 128, 28))
+                painter.drawRect(box.adjusted(1, 1, -2, -2))
         if self.fill_target is not None:
             target = view.cells_grid_rect(*self.fill_target)
             if target is not None:

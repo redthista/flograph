@@ -235,6 +235,10 @@ class FrozenPanes:
                 if fill is not None:
                     # the fill handle can be on a frozen cell
                     fill.watch(self._panes[kind].viewport())
+                pointer = getattr(main, "ref_pointer", None)
+                if pointer is not None:
+                    # pointing at a frozen cell while typing a formula
+                    pointer.watch(self._panes[kind].viewport())
             elif kind not in wanted and kind in self._panes:
                 pane = self._panes.pop(kind)
                 pane.hide()

@@ -502,6 +502,22 @@ would move.
 formulas that read the current cell. All of these are on the right-click
 menu under **Formula Auditing**.
 
+## Pointing at cells while typing a formula
+
+Type `=` and click a cell: its reference is typed in for you — `=B3`.
+Click a different cell straight away and it replaces that reference
+instead of adding a second, so a wrong click costs nothing. **Drag**
+across cells, or **Shift+click** a second cell, for a range: `=SUM(` then
+a drag down a column gives `=SUM(B2:B9`. The cells you pointed at get a
+dashed green box while you type.
+
+A click points wherever a reference could go next — straight after the
+`=`, an opening bracket, a comma or an operator (`+ - * / ^ & < > :`). So
+`=B3+` then a click adds a second reference, and `=B3*2` then a click
+ends the edit and moves to the clicked cell, as it always did. Clicking a
+column or row header, or the empty space past the last cell, ends the
+edit too. Frozen cells can be pointed at like any other.
+
 ## Pinning a reference: F4
 
 While typing a formula, **F4** cycles the reference at the cursor
@@ -662,5 +678,6 @@ fourteen.
 | AutoSum | **Alt+=** |
 | Select what a formula reads / what reads the cell | **Ctrl+[** / **Ctrl+]** |
 | Pin a reference (`B2` → `$B$2` → `B$2` → `$B2`) | **F4**, while typing a formula |
+| Put a cell's reference in a formula | **Click** it (drag or **Shift+click** for a range), after `=`, `(`, `,` or an operator |
 
 See also [[Nodes and the Library]] and [[Keyboard Shortcuts]].

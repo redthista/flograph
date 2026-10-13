@@ -367,6 +367,9 @@ class SpreadsheetView(QTableView):
         self._fill = FillHandle(self)
         self._row_move = HeaderMove(self, self.verticalHeader(), "row")
         self._col_move = HeaderMove(self, self.horizontalHeader(), "col")
+        # click a cell while typing a formula to type its reference
+        from .pointing import RefPointer
+        self.ref_pointer = RefPointer(self)
         for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
             bar.valueChanged.connect(self._fill.refresh)
         header.sectionResized.connect(self._fill.refresh)
@@ -1094,6 +1097,8 @@ class SpreadsheetView(QTableView):
     def _editor_closed(self) -> None:
         """Settle a row an editor grew: fitted to what was kept, or back
         to what it was."""
+        if getattr(self, "ref_pointer", None) is not None:
+            self.ref_pointer.reset()
         if getattr(self, "_editing_base", None) is not None:
             self._editing_base = None
             self.apply_row_heights()

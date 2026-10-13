@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | **Click a cell to put it in a formula** | In the Table, type `=` and click a cell and its reference is typed in for you (`=B3`); drag, or Shift+click, for a range (`=SUM(B2:B9`). Clicking another cell straight after replaces the reference rather than adding one, and the pointed-at cells get a dashed box. It works wherever a reference could go next — after `=`, a bracket, a comma or an operator; anywhere else a click ends the edit as before. |
 | Fix | **No double scroll bars on a maximized dashboard tile** | With the canvas scroll bars turned on, maximizing a tile left the page's own bars showing beside it — and a table, which scrolls itself, got two sets. The page's bars now step aside while a tile fills the page and come back when it is restored. |
 
 ## 0.1.27
