@@ -63,7 +63,7 @@ works when editing by hand).
 NODE = {
     "label": "Slicer",
     "category": "Viz",
-    "version": "1.3",
+    "version": "1.4",
     "card": "slicer",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe"), ("selected", "any")],

@@ -168,8 +168,10 @@ def selected_paths(raw: Any) -> list[Path]:
         return []
     try:
         parsed = json.loads(text)
+        typed = False
     except ValueError:
         parsed = [part for part in text.split(",")]
+        typed = True
     if not isinstance(parsed, list):
         parsed = [parsed]
 
@@ -178,8 +180,14 @@ def selected_paths(raw: Any) -> list[Path]:
     for item in parsed:
         if isinstance(item, (list, tuple)):
             path = tuple(str(p) for p in item if str(p) != "")
-        else:
+        elif typed:
             path = parse_path(item)
+        else:
+            # a string in the JSON is one value exactly as the card wrote
+            # it: splitting on ">" or stripping spaces turned "Sales " or
+            # "R&D > Labs" into a value no row has, so the card lost its
+            # tick and the node kept nothing, click it as you might
+            path = (str(item),) if str(item) != "" else ()
         if path and path not in seen:
             seen.add(path)
             paths.append(path)

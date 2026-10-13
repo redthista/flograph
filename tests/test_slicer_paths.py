@@ -85,6 +85,42 @@ class TestWritingTheParam:
         paths = [("north", "alpha"), ("south",)]
         assert selected_paths(dump_paths(paths)) == paths
 
+    @pytest.mark.parametrize("value", ["Sales ", " HR", "R&D > Labs",
+                                       "a>b", " both "])
+    def test_a_value_comes_back_exactly_as_ticked(self, value):
+        """Spaces at either end and a ">" are part of the value. Reading
+        them back through the hand-typed rules once trimmed "Sales " to
+        "Sales" and split "R&D > Labs" in two: the card lost its tick and
+        the node kept no rows, however often the value was clicked."""
+        assert selected_paths(dump_paths([(value,)])) == [(value,)]
+
+    def test_a_nested_value_keeps_its_spaces_too(self):
+        paths = [("north ", " store > A")]
+        assert selected_paths(dump_paths(paths)) == paths
+
+
+class TestTheNodeFilters:
+    """What the Slicer node keeps for a selection the card wrote."""
+
+    @staticmethod
+    def _run(registry, table, **params):
+        from flograph.core import compile_run
+        from tests.conftest import FakeContext
+        spec = registry.get("flograph.viz.slicer")
+        values = spec.default_params()
+        values.update(params)
+        return compile_run(spec.source, "test-slicer")(
+            FakeContext(params=values), table=table)
+
+    @pytest.mark.parametrize("value", ["Sales ", " HR", "R&D > Labs"])
+    def test_an_awkward_value_keeps_its_rows(self, registry, value):
+        import pandas as pd
+        table = pd.DataFrame({"dept": ["Sales ", " HR", "R&D > Labs", "Ops"]})
+        out = self._run(registry, table, column="dept",
+                        selected=dump_paths([(value,)]))
+        assert list(out["table"]["dept"]) == [value]
+        assert out["selected"] == [value]
+
 
 class TestPathRules:
     def test_descendant(self):
