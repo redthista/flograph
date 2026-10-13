@@ -1140,6 +1140,44 @@ class TestVanishedValues:
         assert panel.model.paths == []
         assert got == [""]
 
+    def test_it_shows_as_a_ticked_row_at_the_top(self, qtbot):
+        panel = self._stuck(qtbot)
+        assert _texts(panel.view) == ["store A (not in data)",
+                                      "store B", "store C"]
+        row = _row(panel.view, "store A (not in data)")
+        assert row.checkState(0) == Qt.Checked
+        assert row.font(0).italic()
+
+    def test_clicking_it_unticks_it_and_commits(self, qtbot):
+        panel = self._stuck(qtbot)
+        got = []
+        panel.selection_committed.connect(got.append)
+        _row(panel.view, "store A (not in data)").setCheckState(
+            0, Qt.Unchecked)
+        assert got == [""]
+        # stays put, unticked, under the click; the next refresh drops it
+        assert _row(panel.view, "store A (not in data)").checkState(0) \
+            == Qt.Unchecked
+        panel.sync_params(dict(DEFAULTS, selected=""))
+        assert _texts(panel.view) == ["store B", "store C"]
+
+    def test_all_does_not_put_it_back(self, qtbot):
+        panel = self._stuck(qtbot)
+        panel.model.toggle(("store A",))
+        panel.toolbar._on_all()
+        assert panel.model.paths == [("store B",), ("store C",)]
+
+    def test_a_tile_is_marked_missing(self, qtbot):
+        panel = self._stuck(qtbot, layout="cards")
+        tile = panel.view._buttons[("store A",)]
+        assert tile.property("slicerMissing") is True
+        assert tile.isChecked()
+
+    def test_a_present_value_gets_no_missing_row(self, qtbot):
+        panel = _panel(qtbot, [("store B",), ("store C",)],
+                       columns=("store",), params={"selected": '["store B"]'})
+        assert _texts(panel.view) == ["store B", "store C"]
+
     def test_single_mode_keeps_a_value_it_can_show(self, qtbot):
         panel = self._stuck(qtbot)
         panel.model.paths = [("store A",), ("store C",)]

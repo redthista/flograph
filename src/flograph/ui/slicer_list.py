@@ -86,6 +86,17 @@ def ink_on(colour: QColor) -> str:
 
 # --------------------------------------------------------------- selection
 
+class MissingNode(TreeNode):
+    """A ticked path the slicer's data no longer has — drawn greyed as
+    "store A (not in data)" so it can be seen and unticked."""
+
+    __slots__ = ()
+
+    def __init__(self, path) -> None:
+        super().__init__(f"{path_label(path)} (not in data)", tuple(path))
+        self.row = True
+
+
 class _Selection:
     """What is ticked, and every rule for changing it.
 
@@ -112,6 +123,9 @@ class _Selection:
         self.paths: list[tuple[str, ...]] = []
         self._roots: list[TreeNode] = []
         self._index: dict[tuple[str, ...], TreeNode] = {}
+        # ticks on values the data no longer has — see _place_missing
+        self._missing: list[TreeNode] = []
+        self._missing_index: dict[tuple[str, ...], TreeNode] = {}
 
     # ---- what there is to pick from
 
@@ -120,10 +134,24 @@ class _Selection:
         self._roots = options.tree()
         self._index = {node.path: node
                        for root in self._roots for node in root.walk()}
-        # a tick on something the column no longer offers has nothing to
-        # draw and nothing to filter; it is dropped from the view but not
-        # committed back, so a momentary gap upstream can't wipe a selection
-        self.paths = [p for p in self.paths if self._reachable(p)]
+        self._place_missing()
+
+    def _place_missing(self) -> None:
+        """Give every tick on a value the data no longer has a row of its
+        own — "store A (not in data)", greyed, at the top.
+
+        The node still filters on such a tick (to no rows, usually: a store
+        picked under one region, then the region changed upstream), so a
+        card that drew nothing for it showed an empty slicer passing
+        nothing. Shown, it says what is filtering and is one click to clear.
+
+        Taken when the data or the saved selection arrives, not on every
+        tick, so unticking one leaves its row there, unticked, rather than
+        pulling it out from under the click; the next refresh drops it.
+        """
+        self._missing = [MissingNode(p) for p in self.paths
+                         if not self._reachable(p)]
+        self._missing_index = {node.path: node for node in self._missing}
 
     def _reachable(self, path) -> bool:
         """Is `path` still a place in the tree? A path shallower than the
@@ -141,7 +169,8 @@ class _Selection:
         return self.open_levels <= 0 or depth + 1 < self.open_levels
 
     def node(self, path) -> Optional[TreeNode]:
-        return self._index.get(tuple(path))
+        path = tuple(path)
+        return self._index.get(path) or self._missing_index.get(path)
 
     # ---- reading the state
 
@@ -183,6 +212,7 @@ class _Selection:
 
     def set_paths(self, paths) -> None:
         self.paths = self._compact(normalise(paths))
+        self._place_missing()
 
     def toggle(self, path) -> None:
         path = tuple(path)
@@ -297,7 +327,11 @@ class _Selection:
             for node, children in visible:
                 # a branch that is also a row of its own counts as both:
                 # without its own entry, Select All would tick every aisle
-                # and still leave the store's own rows filtered out
+                # and still leave the store's own rows filtered out.
+                # A missing value is not something to pick — All would
+                # put back the tick it is there to let you take away
+                if isinstance(node, MissingNode):
+                    continue
                 if node.row or not children:
                     out.append(node.path)
                 visit(children)
@@ -325,8 +359,11 @@ class _Selection:
                 return (node, children)
             return None
 
-        return [row for row in (visit(root, False) for root in self._roots)
-                if row is not None]
+        # missing values first: they are what is filtering, and kept even
+        # when unticked so the row a click just cleared stays under it
+        return [(node, []) for node in self._missing] + \
+            [row for row in (visit(root, False) for root in self._roots)
+             if row is not None]
 
     def flat_rows(self, budget: int = RENDER_BUDGET):
         """`visible()` flattened for a list-shaped view: (node, depth) in
@@ -611,6 +648,8 @@ class SlicerTreeWidget(QTreeWidget):
                 item.setCheckState(0, self._model.state(node))
                 if len(node.path) > 1:
                     item.setToolTip(0, path_label(node.path))
+                if isinstance(node, MissingNode):
+                    _grey_missing(item)
                 while stack and stack[-1][0] >= depth:
                     stack.pop()
                 if stack:
@@ -835,6 +874,9 @@ class _CardsView(QScrollArea):
                            "partial" if state == Qt.PartiallyChecked
                            else "on" if state == Qt.Checked else "off")
         button.setProperty("slicerBranch", branch)
+        if isinstance(node, MissingNode):
+            button.setProperty("slicerMissing", True)
+            button.setToolTip(MISSING_TIP)
         button.setStyleSheet(self._style)
         button.clicked.connect(lambda _c=False, p=node.path: self._pick(p))
         self._buttons[node.path] = button
@@ -895,6 +937,15 @@ QToolButton[slicerState="partial"] {{
     color: {theme.NODE_TEXT.name()};
 }}
 QToolButton[slicerBranch="true"] {{ font-weight: 600; }}
+QToolButton[slicerMissing="true"] {{
+    background: transparent;
+    border: 1px dashed {colour.name()};
+    color: {theme.NODE_SUBTEXT.name()};
+    font-style: italic;
+}}
+QToolButton[slicerMissing="true"][slicerState="off"] {{
+    border-color: {theme.NODE_BORDER.name()};
+}}
 """
 
 
@@ -1448,6 +1499,18 @@ class SlicerPanel(QWidget):
 
 
 # ------------------------------------------------------------------ helpers
+
+MISSING_TIP = ("Ticked, but no longer in the data — the slicer still "
+               "filters on it. Click to untick.")
+
+
+def _grey_missing(item: QTreeWidgetItem) -> None:
+    """Draw a tree row for a missing value greyed and in italics."""
+    item.setForeground(0, theme.NODE_SUBTEXT)
+    font = item.font(0)
+    font.setItalic(True)
+    item.setFont(0, font)
+    item.setToolTip(0, MISSING_TIP)
 
 def _flatten(entries) -> list:
     """A nested (node, children) tree as a flat list, parents first."""
