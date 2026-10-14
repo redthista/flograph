@@ -218,6 +218,21 @@ class TestRendering:
     def test_a_scalar_embed_renders_inline(self, env):
         assert "3,500" in html_of("Revenue was ![[Total]] this quarter.", env)
 
+    @pytest.mark.parametrize("live", [False, True])
+    def test_a_card_embed_keeps_the_cards_format(self, env, registry, live):
+        """Reported 2026-10-14: a Card formatted ",.2f" on the canvas came
+        out in scientific notation in the web report — the report wrote
+        every scalar its own way and never read the card's Format."""
+        graph, cache = env
+        node = graph.add_node(registry.instantiate("flograph.viz.card"))
+        graph.set_label(node.id, "Revenue")
+        node.params["format"] = ",.2f"
+        cache.set(node.id, {"value": 12345678901.5}, 0.0)
+        html = render_report("Revenue: ![[Revenue]]", graph, cache,
+                             live=live).document.toHtml()
+        assert "12,345,678,901.50" in html
+        assert "e+" not in html
+
     def test_a_string_embed_is_inlined_as_markdown(self, env):
         """The programmatic path: a node returning prose becomes real
         headings and bold, not a quoted blob."""

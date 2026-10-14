@@ -1506,6 +1506,14 @@ class _Resolver:
         if hasattr(value, "itertuples") and hasattr(value, "columns"):
             return self._table(value, ref)    # duck-typed frame
 
+        # A KPI card's number arrives as the card shows it — its Format
+        # spec, and its no-format fallback — not report-wide scalar text,
+        # or ",.2f" on the canvas came out as 1.23457e+07 on the page.
+        node = self._node_for(ref)
+        from ..canvas.node_item import card_kind, kpi_text
+        if node is not None and card_kind(node) == "kpi":
+            return escape_markdown(kpi_text(
+                value, str(node.params.get("format", "") or "")))
         return format_scalar(value)
 
     def _check_outlines(self, figure, ref: str) -> None:
