@@ -14,6 +14,12 @@ bar, leave the node selected and the canvas where the node is.
 
 The bar takes the graph fresh on every keystroke, so nodes added, renamed
 or deleted while it is open are simply searched as they now are.
+
+It searches every canvas, not just the one on screen, so a hit may live on
+another canvas tab. Jumping there is the window's business (the view cannot
+change tabs), so the window takes `reveal_requested` over and sets
+`page_memory`, which lets Esc go back to the tab the search started on as
+well as to the place.
 """
 from __future__ import annotations
 
@@ -56,6 +62,11 @@ class NodeSearchBar(QFrame):
         self._view = view
         self._home: Optional[QPointF] = None
         self._home_zoom = 1.0
+        #: (current, restore) for the tab being looked at, set by the window:
+        #: `current()` names it and `restore(name)` goes back to it. Without
+        #: one the bar is a single canvas's and only the place is restored.
+        self.page_memory = None
+        self._home_page = None
 
         self._edit = QLineEdit(self)
         self._edit.setPlaceholderText("Find node…")
@@ -131,6 +142,8 @@ class NodeSearchBar(QFrame):
         self._home = self._view.mapToScene(
             self._view.viewport().rect().center())
         self._home_zoom = self._view.zoom
+        if self.page_memory is not None:
+            self._home_page = self.page_memory[0]()
         self.reposition()
         self.show()
         self.raise_()
@@ -149,6 +162,10 @@ class NodeSearchBar(QFrame):
     def cancel(self) -> None:
         """Close and put the view back where the search started."""
         if self._home is not None:
+            if self.page_memory is not None:
+                # first the tab, then the place on it: going back to the tab
+                # puts its own remembered place back, which is this one
+                self.page_memory[1](self._home_page)
             self._view.set_zoom(self._home_zoom)
             self._view.center_on_scene(self._home)
         self._close()

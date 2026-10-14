@@ -311,3 +311,47 @@ class TestFindNodeAction:
         window.action_find_node.trigger()
         assert window.page_bar.current_page_id() is None
         assert not window.view.search_bar.isHidden()
+
+    def test_a_hit_on_another_canvas_tab_goes_to_that_tab(self, window):
+        """The bar searches every canvas; a hit drawn on another one has to
+        bring its tab up, or the view centres on nothing."""
+        from PySide6.QtCore import QPointF
+        from flograph.core.page_nav import CANVAS_KIND
+        window._add_page(CANVAS_KIND)
+        canvas_id = window.page_bar.current_page_id()
+        window._add_node_at("flograph.util.constant", QPointF(40, 40))
+        far = next(n for n in window.graph.nodes.values()
+                   if n.canvas == canvas_id)
+        far.label_override = "Faraway"
+        window.page_bar.select_page(None)
+        assert window.scene.canvas_id == ""
+
+        window.action_find_node.trigger()
+        bar = window.view.search_bar
+        bar._edit.setText("Faraway")
+        assert bar.matches() == [far.id]
+        assert window.page_bar.current_page_id() == canvas_id
+        assert window.scene.canvas_id == canvas_id
+        assert window.scene.node_items[far.id].isSelected()
+
+        bar.accept()
+        assert window.page_bar.current_page_id() == canvas_id
+
+    def test_esc_goes_back_to_the_tab_the_search_started_on(self, window):
+        from PySide6.QtCore import QPointF
+        from flograph.core.page_nav import CANVAS_KIND
+        window._add_page(CANVAS_KIND)
+        canvas_id = window.page_bar.current_page_id()
+        window._add_node_at("flograph.util.constant", QPointF(40, 40))
+        far = next(n for n in window.graph.nodes.values()
+                   if n.canvas == canvas_id)
+        far.label_override = "Faraway"
+        window.page_bar.select_page(None)
+
+        window.action_find_node.trigger()
+        bar = window.view.search_bar
+        bar._edit.setText("Faraway")
+        assert window.scene.canvas_id == canvas_id
+        bar.cancel()
+        assert window.page_bar.current_page_id() is None
+        assert window.scene.canvas_id == ""

@@ -117,6 +117,12 @@ class MainWindow(QMainWindow):
                                     registry=registry, parent=self)
         self.scene.confirm_collapsed_delete = self._confirm_collapsed_delete
         self.view = NodeGraphView(self.scene)
+        # Find Node searches every canvas; a hit on another canvas tab has to
+        # change tabs to be seen, which only the window can do
+        self.view.search_bar.reveal_requested.disconnect(self.view.go_to_node)
+        self.view.search_bar.reveal_requested.connect(self._go_to_node)
+        self.view.search_bar.page_memory = (
+            lambda: self._current_page_id, self._back_to_page)
         self._canvas_stack = QStackedWidget()
         self._canvas_stack.addWidget(self.view)
         # built the first time it is asked for — see show_start_screen
@@ -5311,6 +5317,12 @@ class MainWindow(QMainWindow):
             return
         self._onto_canvas_of(node)
         self.view.go_to_node(node_id)
+
+    def _back_to_page(self, page_id) -> None:
+        """Go back to a tab the Find Node bar left, when Esc undoes its
+        excursion — the tab puts its own place back on the way in."""
+        if self.page_bar.current_page_id() != page_id:
+            self.page_bar.select_page(page_id)
 
     def _go_to_use(self, use) -> None:
         """Take the user to one answer from Where Is This Used?
