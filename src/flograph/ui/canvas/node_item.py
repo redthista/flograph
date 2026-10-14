@@ -23,6 +23,7 @@ from flograph.core import NodeInstance, PortSpec, PortType
 from flograph.core.links import link_label, source_id
 from flograph.core.node import NodeStatus
 from flograph.core.ports import FLOW_INPUT, FLOW_OUTPUT, is_flow
+from flograph.core.report import plain_number
 
 from .. import theme
 from ..proxy_cache import cache_proxy
@@ -265,8 +266,9 @@ PREVIEW_TOGGLABLE_KINDS = {"figure", "webview", "table_viewer", "slicer", "grid"
 
 def kpi_text(value, fmt: str) -> str:
     """A KPI value rendered for display: the node's format spec when it
-    applies, otherwise sensible number formatting. Shared with dashboard
-    tiles."""
+    applies, otherwise sensible number formatting — six significant digits
+    and never scientific notation. Shared with dashboard tiles and report
+    embeds."""
     if fmt:
         try:
             return format(value, fmt)
@@ -274,8 +276,9 @@ def kpi_text(value, fmt: str) -> str:
             pass
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return str(value)
-    return format(value, ",") if isinstance(value, int) \
-        else format(value, ",.6g")
+    if isinstance(value, int):
+        return format(value, ",")
+    return plain_number(value, 6)
 
 
 def kpi_caption(params: dict) -> str:

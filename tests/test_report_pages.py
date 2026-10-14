@@ -165,6 +165,9 @@ class TestTablesAndValues:
         assert format_scalar(114558.0) == "114,558"
         assert format_scalar(114558.42) == "114,558.42"
         assert format_scalar(-4200.5) == "-4,200.5"
+        # past ten digits `g` gave up and wrote 2.35185183e+10
+        assert format_scalar(23518518304.5) == "23,518,518,304"
+        assert format_scalar(0.00001234) == "0.00001234"
 
     def test_float_noise_is_still_trimmed(self):
         assert format_scalar(1 / 3) == "0.3333333333"
@@ -231,6 +234,16 @@ class TestRendering:
         html = render_report("Revenue: ![[Revenue]]", graph, cache,
                              live=live).document.toHtml()
         assert "12,345,678,901.50" in html
+        assert "e+" not in html
+
+    def test_a_card_with_no_format_has_no_scientific_notation(self, env,
+                                                              registry):
+        graph, cache = env
+        node = graph.add_node(registry.instantiate("flograph.viz.card"))
+        graph.set_label(node.id, "Revenue")
+        cache.set(node.id, {"value": 23518518304.5}, 0.0)
+        html = html_of("Revenue: ![[Revenue]]", env)
+        assert "23,518,518,304" in html
         assert "e+" not in html
 
     def test_a_string_embed_is_inlined_as_markdown(self, env):

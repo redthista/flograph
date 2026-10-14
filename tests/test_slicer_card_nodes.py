@@ -1247,6 +1247,19 @@ class TestKpiCard:
         item.set_card_value("n/a")  # non-numeric value with a numeric format
         assert item._kpi_text() == "n/a"
 
+    def test_a_blank_format_never_writes_scientific_notation(self):
+        """Six significant digits used to mean `,.6g`, which writes any
+        float of a million or more as 1.23457e+06."""
+        from flograph.ui.canvas.node_item import kpi_text
+        assert kpi_text(23518518304.5, "") == "23,518,518,304"
+        assert kpi_text(1234567.89, "") == "1,234,568"
+        assert kpi_text(114558.42, "") == "114,558"
+        assert kpi_text(3.14159265, "") == "3.14159"
+        assert kpi_text(0.0000123456789, "") == "0.0000123457"
+        assert kpi_text(-0.5, "") == "-0.5"
+        assert kpi_text(0.0, "") == "0"
+        assert kpi_text(float("nan"), "") == "nan"
+
     def test_caption_falls_back_to_aggregation_of_column(self, env, registry):
         graph, stack, scene = env
         node = graph.add_node(registry.instantiate("flograph.viz.card"))

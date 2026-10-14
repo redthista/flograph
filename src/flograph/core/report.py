@@ -20,6 +20,7 @@ into pixels belongs to the UI (see ui/report/render.py).
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -367,6 +368,27 @@ def unrun_embed(ref: str) -> str:
 #: while still cutting the float noise off something like 1/3.
 SCALAR_PRECISION = 10
 
+#: The most decimals plain_number writes. A float smaller than this shows
+#: as 0 — a number nobody reads beats a 0.000… line that runs off the card.
+_MAX_DECIMALS = 15
+
+
+def plain_number(value: float, significant: int) -> str:
+    """A float to `significant` digits, thousands separated, and never in
+    scientific notation: `g` trims as wanted but writes 23518518304.5 as
+    2.35185e+10, which is not a number to show anyone. Digits left of the
+    point are always kept — rounding the units off a total would hide it."""
+    if value != value or value in (float("inf"), float("-inf")):
+        return str(value)
+    if value == 0:
+        return "0"
+    whole_digits = math.floor(math.log10(abs(value))) + 1
+    decimals = min(_MAX_DECIMALS, max(0, significant - whole_digits))
+    text = f"{value:,.{decimals}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if text == "-0" else text
+
 
 def format_scalar(value) -> str:
     """A single value as report text — thousands separated, no scientific
@@ -376,9 +398,7 @@ def format_scalar(value) -> str:
     if isinstance(value, int):
         return f"{value:,}"
     if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            return str(value)
-        return f"{value:,.{SCALAR_PRECISION}g}"
+        return plain_number(value, SCALAR_PRECISION)
     return str(value)
 
 
