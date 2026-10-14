@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Find Node on another canvas** | **Ctrl+F** listed nodes on every canvas tab, but picking one that lived on another canvas centred the view on empty space. It now switches to that node's tab first, selects it and brings it into view — the same jump **Go to Connected Node** makes. **Esc** goes back to the tab the search started on, at the zoom and place it had. |
 
 ## 0.1.29
 
