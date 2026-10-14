@@ -152,6 +152,46 @@ def level_mask(column, value):
     return column.astype(str) == value
 
 
+def paths_mask(table, columns: Sequence[str],
+               paths: Iterable[Sequence[str]]):
+    """Which rows of `table` a selection keeps: one mask per path, OR'd.
+
+    A path of fewer values than there are columns is a *prefix*, and keeps
+    every row it prefixes — which is what makes ticking a parent mean "all
+    of it" without its children having to be listed. The Slicer filters
+    its own table with this and Apply Filters filters a second one with it,
+    so the two can't disagree about which rows a tick keeps.
+    """
+    import pandas as pd
+
+    keep = pd.Series(False, index=table.index)
+    for path in paths:
+        mask = pd.Series(True, index=table.index)
+        # zip stops at the shorter, so a ragged path tests only the levels
+        # it has — and level_mask is what knows a "(blank)" level means an
+        # empty cell rather than a column whose text reads "(blank)"
+        for column, value in zip(columns, path):
+            mask &= level_mask(table[column], value)
+        keep |= mask
+    return keep
+
+
+def as_filter(columns: Sequence[str],
+              paths: Iterable[Sequence[str]]) -> Optional[dict]:
+    """A selection as one filter in the shape an Input Panel emits, for the
+    Slicer's "filters" output — or None when nothing is ticked, since a
+    slicer with no ticks keeps every row. Its own kind, "path", because a
+    tree's selection is an OR of prefixes across columns, which the panel's
+    one-column-per-filter form can't say. `core.input_panel.apply_filter`
+    reads it through `paths_mask`."""
+    listed = [list(p) for p in paths if p]
+    if not listed or not columns:
+        return None
+    return {"field": f" {PATH_SEP} ".join(columns), "column": columns[0],
+            "columns": list(columns), "op": "in", "value": listed,
+            "kind": "path"}
+
+
 def selected_paths(raw: Any) -> list[Path]:
     """The ticked selections of a Slicer's "selected" param, as paths.
 

@@ -261,6 +261,14 @@ ticks, chosen tiles and the dropdown button, so a filter panel of three
 reads at a glance; leave it on **Theme** to follow the app. None of these
 re-runs the flow — they change the picture, not the filter.
 
+One slicer can filter more than one table. Its **filters** output carries the
+ticks themselves rather than the rows they kept: wire it into an **Apply
+Filters** node beside a second table and that table is filtered the same way —
+the same values, the same tree (a ticked region keeps all its stores),
+**(blank)** for an empty cell, and nothing ticked lets every row through.
+Columns are matched by name; where the second table calls one something else,
+say so in Apply Filters' **Column names** (`region = sales_region`).
+
 When a table wants filtering on everything at once, a **Filter Page** saves
 building a slicer per column. Wire the table in and every column arrives with
 a control of its own: a searchable checklist for categories, a two-handled

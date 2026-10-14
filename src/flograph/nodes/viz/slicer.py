@@ -55,6 +55,13 @@ whatever the mode and however deep the tree — the deepest value of each
 selection — so one picker can drive the options of the next: region picks a
 region, and the store slicer beside it only offers that region's stores.
 
+**Filtering another table.** The "filters" output carries the selection
+itself rather than the rows it kept. Wire it into an **Apply Filters** node
+with a second table and that table is filtered by the same ticks — tree,
+"(blank)" levels and all — matching columns by name, or through Apply
+Filters' "Column names" where the second table calls them something else.
+With nothing ticked it is an empty list, and the second table passes whole.
+
 Values are matched as strings; "Selected values" holds the ticked ones as a
 JSON array (["north", "south"], or [["north", "store A"]] once there is
 more than one level; a comma-separated list, with ">" between levels, also
@@ -63,10 +70,11 @@ works when editing by hand).
 NODE = {
     "label": "Slicer",
     "category": "Viz",
-    "version": "1.4",
+    "version": "1.5",
     "card": "slicer",
     "inputs": [("table", "dataframe", {"optional": True})],
-    "outputs": [("table", "dataframe"), ("selected", "any")],
+    "outputs": [("table", "dataframe"), ("selected", "any"),
+                ("filters", "any")],
 }
 PARAMS = [
     {"name": "column", "type": "columns", "label": "Column(s)",
@@ -117,9 +125,9 @@ def run(ctx, table=None):
     import pandas as pd
 
     from flograph.core.controls import lines_to_values
-    from flograph.core.slicer import (leaf_values, level_mask, matches,
-                                      normalise, parse_path, selected_paths,
-                                      slicer_columns)
+    from flograph.core.slicer import (as_filter, leaf_values, matches,
+                                      normalise, parse_path, paths_mask,
+                                      selected_paths, slicer_columns)
 
     columns = slicer_columns(ctx.params.get("column", ""))
     picked = normalise(selected_paths(ctx.params.get("selected", "")))
@@ -140,8 +148,10 @@ def run(ctx, table=None):
             if path and (not picked or matches(path, picked)):
                 rows.append(list(path) + [None] * (depth - len(path)))
         ctx.log(f"standalone slicer: {len(rows)} values")
+        flt = as_filter(names, picked)
         return {"table": pd.DataFrame(rows, columns=names),
-                "selected": leaf_values(tuple(r) for r in rows)}
+                "selected": leaf_values(tuple(r) for r in rows),
+                "filters": [flt] if flt else []}
 
     if not columns:
         raise ValueError(
@@ -153,22 +163,11 @@ def run(ctx, table=None):
             f"column {missing[0]!r} not in table (has: {available})")
 
     if not picked:
-        return {"table": table, "selected": []}
+        return {"table": table, "selected": [], "filters": []}
 
-    # One boolean mask per selected path, OR'd together: a path of fewer
-    # values than there are columns is a *prefix*, and keeps every row it
-    # prefixes — which is what makes ticking a parent mean "all of it"
-    # without its children having to be listed.
-    keep = pd.Series(False, index=table.index)
-    for path in picked:
-        mask = pd.Series(True, index=table.index)
-        # zip stops at the shorter, so a ragged path tests only the levels
-        # it has — and level_mask is what knows a "(blank)" level means an
-        # empty cell rather than a column whose text reads "(blank)"
-        for column, value in zip(columns, path):
-            mask &= level_mask(table[column], value)
-        keep |= mask
+    keep = paths_mask(table, columns, picked)
     filtered = table[keep]
     where = ", ".join(repr(c) for c in columns)
     ctx.log(f"slicer on {where}: kept {len(filtered)} of {len(table)} rows")
-    return {"table": filtered, "selected": leaf_values(picked)}
+    return {"table": filtered, "selected": leaf_values(picked),
+            "filters": [as_filter(columns, picked)]}

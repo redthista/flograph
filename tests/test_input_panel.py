@@ -441,3 +441,106 @@ class TestSize:
         assert item.body_height >= 2400 and item.width == 1200
         slider = graph.add_node(registry.instantiate("flograph.input.slider"))
         assert scene.node_items[slider.id]._resize_bounds()[3] == 600.0
+
+
+# ------------------------------------------- a Slicer's ticks, on a second table
+
+STORES = pd.DataFrame({
+    "region": ["North", "North", "South", "South", "East", None],
+    "city": ["Leeds", "York", "Bath", None, "Ely", "Hull"],
+})
+VISITS = pd.DataFrame({
+    "area": ["North", "North", "South", "South", "East", "", "North"],
+    "city": ["Leeds", "York", "Bath", "", "Ely", "Hull", "Leeds"],
+    "n": [1, 2, 3, 4, 5, 6, 7],
+})
+
+
+class TestSlicerFilters:
+    """"Take the output from a slicer and filter another dataset with the
+    same settings as the slicer" - the Slicer's "filters" output into
+    Apply Filters."""
+
+    def _flow(self, registry, column, selected, mapping="", missing="skip",
+              wired=True):
+        graph = Graph()
+        slicer = graph.add_node(registry.instantiate("flograph.viz.slicer"))
+        graph.set_param(slicer.id, "column", column)
+        graph.set_param(slicer.id, "selected", selected)
+        if wired:
+            stores = source(graph, STORES, "Stores")
+            graph.connect(stores.id, "t", slicer.id, "table")
+        else:
+            graph.set_param(slicer.id, "values", "North\nSouth\nEast")
+        visits = source(graph, VISITS, "Visits")
+        node = graph.add_node(
+            registry.instantiate("flograph.transform.apply_filters"))
+        graph.set_param(node.id, "mapping", mapping)
+        graph.set_param(node.id, "missing", missing)
+        graph.connect(visits.id, "t", node.id, "table")
+        graph.connect(slicer.id, "filters", node.id, "filters")
+        return graph, slicer, node
+
+    def _run(self, qtbot, graph, node):
+        engine, failures = run_engine(qtbot, graph)
+        assert not failures, failures
+        return engine.cache.outputs_for(node.id)["filtered"]
+
+    def test_one_column(self, qtbot, registry):
+        graph, _s, node = self._flow(registry, "region", '["South", "East"]',
+                                     mapping="region = area")
+        assert list(self._run(qtbot, graph, node)["n"]) == [3, 4, 5]
+
+    def test_nothing_ticked_keeps_every_row(self, qtbot, registry):
+        graph, slicer, node = self._flow(registry, "region", "",
+                                         mapping="region = area")
+        engine, failures = run_engine(qtbot, graph)
+        assert not failures, failures
+        assert engine.cache.outputs_for(slicer.id)["filters"] == []
+        assert len(engine.cache.outputs_for(node.id)["filtered"]) == 7
+
+    def test_a_tree_keeps_a_whole_parent_and_one_child(self, qtbot, registry):
+        # all of North, plus only Bath under South
+        graph, _s, node = self._flow(
+            registry, "region, city", '[["North"], ["South", "Bath"]]',
+            mapping="region = area")
+        assert list(self._run(qtbot, graph, node)["n"]) == [1, 2, 3, 7]
+
+    def test_blank_matches_an_empty_cell(self, qtbot, registry):
+        graph, _s, node = self._flow(
+            registry, "region, city", '[["(blank)"], ["South", "(blank)"]]',
+            mapping="region = area")
+        assert list(self._run(qtbot, graph, node)["n"]) == [4, 6]
+
+    def test_same_rows_as_the_slicer_itself(self, qtbot, registry):
+        """The second table *is* the slicer's table: it must keep exactly
+        the rows the slicer kept."""
+        graph = Graph()
+        stores = source(graph, STORES, "Stores")
+        slicer = graph.add_node(registry.instantiate("flograph.viz.slicer"))
+        graph.set_param(slicer.id, "column", "region, city")
+        graph.set_param(slicer.id, "selected",
+                        '[["North", "York"], ["(blank)"], ["East"]]')
+        graph.connect(stores.id, "t", slicer.id, "table")
+        node = graph.add_node(
+            registry.instantiate("flograph.transform.apply_filters"))
+        graph.connect(stores.id, "t", node.id, "table")
+        graph.connect(slicer.id, "filters", node.id, "filters")
+        engine, failures = run_engine(qtbot, graph)
+        assert not failures, failures
+        mine = engine.cache.outputs_for(slicer.id)["table"]
+        theirs = engine.cache.outputs_for(node.id)["filtered"]
+        assert list(theirs.index) == list(mine.index) == [1, 4, 5]
+
+    def test_a_standalone_slicer_filters_too(self, qtbot, registry):
+        graph, _s, node = self._flow(registry, "area", '["East"]',
+                                     wired=False)
+        assert list(self._run(qtbot, graph, node)["n"]) == [5]
+
+    def test_a_missing_level_skips_or_fails(self, qtbot, registry):
+        graph, _s, node = self._flow(registry, "region", '["North"]')
+        assert len(self._run(qtbot, graph, node)) == 7      # skipped
+        graph, _s, node = self._flow(registry, "region", '["North"]',
+                                     missing="fail")
+        _engine, failures = run_engine(qtbot, graph)
+        assert "no column 'region'" in failures[node.id]

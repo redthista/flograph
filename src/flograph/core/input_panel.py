@@ -31,7 +31,9 @@ value, a Between on the whole range, a date on the earliest day — so a new
 panel passes every row, and each field narrows only once it is used.
 
 The filters a panel applied are also emitted as data (`filters_from`), so
-an Apply Filters node can apply the same picks to a second table.
+an Apply Filters node can apply the same picks to a second table. A Slicer
+emits its ticks the same way, as one filter of kind "path"
+(`core.slicer.as_filter`).
 """
 from __future__ import annotations
 
@@ -409,11 +411,24 @@ def filter_of(field: dict, value: Any, params: dict) -> Optional[dict]:
             "value": value, "kind": kind}
 
 
-def apply_filter(df, flt: dict, column: Optional[str] = None):
+def filter_columns(flt: dict) -> list[str]:
+    """Every column a filter reads: one for a panel field, the levels of
+    the tree for a Slicer's (kind "path")."""
+    return list(flt.get("columns") or [flt["column"]])
+
+
+def apply_filter(df, flt: dict, column: Optional[str] = None,
+                 columns: Optional[list] = None):
     """Rows of `df` that pass one filter. `column` overrides the filter's
-    own, which is how Apply Filters maps a filter onto another table."""
+    own — `columns`, all of a Slicer filter's levels — which is how Apply
+    Filters maps a filter onto another table."""
     import pandas as pd
 
+    if flt.get("kind") == "path":
+        from flograph.core.slicer import paths_mask
+
+        return df[paths_mask(df, columns or filter_columns(flt),
+                             flt["value"])]
     column = column or flt["column"]
     series = df[column]
     op, value, kind = flt["op"], flt["value"], flt.get("kind", "number")
