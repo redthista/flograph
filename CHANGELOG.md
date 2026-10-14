@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.30
+
+| Category | Change | Details |
+| --- | --- | --- |
+
 ## 0.1.29
 
 | Category | Change | Details |
