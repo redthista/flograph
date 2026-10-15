@@ -568,8 +568,14 @@ class FloPanel(QWidget):
                        f"{LEVEL_NAMES.get(ceiling, '?')}")
         limits = "; ".join(why)
         extra = []
-        if self._privacy().hide_text:
+        privacy = self._privacy()
+        if privacy.hide_text:
             extra.append("Text typed into settings is hidden.")
+        shared = [n for n, r in privacy.columns.items()
+                  if r.share_values and not r.sensitive]
+        if shared and level >= disc.SCHEMA:
+            extra.append(f"Values shared: {', '.join(sorted(shared)[:4])}"
+                         + ("…" if len(shared) > 4 else "") + ".")
         if limits:
             extra.append(f"{limits[:1].upper()}{limits[1:]}.")
         self.sees_line.setText(" ".join([LEVEL_SEES[level]] + extra))

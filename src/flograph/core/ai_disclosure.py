@@ -58,9 +58,15 @@ class ColumnRule:
     sensitive: bool = False
     alias: str = ""
     hint: str = ""
+    # The user chose to let the AI see this column's distinct values — the
+    # only real values it is ever shown at levels 1-2. For filtering on a
+    # category ("which spelling is haematocrit?"), which it otherwise has to
+    # guess. Never for a sensitive column, never at Structure.
+    share_values: bool = False
 
     def is_default(self) -> bool:
-        return not (self.sensitive or self.alias or self.hint)
+        return not (self.sensitive or self.alias or self.hint
+                    or self.share_values)
 
 
 @dataclass
@@ -106,7 +112,8 @@ class Privacy:
                 columns[str(name)] = ColumnRule(
                     sensitive=bool(raw.get("sensitive")),
                     alias=str(raw.get("alias") or ""),
-                    hint=str(raw.get("hint") or ""))
+                    hint=str(raw.get("hint") or ""),
+                    share_values=bool(raw.get("share_values")))
         return cls(level, columns, bool(data.get("hide_text")))
 
 
@@ -194,6 +201,23 @@ def _infer_text_kind(series) -> str:
     if unique == len(sample) and len(sample) >= 20:
         return "unique per row (an id or a name)"
     return "free text"
+
+
+MAX_SHARED_VALUES = 100
+
+
+def _shared_values(column) -> dict:
+    """A shared column's distinct values, most common first, capped."""
+    try:
+        counts = column.dropna().astype(str).value_counts()
+    except Exception:
+        return {}
+    values = [v if len(v) <= 80 else v[:77] + "..."
+              for v in counts.index[:MAX_SHARED_VALUES]]
+    out: dict = {"values": values}
+    if len(counts) > MAX_SHARED_VALUES:
+        out["values_not_shown"] = int(len(counts) - MAX_SHARED_VALUES)
+    return out
 
 
 class Disclosure:
@@ -373,6 +397,8 @@ class Disclosure:
             out["hint"] = rule.hint
         if rule.sensitive:
             out["sensitive"] = True
+        elif rule.share_values and self.level >= SCHEMA:
+            out.update(_shared_values(column))
         if self.level < PROFILE:
             return out
         try:

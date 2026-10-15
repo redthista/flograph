@@ -574,3 +574,27 @@ class TestStayingOnTrack:
                               _toolbox(registry, stack)).system_prompt()
         assert "ask one short question" in prompt
         assert "this_turn_so_far" in prompt
+
+
+
+def test_the_receipt_names_shared_values(registry, stack):
+    from flograph.flo import receipt
+    graph = Graph()
+    node = registry.instantiate(CSV, (0, 0))
+    graph.add_node(node)
+    cache = _Cache({node.id: {"table": pd.DataFrame({"Test_Name": ["TSH"]})}})
+    box = _toolbox(registry, stack, graph=graph, cache=cache, level=disc.SCHEMA,
+                   privacy=Privacy(columns={"Test_Name": ColumnRule(share_values=True)}))
+    box.handle(node.id)
+    result = box.execute(ToolCall("a", "get_output", {"node": "n1"}))
+    entry = {"messages": [{"role": "system", "content": "s"},
+                          {"role": "tool", "name": "get_output", "content": result}]}
+    made = receipt.build([entry], [], box.disclosure, destination="x", local=False)
+    assert made.values == ["Test_Name"]
+    assert "the values of 1 column you share" in made.summary()
+
+
+def test_the_prompt_says_how_to_get_values(registry, stack):
+    prompt = Conversation(wire.Connection(model="m"),
+                          _toolbox(registry, stack, level=disc.SCHEMA)).system_prompt()
+    assert "Share values" in prompt and "never say what a value is" in prompt

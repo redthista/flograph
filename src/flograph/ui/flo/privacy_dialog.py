@@ -43,7 +43,7 @@ def known_columns(graph, cache) -> dict[str, list[str]]:
 
 class PrivacyDialog(QDialog):
     COLUMNS = ("Column", "Found in", "Sensitive", "Shown to the AI as",
-               "Meaning (sent with the alias)")
+               "Meaning (sent with the alias)", "Share values")
 
     def __init__(self, graph, cache, parent=None) -> None:
         super().__init__(parent)
@@ -87,6 +87,7 @@ class PrivacyDialog(QDialog):
         header.setStretchLastSection(True)
         self._names: list[str] = []
         self._sensitive: list[QCheckBox] = []
+        self._share: list[QCheckBox] = []
         for row, (name, where) in enumerate(sorted(
                 columns.items(), key=lambda kv: kv[0].lower())):
             rule = self._privacy.columns.get(name) or disc.ColumnRule()
@@ -109,6 +110,19 @@ class PrivacyDialog(QDialog):
             self._sensitive.append(box)
             self.table.setItem(row, 3, QTableWidgetItem(rule.alias))
             self.table.setItem(row, 4, QTableWidgetItem(rule.hint))
+            share = QCheckBox()
+            share.setChecked(rule.share_values)
+            share.setToolTip(
+                "Let the AI see this column's distinct values (the 100 most "
+                "common) — for filtering on a category such as a test name or "
+                "a region. Not for a sensitive column, and never at Structure.")
+            holder = QWidget()
+            centre = QHBoxLayout(holder)
+            centre.setContentsMargins(0, 0, 0, 0)
+            centre.setAlignment(Qt.AlignCenter)
+            centre.addWidget(share)
+            self.table.setCellWidget(row, 5, holder)
+            self._share.append(share)
         self.table.resizeColumnsToContents()
         layout.addWidget(self.table, 1)
         if not columns:
@@ -156,7 +170,10 @@ class PrivacyDialog(QDialog):
         for row, name in enumerate(self._names):
             alias = (self.table.item(row, 3).text() or "").strip()
             hint = (self.table.item(row, 4).text() or "").strip()
+            sensitive = self._sensitive[row].isChecked()
             columns[name] = disc.ColumnRule(
-                sensitive=self._sensitive[row].isChecked(), alias=alias, hint=hint)
+                sensitive=sensitive, alias=alias, hint=hint,
+                # sensitive wins: its values are never shared
+                share_values=self._share[row].isChecked() and not sensitive)
         return disc.Privacy(self.level.currentData(), columns,
                             self.hide_text.isChecked()).to_dict()

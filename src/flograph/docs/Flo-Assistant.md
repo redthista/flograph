@@ -74,6 +74,12 @@ so its tables exist) and lets you set, for each one:
   ever knowing it as `Customer`.
 - **Meaning** — a note sent with the alias, standing in for what the real
   name would have told it.
+- **Share values** — let it see this column's distinct values (the 100
+  most common). Off by default, and the only real values it is shown at
+  Schema or Profile. Tick it for a category you want it to filter on — a
+  test name, a region — so it uses the exact spelling instead of guessing.
+  Never for a sensitive column, never at Structure; the receipt says when
+  values went.
 
 These, and the flow's limit, are saved in the flow. Whoever you send it to
 gets the same limit: their connection can lower it but not raise it. It is

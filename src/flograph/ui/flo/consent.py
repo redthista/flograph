@@ -33,6 +33,11 @@ def will_see(level: int, privacy: disc.Privacy) -> list[str]:
             extra.append(f"{hidden} marked sensitive")
         out.append("Column names and types" + (f" ({', '.join(extra)})"
                                                if extra else ""))
+    shared = sorted(name for name, rule in privacy.columns.items()
+                    if rule.share_values and not rule.sensitive)
+    if level >= disc.SCHEMA and shared:
+        out.append("The distinct values of the columns you chose to share: "
+                   + ", ".join(shared))
     if level >= disc.PROFILE:
         out.append("Per column: how much is empty and how many distinct values "
                    "— and, for numbers and dates, the smallest and largest "

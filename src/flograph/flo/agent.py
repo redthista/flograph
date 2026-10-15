@@ -88,14 +88,24 @@ lines, and anything the user should check or set themselves.
 What you may see of the data: {level}.
 {visibility}"""
 
+_NO_GUESSING = (
+    " You cannot see any other values, so never say what a value is or that "
+    "you found one. To filter on a category whose values you can't see, ask "
+    "the user to tick 'Share values' for that column in Privacy… (top of the "
+    "Flo panel) — or to tell you the exact value — and stop there.")
+
 _VISIBILITY = {
     disc.STRUCTURE: "You cannot see column names or any values. Where a "
                     "setting needs a column, ask the user to name it, or leave "
                     "it for them and say so. '<column>' marks a hidden name.",
-    disc.SCHEMA: "You can see column names and types, but never any values.",
+    disc.SCHEMA: "You can see column names and types, but no values — "
+                 "except where a column lists 'values': the user chose to "
+                 "share that column's distinct values." + _NO_GUESSING,
     disc.PROFILE: "You can see column names and types, and per column its "
                   "empty share, distinct count, numeric/date range and what it "
-                  "looks like — but never the rows themselves.",
+                  "looks like — but never the rows themselves. A column that "
+                  "lists 'values' is one whose distinct values the user chose "
+                  "to share." + _NO_GUESSING,
 }
 
 

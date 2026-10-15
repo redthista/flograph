@@ -35,6 +35,7 @@ class Receipt:
     aliased: list = field(default_factory=list)     # (real, alias) pairs
     profiled: list = field(default_factory=list)    # shown names with stats
     ranges: list = field(default_factory=list)      # shown names with min/max
+    values: list = field(default_factory=list)      # shown names, values shared
     settings_nodes: int = 0              # nodes whose settings were sent
     text_hidden: bool = False            # typed setting text was withheld
 
@@ -62,6 +63,9 @@ class Receipt:
         elif self.profiled:
             parts.append(f"counts for {len(self.profiled)} "
                          f"column{_s(len(self.profiled))}")
+        if self.values:
+            parts.append(f"the values of {len(self.values)} "
+                         f"column{_s(len(self.values))} you share")
         parts.append("no rows")
         return f"{where}: " + ", ".join(parts) + "."
 
@@ -77,6 +81,9 @@ class Receipt:
                        + ", ".join(self.profiled))
         if self.ranges:
             out.append("Smallest and largest value: " + ", ".join(self.ranges))
+        if self.values:
+            out.append("Distinct values (you chose to share): "
+                       + ", ".join(self.values))
         if self.settings_nodes:
             out.append(f"Settings of {self.settings_nodes} node"
                        f"{_s(self.settings_nodes)}, "
@@ -106,7 +113,8 @@ def _columns_in(value: Any) -> Iterable[dict]:
     """Every column description in a get_output result."""
     if isinstance(value, dict):
         if "name" in value and "type" in value and (
-                "empty_percent" in value or "distinct" in value or "min" in value):
+                "empty_percent" in value or "distinct" in value
+                or "min" in value or "values" in value):
             yield value
         for item in value.values():
             yield from _columns_in(item)
@@ -175,6 +183,8 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
                 receipt.profiled.append(shown)
             if "min" in column:
                 receipt.ranges.append(shown)
+            if "values" in column:
+                receipt.values.append(shown)
 
     receipt.nodes = len(described)
     receipt.settings_nodes = len(with_settings)
@@ -182,4 +192,5 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
     receipt.columns = sorted(found_real - {real_name for real_name, _ in receipt.aliased})
     receipt.profiled = sorted(set(receipt.profiled))
     receipt.ranges = sorted(set(receipt.ranges))
+    receipt.values = sorted(set(receipt.values))
     return receipt

@@ -185,3 +185,43 @@ class TestErrorText:
         disclosure = Disclosure(d.STRUCTURE, Privacy(), known_columns=["price"])
         out = disclosure.error_text('KeyError: "price"')
         assert "price" not in out
+
+
+
+class TestShareValues:
+    TABLE = pd.DataFrame({"Test_Name": ["Hematocrit (HCT)", "TSH", "TSH"],
+                          "Patient": ["a", "b", "c"]})
+
+    def _cols(self, level, rule):
+        disclosure = Disclosure(level, Privacy(columns={"Test_Name": rule}))
+        return {c["name"]: c for c in disclosure.describe(self.TABLE)["columns"]}
+
+    def test_only_a_shared_column_shows_its_values(self):
+        cols = self._cols(d.SCHEMA, ColumnRule(share_values=True))
+        assert cols["Test_Name"]["values"] == ["TSH", "Hematocrit (HCT)"]
+        assert "values" not in cols["Patient"]
+
+    def test_off_by_default(self):
+        cols = self._cols(d.SCHEMA, ColumnRule())
+        assert "values" not in cols["Test_Name"]
+
+    def test_sensitive_wins(self):
+        cols = self._cols(d.PROFILE, ColumnRule(sensitive=True, share_values=True))
+        assert "values" not in cols["Test_Name"]
+
+    def test_never_at_structure(self):
+        disclosure = Disclosure(d.STRUCTURE, Privacy(columns={
+            "Test_Name": ColumnRule(share_values=True)}))
+        assert "Hematocrit" not in json.dumps(disclosure.describe(self.TABLE))
+
+    def test_capped(self):
+        table = pd.DataFrame({"c": [f"v{i}" for i in range(150)]})
+        disclosure = Disclosure(d.SCHEMA, Privacy(columns={
+            "c": ColumnRule(share_values=True)}))
+        col = disclosure.describe(table)["columns"][0]
+        assert len(col["values"]) == 100 and col["values_not_shown"] == 50
+
+    def test_saved_in_the_flow(self):
+        data = Privacy(columns={"c": ColumnRule(share_values=True)}).to_dict()
+        assert data == {"columns": {"c": {"share_values": True}}}
+        assert Privacy.from_dict(data).columns["c"].share_values
