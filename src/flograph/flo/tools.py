@@ -597,9 +597,14 @@ class Toolbox:
             source = self._node(handle)
         twin = self._twin(spec.type_id, source, checked)
         if twin is not None:
-            raise _ToolError(f"{self.handle(twin)} is already that node, added "
-                             "earlier this turn — use it instead of adding "
-                             "another")
+            inst = self.graph.node(twin)
+            unset = [p.name for p in inst.spec.params
+                     if p.type == "columns" and not inst.params.get(p.name)][:6]
+            raise _ToolError(
+                f"{self.handle(twin)} is already that node, added earlier this "
+                "turn — use it instead of adding another"
+                + (f". Its {', '.join(unset)} are not set yet: set them with "
+                   f"set_params on {self.handle(twin)}" if unset else ""))
         near_id = (self._node(near).id if near else
                    source.id if source is not None else None)
         pos, canvas = self._place(near_id)

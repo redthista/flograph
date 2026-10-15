@@ -225,3 +225,18 @@ class TestShareValues:
         data = Privacy(columns={"c": ColumnRule(share_values=True)}).to_dict()
         assert data == {"columns": {"c": {"share_values": True}}}
         assert Privacy.from_dict(data).columns["c"].share_values
+
+
+
+class TestCharts:
+    def test_a_chart_is_counted_not_shown(self):
+        import plotly.graph_objects as go
+        fig = go.Figure([go.Scatter(x=[1, 2, 3], y=[5.0, None, 7.0], name="HCT")])
+        out = Disclosure(d.SCHEMA).describe(fig)
+        assert out == {"kind": "chart", "traces": [
+            {"type": "scatter", "name": "HCT", "points": 2}]}
+
+    def test_an_empty_chart_says_so(self):
+        import plotly.graph_objects as go
+        out = Disclosure(d.SCHEMA).describe(go.Figure())
+        assert out["traces"] == [] and "draws nothing" in out["note"]

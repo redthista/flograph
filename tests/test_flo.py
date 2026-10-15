@@ -598,3 +598,14 @@ def test_the_prompt_says_how_to_get_values(registry, stack):
     prompt = Conversation(wire.Connection(model="m"),
                           _toolbox(registry, stack, level=disc.SCHEMA)).system_prompt()
     assert "Share values" in prompt and "never say what a value is" in prompt
+
+
+
+def test_a_refused_duplicate_says_what_is_unset(registry, stack):
+    box = _toolbox(registry, stack)
+    box.execute(ToolCall("a", "add_node", {"type_id": CSV}))
+    box.execute(ToolCall("b", "add_node", {"type_id": PLOTLY, "input_from": "n1"}))
+    out = json.loads(box.execute(ToolCall("c", "add_node", {
+        "type_id": PLOTLY, "input_from": "n1"})))
+    assert "n2 is already that node" in out["error"]
+    assert "x" in out["error"] and "set_params on n2" in out["error"]

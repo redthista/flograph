@@ -203,6 +203,28 @@ def _infer_text_kind(series) -> str:
     return "free text"
 
 
+def _plotly_traces(value) -> Optional[list]:
+    """(type, name, points) per trace of a Plotly figure, or None."""
+    data = getattr(value, "data", None)
+    if data is None or not hasattr(value, "layout") or not isinstance(
+            data, (list, tuple)):
+        return None
+    out = []
+    for trace in data:
+        points = 0
+        for key in ("y", "x", "values", "z", "r"):
+            seq = getattr(trace, key, None)
+            if seq is not None:
+                try:
+                    points = sum(1 for v in seq if v is not None and v == v)
+                except TypeError:
+                    points = 0
+                break
+        out.append((str(getattr(trace, "type", "") or ""),
+                    str(getattr(trace, "name", "") or ""), points))
+    return out
+
+
 MAX_SHARED_VALUES = 100
 
 
@@ -384,6 +406,16 @@ class Disclosure:
             return out
         if value is None:
             return {"kind": "nothing"}
+        traces = _plotly_traces(value)
+        if traces is not None:
+            # what a chart draws, counted: a model can't look at it, and
+            # without this an empty chart and a full one read the same
+            out = {"kind": "chart", "traces": [
+                {"type": kind, "name": self.scrub(name), "points": points}
+                for kind, name, points in traces[:20]]}
+            if not any(points for _, _, points in traces):
+                out["note"] = "the chart draws nothing — check its x and y"
+            return out
         return {"kind": type(value).__name__}
 
     def _column(self, name: str, series) -> dict:
