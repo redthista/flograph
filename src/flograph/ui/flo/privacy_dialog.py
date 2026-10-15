@@ -47,7 +47,7 @@ class PrivacyDialog(QDialog):
 
     def __init__(self, graph, cache, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("What the Flo Assistant May See of This Flow")
+        self.setWindowTitle("Privacy for This Flow")
         self.resize(760, 520)
         self._privacy = disc.Privacy.from_dict(graph.ai_privacy)
         layout = QVBoxLayout(self)
@@ -63,6 +63,11 @@ class PrivacyDialog(QDialog):
         self.level.setCurrentIndex(max(0, self.level.findData(self._privacy.level)))
         form.addRow("This flow allows at most:", self.level)
         layout.addLayout(form)
+        self.hide_text = QCheckBox(
+            "Hide text typed into settings — a filter's values, a date, a "
+            "query. Column names in settings still follow the rules below.")
+        self.hide_text.setChecked(self._privacy.hide_text)
+        layout.addWidget(self.hide_text)
         note = QLabel(
             "Saved in the flow, so whoever you send it to gets the same "
             "limit — their connection can lower it, not raise it. It is a "
@@ -153,4 +158,5 @@ class PrivacyDialog(QDialog):
             hint = (self.table.item(row, 4).text() or "").strip()
             columns[name] = disc.ColumnRule(
                 sensitive=self._sensitive[row].isChecked(), alias=alias, hint=hint)
-        return disc.Privacy(self.level.currentData(), columns).to_dict()
+        return disc.Privacy(self.level.currentData(), columns,
+                            self.hide_text.isChecked()).to_dict()

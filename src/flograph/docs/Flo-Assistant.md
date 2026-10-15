@@ -5,28 +5,42 @@ change it. Ask for *"a bar chart of sales by region from my Excel reader"*
 and it finds the right nodes, adds them, wires them up and sets their
 options, and then tells you what it did.
 
+Privacy comes first: the panel always shows where your words go, every
+reply ends with a receipt of what left, and nothing is sent until you
+press Enter.
+
 Open it with **Tools ▸ Flo Assistant**, **Ctrl+Shift+A**, or the **Flo**
 button on the title bar. It needs a connection first: see **Tools ▸ AI
 Assistant Settings**, which works with a local server (Ollama, LM Studio,
 llama.cpp) or an online one (a work gateway, Anthropic, OpenAI,
 OpenRouter), in either the OpenAI or the Anthropic API format.
 
-## The header
+## The privacy card
 
-- **Connection** — which of your saved connections to use. The badge says
-  **Local** (the server is on this PC, so nothing leaves it) or **Online**
-  (hover it to see the host). Switching to a different connection starts a
-  fresh chat, so nothing the last server was shown goes to the new one.
+Under the connection name (top left — click it to switch) sits a card
+that always says where your words go and what the AI sees:
+**Local — nothing leaves this PC** in green, or **Online — sent to
+*host*** in amber. Switching to a different connection starts a fresh
+chat, so nothing the last server was shown goes to the new one.
+
+The first time you send to an online server, Flo asks first and lists
+exactly what that server will see and what it never will. Tick *Don't ask
+again for this connection* to stop it asking; it asks again if you later
+let it see more.
+
+The card carries the two dials:
+
 - **Sees** — how much of your data it is told about:
   - **Structure** — the flow only: node types, wires and settings. Column
     names are replaced with `<column>` everywhere, even in what you type.
-  - **Schema** — column names and types too. No values.
+  - **Schema** — column names and types too. No rows.
   - **Profile** — also, per column, how much of it is empty, how many
     distinct values it has, its numeric or date range, and what it looks
     like (emails, IDs, a few categories). Never the rows themselves.
 - **Can** — **Advise** lets it look and explain but not change anything;
   **Act** lets it add, wire, set, rename and delete nodes.
-- **Columns…** — this flow's own limit, and a rule per column (below).
+- **Privacy…** — this flow's own limit, a rule per column, and hiding
+  text typed into settings (below).
 
 *Sees* can never go above the lowest of two limits: the connection's
 (set per connection in AI Assistant Settings — an online one starts at
@@ -37,9 +51,19 @@ level let through.
 The limit is enforced by what the AI is *able* to ask for, not by asking it
 nicely: at Structure it is not given the tool that reads columns at all.
 
-## Per-column rules
+## Privacy for this flow
 
-**Columns…** lists every column the flow has in hand (run the flow first,
+**Privacy…** sets the most this flow lets the AI see, whatever the
+connection allows.
+
+**Hide text typed into settings.** Node settings go to the AI as written,
+so a filter like `customer == "Jane Smith"` sends Jane's name — at every
+level, even Structure. Tick this and typed text goes as
+`<text, 22 characters>` instead (a setting that is just a column name
+still follows the column rules). The AI can still set such settings; it
+just can't read what is in them.
+
+It also lists every column the flow has in hand (run the flow first,
 so its tables exist) and lets you set, for each one:
 
 - **Sensitive** — send its name and type only: no ranges, counts or
@@ -65,6 +89,20 @@ running joins that reply's undo step.
 
 **Stop** takes effect as soon as the AI next answers: whatever it asked to
 do in that answer is not done.
+
+## The receipt
+
+Every reply ends with a line saying what it sent and where — for example
+*Sent to ai.example.com: your message, the flow (3 nodes), 6 column
+names, no rows.* **details** lists the column names, which ones went under
+an alias, which had their ranges sent, and whether typed setting text was
+included. The receipt is read back from the requests that actually went,
+not worked out from the dials, so it reports what left rather than what
+should have.
+
+At **Profile**, the smallest and largest value of number and date columns
+are real values from your data; the receipt names those columns. Mark a
+column *Sensitive* to keep them back.
 
 ## What was sent
 

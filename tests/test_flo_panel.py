@@ -59,23 +59,24 @@ def _turn(qtbot, panel, text="Bar chart of sales by region"):
 class TestDials:
     def test_local_connection_may_see_profile(self, qtbot, registry, settings, user_dir):
         panel = _panel(qtbot, registry, settings)
-        assert panel.badge.text() == "Local"
+        assert panel.where.text() == "Local — nothing leaves this PC"
         assert panel.level() == disc.PROFILE
-        assert "nothing leaves this PC" in panel.limit_note.text()
+        assert panel.sees_btn.text().startswith("Sees: Profile")
+        assert "never rows" in panel.sees_line.text()
 
     def test_online_connection_defaults_to_schema(self, qtbot, registry, settings, user_dir):
         panel = _panel(qtbot, registry, settings, active=ONLINE)
-        assert panel.badge.text() == "Online"
+        assert panel.where.text() == "Online — sent to ai.example.com"
         assert panel.level() == disc.SCHEMA
-        assert not panel.level_combo.model().item(disc.PROFILE).isEnabled()
-        assert "ai.example.com" in panel.limit_note.text()
+        assert not panel.level_actions[disc.PROFILE].isEnabled()
+        assert "This connection allows up to Schema" in panel.sees_line.text()
 
     def test_the_flow_can_lower_it(self, qtbot, registry, settings, user_dir):
         graph = Graph()
         graph.ai_privacy = {"level": 0}
         panel = _panel(qtbot, registry, settings, graph=graph)
         assert panel.level() == disc.STRUCTURE
-        assert "This flow allows up to Structure" in panel.limit_note.text()
+        assert "This flow allows up to Structure" in panel.sees_line.text()
 
     def test_the_chat_choice_is_remembered_but_clamped(self, qtbot, registry, settings, user_dir):
         settings.setValue("flo/level", disc.SCHEMA)
@@ -96,8 +97,7 @@ class TestTurns:
         assert panel.undo_stack.count() == 1
         record = panel._turns[0]
         assert "undo:0" in record["footer"].text()
-        assert "4 requests" in record["footer"].text() or \
-            "5 requests" in record["footer"].text()
+        assert "sent:0" in record["footer"].text()
         panel._on_link("undo:0")
         assert not panel.graph.nodes
         assert "Undone" in record["footer"].text()
@@ -159,7 +159,7 @@ class TestTurns:
                                           registry, settings, user_dir):
         model = ScriptedModel(monkeypatch, ["You could add a chart."])
         panel = _panel(qtbot, registry, settings)
-        panel.autonomy_combo.setCurrentIndex(0)      # Advise
+        panel.choose_autonomy("advise")
         _turn(qtbot, panel, "what should I do?")
         names = {t["function"]["name"] for t in model.bodies[0]["tools"]}
         assert "describe_flow" in names and "add_node" not in names
@@ -206,7 +206,7 @@ class TestFreshChats:
         settings.setValue("flo/level", disc.SCHEMA)
         panel = _panel(qtbot, registry, settings)
         _turn(qtbot, panel, "hi")
-        panel._on_level_chosen(disc.PROFILE)
+        panel.choose_level(disc.PROFILE)
         assert panel.chat is not None
 
     def test_switching_connection_starts_a_fresh_chat(self, qtbot, monkeypatch,
@@ -214,7 +214,7 @@ class TestFreshChats:
         ScriptedModel(monkeypatch, ["hello"])
         panel = _panel(qtbot, registry, settings)
         _turn(qtbot, panel, "hi")
-        panel._on_profile_chosen(panel.profile_combo.findData("web"))
+        panel.choose_profile("web")
         assert panel.chat is None
         assert profiles.load().active_id == "web"
 
@@ -324,3 +324,99 @@ class TestWindow:
         window._replace_graph(loaded)
         assert window.graph.ai_privacy == loaded.ai_privacy
         assert window.flo_panel.level() == disc.STRUCTURE
+
+
+class TestReceipt:
+    def test_it_says_what_went_and_where(self, qtbot, monkeypatch, registry,
+                                         settings, user_dir):
+        from flograph.core.graph import Graph as G
+        graph = G()
+        node = registry.instantiate(CSV, (0, 0))
+        graph.add_node(node)
+        cache = _Cache({node.id: {"table": pd.DataFrame(
+            {"region": ["a", "b"], "sales": [1, 5], "secret": [1, 2]})}})
+        graph.ai_privacy = {"columns": {"secret": {"alias": "score"}}}
+        ScriptedModel(monkeypatch, [[("get_output", {"node": "n1"})], "done"])
+        panel = _panel(qtbot, registry, settings, graph=graph, cache=cache)
+        panel.toolbox = None
+        # n1 has to exist as a handle: describe first in a real chat
+        assert panel._ensure_chat()
+        panel.toolbox.handle(node.id)
+        _turn(qtbot, panel, "what's in it?")
+        receipt = panel._turns[0]["receipt"]
+        assert receipt.local and receipt.message
+        assert receipt.columns == ["region", "sales"]
+        assert receipt.aliased == [("secret", "score")]
+        assert receipt.ranges == ["sales", "score"]
+        assert receipt.summary().startswith("Stayed on this PC: your message")
+        assert "no rows" in receipt.summary()
+        assert any("Smallest and largest" in line for line in receipt.details())
+
+    def test_structure_level_sends_no_names(self, qtbot, monkeypatch, registry,
+                                            settings, user_dir):
+        from flograph.core.graph import Graph as G
+        graph = G()
+        node = registry.instantiate(CSV, (0, 0))
+        graph.add_node(node)
+        graph.ai_privacy = {"level": 0}
+        cache = _Cache({node.id: {"table": pd.DataFrame({"region": ["a"]})}})
+        ScriptedModel(monkeypatch, [[("describe_flow", {})], "ok"])
+        panel = _panel(qtbot, registry, settings, graph=graph, cache=cache)
+        _turn(qtbot, panel, "chart region please")
+        receipt = panel._turns[0]["receipt"]
+        assert receipt.columns == [] and receipt.nodes == 1
+        assert "column name" not in receipt.summary()
+
+
+class TestConsent:
+    def test_online_asks_once_and_cancel_sends_nothing(self, qtbot, monkeypatch,
+                                                       registry, settings, user_dir):
+        model = ScriptedModel(monkeypatch, ["hi", "again"])
+        panel = _panel(qtbot, registry, settings, active=ONLINE)
+        asked = []
+        monkeypatch.setattr(panel, "_ask_consent",
+                            lambda p, level: asked.append(level) or (False, False))
+        panel.input.setPlainText("hello")
+        assert not panel.send()
+        assert not model.bodies and panel.input.toPlainText() == "hello"
+        monkeypatch.setattr(panel, "_ask_consent",
+                            lambda p, level: asked.append(level) or (True, False))
+        _turn(qtbot, panel, "hello")
+        _turn(qtbot, panel, "and again")
+        assert asked == [disc.SCHEMA, disc.SCHEMA]   # not asked a third time
+
+    def test_remembered_per_connection_and_level(self, qtbot, monkeypatch,
+                                                 registry, settings, user_dir):
+        ScriptedModel(monkeypatch, ["hi"])
+        panel = _panel(qtbot, registry, settings, active=ONLINE)
+        monkeypatch.setattr(panel, "_ask_consent", lambda p, level: (True, True))
+        _turn(qtbot, panel, "hello")
+        assert settings.value("flo/agreed/web", type=int) == disc.SCHEMA
+        assert panel._agreed_to(ONLINE, disc.STRUCTURE)
+        assert not panel._agreed_to(ONLINE, disc.PROFILE)
+
+    def test_local_never_asks(self, qtbot, monkeypatch, registry, settings, user_dir):
+        ScriptedModel(monkeypatch, ["hi"])
+        panel = _panel(qtbot, registry, settings)
+        monkeypatch.setattr(panel, "_ask_consent",
+                            lambda *a: pytest.fail("asked for a local server"))
+        _turn(qtbot, panel, "hello")
+
+    def test_the_lists_follow_the_rules(self):
+        from flograph.ui.flo.consent import never_sees, will_see
+        privacy = disc.Privacy(columns={"a": disc.ColumnRule(sensitive=True)},
+                               hide_text=True)
+        seen = " ".join(will_see(disc.PROFILE, privacy))
+        assert "1 marked sensitive" in seen and "smallest and largest" in seen
+        assert "text you typed into settings is hidden" in seen
+        assert "Column names" in " ".join(never_sees(disc.STRUCTURE))
+        assert "Column names" not in " ".join(never_sees(disc.SCHEMA))
+
+
+def test_privacy_dialog_hide_text_round_trips(qtbot):
+    graph = Graph()
+    graph.ai_privacy = {"hide_text": True}
+    dialog = PrivacyDialog(graph, None)
+    qtbot.addWidget(dialog)
+    assert dialog.hide_text.isChecked()
+    assert dialog.privacy() == {"hide_text": True}

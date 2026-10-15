@@ -41,6 +41,8 @@ STRUCTURE, SCHEMA, PROFILE, LOOKALIKE, SAMPLE, ANALYSE = range(6)
 BUILT_MAX = PROFILE           # the highest level this module can serve
 HIDDEN_COLUMN = "<column>"
 HIDDEN_SECRET = "<hidden>"
+# setting types whose value is whatever the user typed
+_FREE_TEXT = {"", "string", "text", "date", "auto", "code", "expression"}
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 _URL = re.compile(r"^(https?|ftp)://", re.IGNORECASE)
@@ -66,15 +68,21 @@ class Privacy:
     # allows". Lowering only: the level in force is never above the ceiling.
     level: Optional[int] = None
     columns: dict = field(default_factory=dict)   # real name -> ColumnRule
+    # Text typed into settings (a filter's `name == "Jane"`, a date, a
+    # query) is data too. On, it goes as `<text, N characters>` unless it
+    # is just a column name, which the column rules already cover.
+    hide_text: bool = False
 
     def is_default(self) -> bool:
-        return self.level is None and all(
+        return self.level is None and not self.hide_text and all(
             rule.is_default() for rule in self.columns.values())
 
     def to_dict(self) -> dict:
         out: dict = {}
         if self.level is not None:
             out["level"] = self.level
+        if self.hide_text:
+            out["hide_text"] = True
         cols = {name: {k: v for k, v in vars(rule).items() if v}
                 for name, rule in self.columns.items() if not rule.is_default()}
         if cols:
@@ -97,7 +105,7 @@ class Privacy:
                     sensitive=bool(raw.get("sensitive")),
                     alias=str(raw.get("alias") or ""),
                     hint=str(raw.get("hint") or ""))
-        return cls(level, columns)
+        return cls(level, columns, bool(data.get("hide_text")))
 
 
 def effective_level(ceiling: int, flow_level: Optional[int] = None,
@@ -275,6 +283,10 @@ class Disclosure:
         """A node param as it may be shown."""
         if ptype == "password":
             return HIDDEN_SECRET if value else ""
+        if isinstance(value, str) and self.privacy.hide_text \
+                and ptype in _FREE_TEXT and value.strip() \
+                and not self._only_columns(value):
+            return f"<text, {len(value)} characters>"
         if isinstance(value, str):
             if ptype.startswith(("file", "folder", "path", "save", "open")) \
                     or (_PATHISH.match(value) and len(value) < 400):
@@ -285,6 +297,11 @@ class Disclosure:
         if isinstance(value, dict):
             return {self.scrub(str(k)): self.param_value(v) for k, v in value.items()}
         return value
+
+    def _only_columns(self, value: str) -> bool:
+        """A setting that just names columns ("region" or "a, b")."""
+        parts = [part.strip() for part in value.split(",")]
+        return any(parts) and all(part in self._known for part in parts if part)
 
     # -- values ---------------------------------------------------------------
 

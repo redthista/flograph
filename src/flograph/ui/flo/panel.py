@@ -1,14 +1,20 @@
 """The Flo Assistant dock: a chat that can read and change the flow.
 
-The header carries the two dials and where the words go:
+Privacy is the first thing on the panel, not a setting behind it. The
+**privacy card** under the connection says in plain words where the words
+go (*Local — nothing leaves this PC* / *Online — sent to <host>*), what the
+AI sees and what it never sees, and carries the two dials:
 
-- the **connection** (a profile from AI Assistant Settings) and a badge
-  saying *Local — nothing leaves this PC* or *Online — <host>*;
 - **Sees** — Structure / Schema / Profile, never above the lowest of the
-  connection's ceiling and the flow's own cap (Columns… sets that, with the
-  per-column Sensitive / Alias rules);
+  connection's ceiling and the flow's own cap (Privacy… sets that, the
+  per-column Sensitive / Alias rules, and hiding typed setting text);
 - **Can** — Advise (look and explain) or Act (change the flow; each reply
   is one undo step).
+
+Every reply ends with a **receipt** read back from the requests that went
+(`flo/receipt.py`): where they went, which column names, whether any
+ranges, and that no rows did. The first send to an online server asks
+first (`consent.py`), listing what it will and won't see.
 
 What the model is shown is decided by `core/ai_disclosure.py` and by which
 tools exist (`flo/tools.py`) — this file only picks the dials and shows the
@@ -18,24 +24,24 @@ result. Two rules are enforced here because only the dock sees them happen:
   server was shown is replayed to a new one;
 - **lowering** what it sees starts a fresh chat too: the history holds what
   the higher level let through, and every request resends the history.
-
-Every request is kept in the conversation's outbox (each reply has a *What
-was sent* link), written to the send log, and — with *Confirm Every Send*
-on — shown for approval before it goes.
 """
 from __future__ import annotations
 
 import time
 from typing import Optional
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QDesktopServices, QKeyEvent
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QAction, QActionGroup, QColor, QDesktopServices, QIcon, QKeyEvent,
+    QPainter, QPainterPath, QPixmap,
+)
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QMenu, QPlainTextEdit,
-    QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton,
+    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ...core import ai_disclosure as disc
+from ...flo import receipt as receipts
 from ...flo.agent import Conversation, Event, TurnResult
 from ...flo.sendlog import SendLog, log_dir
 from ...flo.tools import ACT, ADVISE, Toolbox
@@ -50,7 +56,14 @@ LEVEL_TIPS = {
        "they are replaced with <column> everywhere, even in what you type.",
     1: "Column names and types, as well as the flow. No values.",
     2: "Column names and types, plus per column its empty share, distinct "
-       "count, range and what it looks like (emails, IDs…). Never rows.",
+       "count, smallest and largest value, and what it looks like (emails, "
+       "IDs…). Never rows.",
+}
+# what the card says it sees, by level — short, plain, no jargon
+LEVEL_SEES = {
+    0: "Sees the flow only — no column names, never rows.",
+    1: "Sees the flow, column names and types — never rows.",
+    2: "Sees the flow, column names, types and ranges — never rows.",
 }
 AUTONOMY = ((ADVISE, "Advise", "Look at the flow and explain or suggest — "
              "it cannot change anything"),
@@ -70,22 +83,81 @@ TOOL_WORDS = {
     "rename_node": "Renaming a node",
     "delete_nodes": "Deleting nodes",
 }
+ACTION_MARK = {"add_node": "+", "delete_nodes": "−", "connect": "→",
+               "disconnect": "×"}
+SUGGESTIONS = (
+    "Add a bar chart from my data",
+    "Explain what this flow does",
+    "What could be simpler here?",
+)
+
+LOCAL_TINT = QColor(74, 222, 128)
+ONLINE_TINT = QColor(250, 204, 21)
 
 _STYLE = """
-QFrame#flo_user { background: rgba(124,108,246,0.18); border-radius: 8px; }
-QFrame#flo_ai { background: palette(alternate-base); border-radius: 8px; }
-QFrame#flo_error { background: rgba(239,68,68,0.16); border-radius: 8px; }
-QFrame#flo_notice { border: 1px dashed palette(mid); border-radius: 8px; }
+QFrame#flo_card_local { background: rgba(74,222,128,0.09);
+    border: 1px solid rgba(74,222,128,0.30); border-radius: 10px; }
+QFrame#flo_card_online { background: rgba(250,204,21,0.07);
+    border: 1px solid rgba(250,204,21,0.30); border-radius: 10px; }
+QToolButton#flo_pill { border: 1px solid rgba(127,127,127,0.35);
+    border-radius: 11px; padding: 2px 9px; background: transparent; }
+QToolButton#flo_pill:hover { background: rgba(127,127,127,0.16); }
+QToolButton#flo_pill:disabled { color: palette(placeholder-text); }
+QToolButton#flo_pill::menu-indicator { image: none; width: 0; }
+QToolButton#flo_flat { border: none; border-radius: 6px; padding: 3px 6px;
+    background: transparent; }
+QToolButton#flo_flat:hover { background: rgba(127,127,127,0.16); }
+QToolButton#flo_flat::menu-indicator { image: none; width: 0; }
+QFrame#flo_user { background: rgba(124,108,246,0.20); border-radius: 14px; }
+QFrame#flo_changes { border: 1px solid rgba(127,127,127,0.22);
+    border-radius: 10px; }
+QFrame#flo_error { background: rgba(239,68,68,0.12); border-radius: 10px; }
+QFrame#flo_input { border: 1px solid rgba(127,127,127,0.35);
+    border-radius: 14px; background: palette(base); }
+QFrame#flo_input QPlainTextEdit { border: none; background: transparent; }
+QToolButton#flo_send { border: none; border-radius: 14px;
+    background: #7c6cf6; color: white; font-weight: bold;
+    min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; }
+QToolButton#flo_send:hover { background: #8f81f8; }
+QToolButton#flo_send:disabled { background: rgba(127,127,127,0.30); }
+QPushButton#flo_chip { border: 1px solid rgba(127,127,127,0.30);
+    border-radius: 12px; padding: 5px 12px; text-align: left;
+    background: transparent; }
+QPushButton#flo_chip:hover { background: rgba(127,127,127,0.14); }
 QLabel#flo_muted { color: palette(placeholder-text); }
-QLabel#flo_badge_local { background: rgba(74,222,128,0.20);
-    border-radius: 9px; padding: 1px 8px; }
-QLabel#flo_badge_online { background: rgba(250,204,21,0.22);
-    border-radius: 9px; padding: 1px 8px; }
+QLabel#flo_title { font-size: 15px; font-weight: 600; }
 """
 
 
+def shield_icon(color: QColor, size: int = 16) -> QIcon:
+    """A small shield — the privacy card's mark, tinted local/online."""
+    icon = QIcon()
+    for ratio in (1, 2):
+        pm = QPixmap(size * ratio, size * ratio)
+        pm.fill(Qt.transparent)
+        pm.setDevicePixelRatio(ratio)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(0, 0, size, size).adjusted(2, 1, -2, -1)
+        path = QPainterPath(QPointF(r.center().x(), r.top()))
+        path.lineTo(r.right(), r.top() + r.height() * 0.18)
+        path.cubicTo(QPointF(r.right(), r.top() + r.height() * 0.62),
+                     QPointF(r.center().x() + r.width() * 0.25, r.bottom() - 1),
+                     QPointF(r.center().x(), r.bottom()))
+        path.cubicTo(QPointF(r.center().x() - r.width() * 0.25, r.bottom() - 1),
+                     QPointF(r.left(), r.top() + r.height() * 0.62),
+                     QPointF(r.left(), r.top() + r.height() * 0.18))
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawPath(path)
+        p.end()
+        icon.addPixmap(pm)
+    return icon
+
+
 def _label(text: str = "", *, muted: bool = False, rich: bool = False,
-           markdown: bool = False) -> QLabel:
+           markdown: bool = False, name: str = "") -> QLabel:
     label = QLabel()
     label.setWordWrap(True)
     label.setTextFormat(Qt.MarkdownText if markdown else
@@ -94,14 +166,24 @@ def _label(text: str = "", *, muted: bool = False, rich: bool = False,
     label.setTextInteractionFlags(Qt.TextBrowserInteraction)
     label.setOpenExternalLinks(False)
     label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-    if muted:
-        label.setObjectName("flo_muted")
+    if name or muted:
+        label.setObjectName(name or "flo_muted")
     return label
 
 
 def _escape(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;"))
+
+
+def _pill(text: str, tip: str = "") -> QToolButton:
+    button = QToolButton()
+    button.setObjectName("flo_pill")
+    button.setText(text)
+    button.setToolTip(tip)
+    button.setPopupMode(QToolButton.InstantPopup)
+    button.setCursor(Qt.PointingHandCursor)
+    return button
 
 
 class _Input(QPlainTextEdit):
@@ -135,12 +217,14 @@ class FloPanel(QWidget):
         self.send_log = SendLog()
         self._chat_profile: Optional[dict] = None   # as the chat began
         self._chat_level = -1          # the most the chat's history has seen
+        self._agreed: set = set()      # (profile id, level) agreed this session
         self._busy = False
         self._cancel = False
         self._turns: list[dict] = []
         self._turn: dict = {}
         self._started = 0.0
         self._doing = ""
+        self._welcome: Optional[QWidget] = None
         self.setStyleSheet(_STYLE)
         self._build()
         self.reload_profiles()
@@ -152,25 +236,34 @@ class FloPanel(QWidget):
 
     def _build(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(6, 6, 6, 6)
-        outer.setSpacing(6)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
 
-        row = QHBoxLayout()
-        self.profile_combo = QComboBox()
-        self.profile_combo.setToolTip("Which AI connection to use — set them "
-                                      "up in AI Assistant Settings")
-        self.profile_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.profile_combo.setMinimumContentsLength(8)
-        self.profile_combo.activated.connect(self._on_profile_chosen)
-        row.addWidget(self.profile_combo, 1)
-        self.badge = QLabel()
-        row.addWidget(self.badge)
-        self.menu_btn = QToolButton()
-        self.menu_btn.setText("⋯")
-        self.menu_btn.setToolTip("More")
-        self.menu_btn.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(self.menu_btn)
+        top = QHBoxLayout()
+        top.setSpacing(4)
+        self.connection_btn = QToolButton()
+        self.connection_btn.setObjectName("flo_flat")
+        self.connection_btn.setPopupMode(QToolButton.InstantPopup)
+        self.connection_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.connection_btn.setToolTip("Which AI connection to use")
+        self.connection_menu = QMenu(self.connection_btn)
+        self.connection_btn.setMenu(self.connection_menu)
+        top.addWidget(self.connection_btn)
+        top.addStretch(1)
+        self.new_btn = QToolButton()
+        self.new_btn.setObjectName("flo_flat")
+        self.new_btn.setText("New chat")
+        self.new_btn.setToolTip("Start a fresh conversation")
+        self.new_btn.clicked.connect(lambda: self.new_chat())
+        top.addWidget(self.new_btn)
+        self.more_btn = QToolButton()
+        self.more_btn.setObjectName("flo_flat")
+        self.more_btn.setText("⋯")
+        self.more_btn.setToolTip("More")
+        self.more_btn.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(self.more_btn)
         self.action_new_chat = menu.addAction("New Chat", self.new_chat)
+        menu.addAction("Privacy for This Flow…", self.edit_privacy)
         menu.addAction("Connections…", self.settings_requested.emit)
         menu.addSeparator()
         self.action_confirm = menu.addAction("Confirm Every Send")
@@ -180,48 +273,79 @@ class FloPanel(QWidget):
         self.action_confirm.toggled.connect(
             lambda on: self.settings.setValue("flo/confirm_sends", bool(on)))
         menu.addAction("Open Send Log Folder", self._open_log_folder)
-        self.menu_btn.setMenu(menu)
-        row.addWidget(self.menu_btn)
-        outer.addLayout(row)
+        self.more_btn.setMenu(menu)
+        top.addWidget(self.more_btn)
+        outer.addLayout(top)
 
+        # -- the privacy card
+        self.card = QFrame()
+        card = QVBoxLayout(self.card)
+        card.setContentsMargins(10, 8, 10, 8)
+        card.setSpacing(4)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        self.shield = QLabel()
+        head.addWidget(self.shield, 0, Qt.AlignTop)
+        self.where = _label()
+        font = self.where.font()
+        font.setBold(True)
+        self.where.setFont(font)
+        head.addWidget(self.where, 1)
+        card.addLayout(head)
+        self.sees_line = _label(muted=True)
+        card.addWidget(self.sees_line)
         dials = QHBoxLayout()
-        dials.addWidget(QLabel("Sees"))
-        self.level_combo = QComboBox()
+        dials.setSpacing(6)
+        self.sees_btn = _pill("", "How much of your data the AI is told about")
+        self.level_menu = QMenu(self.sees_btn)
+        self.level_menu.setToolTipsVisible(True)
+        self.level_group = QActionGroup(self)
+        self.level_actions: dict[int, QAction] = {}
         for index in range(disc.BUILT_MAX + 1):
-            self.level_combo.addItem(LEVEL_NAMES[index], index)
-            self.level_combo.setItemData(index, LEVEL_TIPS[index], Qt.ToolTipRole)
-        self.level_combo.activated.connect(self._on_level_chosen)
-        dials.addWidget(self.level_combo)
-        dials.addSpacing(6)
-        dials.addWidget(QLabel("Can"))
-        self.autonomy_combo = QComboBox()
-        for index, (key, name, tip) in enumerate(AUTONOMY):
-            self.autonomy_combo.addItem(name, key)
-            self.autonomy_combo.setItemData(index, tip, Qt.ToolTipRole)
+            action = self.level_menu.addAction(LEVEL_NAMES[index])
+            action.setCheckable(True)
+            action.setToolTip(LEVEL_TIPS[index])
+            action.triggered.connect(lambda _=False, i=index: self.choose_level(i))
+            self.level_group.addAction(action)
+            self.level_actions[index] = action
+        self.sees_btn.setMenu(self.level_menu)
+        dials.addWidget(self.sees_btn)
+        self.can_btn = _pill("", "Whether the AI may change the flow")
+        self.autonomy_menu = QMenu(self.can_btn)
+        self.autonomy_menu.setToolTipsVisible(True)
+        group = QActionGroup(self)
+        self.autonomy_actions: dict[str, QAction] = {}
         chosen = self.settings.value("flo/autonomy", ACT, type=str)
-        self.autonomy_combo.setCurrentIndex(
-            max(0, self.autonomy_combo.findData(chosen)))
-        self.autonomy_combo.activated.connect(self._on_autonomy_chosen)
-        dials.addWidget(self.autonomy_combo)
+        for key, name, tip in AUTONOMY:
+            action = self.autonomy_menu.addAction(name)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            action.setChecked(key == chosen)
+            action.triggered.connect(lambda _=False, k=key: self.choose_autonomy(k))
+            group.addAction(action)
+            self.autonomy_actions[key] = action
+        if not any(a.isChecked() for a in self.autonomy_actions.values()):
+            self.autonomy_actions[ACT].setChecked(True)
+        self.can_btn.setMenu(self.autonomy_menu)
+        dials.addWidget(self.can_btn)
         dials.addStretch(1)
-        self.columns_btn = QPushButton("Columns…")
-        self.columns_btn.setToolTip(
-            "What this flow lets the AI see: its limit, and which columns "
-            "are sensitive or go by another name")
-        self.columns_btn.clicked.connect(self.edit_privacy)
-        dials.addWidget(self.columns_btn)
-        outer.addLayout(dials)
+        self.privacy_btn = _pill("Privacy…", "What this flow lets the AI see: "
+                                 "its limit, sensitive or renamed columns, "
+                                 "and hiding text typed into settings")
+        self.privacy_btn.setPopupMode(QToolButton.DelayedPopup)
+        self.privacy_btn.clicked.connect(self.edit_privacy)
+        dials.addWidget(self.privacy_btn)
+        card.addLayout(dials)
+        outer.addWidget(self.card)
 
-        self.limit_note = _label(muted=True)
-        outer.addWidget(self.limit_note)
-
+        # -- the thread
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.thread = QWidget()
         self.thread_layout = QVBoxLayout(self.thread)
-        self.thread_layout.setContentsMargins(0, 0, 4, 0)
-        self.thread_layout.setSpacing(8)
+        self.thread_layout.setContentsMargins(2, 4, 6, 4)
+        self.thread_layout.setSpacing(14)
         self.thread_layout.addStretch(1)
         self.scroll.setWidget(self.thread)
         outer.addWidget(self.scroll, 1)
@@ -233,19 +357,27 @@ class FloPanel(QWidget):
         self._tick.setInterval(1000)
         self._tick.timeout.connect(self._show_progress)
 
-        entry = QHBoxLayout()
+        # -- the input
+        box = QFrame()
+        box.setObjectName("flo_input")
+        entry = QHBoxLayout(box)
+        entry.setContentsMargins(10, 6, 6, 6)
+        entry.setSpacing(6)
         self.input = _Input()
-        self.input.setPlaceholderText(
-            "Ask for a change — e.g. add a bar chart of sales by region "
-            "from my Excel reader")
-        self.input.setFixedHeight(64)
+        self.input.setPlaceholderText("Ask Flo to build or change something…")
+        self.input.setFixedHeight(54)
         self.input.submitted.connect(self.send)
         entry.addWidget(self.input, 1)
-        self.send_btn = QPushButton("Send")
-        self.send_btn.setDefault(True)
+        self.send_btn = QToolButton()
+        self.send_btn.setObjectName("flo_send")
+        self.send_btn.setCursor(Qt.PointingHandCursor)
         self.send_btn.clicked.connect(self._on_send_clicked)
         entry.addWidget(self.send_btn, 0, Qt.AlignBottom)
-        outer.addLayout(entry)
+        outer.addWidget(box)
+        self.hint = _label("Enter to send · Shift+Enter for a new line",
+                           muted=True)
+        outer.addWidget(self.hint)
+        self._set_send_face(False)
 
     # -- the dials ------------------------------------------------------------------
 
@@ -253,14 +385,21 @@ class FloPanel(QWidget):
         """Re-read the connections (after AI Assistant Settings closes)."""
         from ..ai_settings_dialog import load_profiles
         self.profiles = load_profiles()
-        self.profile_combo.blockSignals(True)
-        self.profile_combo.clear()
-        for profile in self.profiles.profiles:
-            self.profile_combo.addItem(profile.name, profile.id)
         active = self.profiles.active()
-        self.profile_combo.setCurrentIndex(
-            max(0, self.profile_combo.findData(active.id)))
-        self.profile_combo.blockSignals(False)
+        self.connection_menu.clear()
+        group = QActionGroup(self.connection_menu)
+        for profile in self.profiles.profiles:
+            action = self.connection_menu.addAction(
+                f"{profile.name}  —  {'this PC' if profile.is_local() else _host(profile)}")
+            action.setCheckable(True)
+            action.setChecked(profile.id == active.id)
+            action.setData(profile.id)
+            action.triggered.connect(
+                lambda _=False, pid=profile.id: self.choose_profile(pid))
+            group.addAction(action)
+        self.connection_menu.addSeparator()
+        self.connection_menu.addAction("Manage Connections…",
+                                       self.settings_requested.emit)
         if self._chat_profile is not None and self._has_history():
             if self._chat_profile.get("id") != active.id:
                 self.new_chat(note=self._switched_note(active))
@@ -290,29 +429,48 @@ class FloPanel(QWidget):
         return disc.effective_level(self.allowed_level(), None, wanted)
 
     def autonomy(self) -> str:
-        return self.autonomy_combo.currentData() or ACT
+        for key, action in self.autonomy_actions.items():
+            if action.isChecked():
+                return key
+        return ACT
 
     def _on_undo_index(self, _index: int) -> None:
-        self.refresh_header()
+        # a QWidget deletes its children before the panel's own slot is
+        # disconnected, so a stack change while the window closes can land
+        # here with the menus already gone
+        from shiboken6 import isValid
+        parts = (self, self.level_menu, self.autonomy_menu, self.card,
+                 self.sees_btn, *self.level_actions.values(),
+                 *self.autonomy_actions.values())
+        if not all(isValid(part) for part in parts):
+            return
+        try:
+            self.refresh_header()
+        except RuntimeError:   # torn down between the check and the call
+            pass
 
     def refresh_header(self) -> None:
         if self.profiles is None:
             return
         profile = self.profile()
         local = profile.is_local()
-        self.badge.setObjectName("flo_badge_local" if local else "flo_badge_online")
-        self.badge.setText("Local" if local else "Online")
-        self.badge.setToolTip(profile.where_label())
-        self.badge.style().unpolish(self.badge)
-        self.badge.style().polish(self.badge)
+        tint = LOCAL_TINT if local else ONLINE_TINT
+        self.connection_btn.setIcon(shield_icon(tint, 12))
+        self.connection_btn.setText(f"{profile.name}  ▾")
+        self.connection_btn.setToolTip(profile.where_label())
+        self.card.setObjectName("flo_card_local" if local else "flo_card_online")
+        self.card.style().unpolish(self.card)
+        self.card.style().polish(self.card)
+        self.shield.setPixmap(shield_icon(tint, 16).pixmap(QSize(16, 16)))
+        self.where.setText("Local — nothing leaves this PC" if local
+                           else f"Online — sent to {_host(profile)}")
 
         allowed, level = self.allowed_level(), self.level()
-        model = self.level_combo.model()
-        for index in range(self.level_combo.count()):
-            item = model.item(index)
-            item.setEnabled(index <= allowed)
-        self.level_combo.setCurrentIndex(level)
-        self.level_combo.setToolTip(LEVEL_TIPS[level])
+        for index, action in self.level_actions.items():
+            action.setEnabled(index <= allowed)
+            action.setChecked(index == level)
+        self.sees_btn.setText(f"Sees: {LEVEL_NAMES[level]}  ▾")
+        self.can_btn.setText(f"Can: {dict((k, n) for k, n, _ in AUTONOMY)[self.autonomy()]}  ▾")
 
         why = []
         ceiling = profile.effective_ceiling()
@@ -322,11 +480,14 @@ class FloPanel(QWidget):
         if ceiling < disc.BUILT_MAX:
             why.append(f"this connection allows up to "
                        f"{LEVEL_NAMES.get(ceiling, '?')}")
-        place = ("Local — nothing leaves this PC." if local
-                 else f"Online — what is sent goes to {_host(profile)}.")
         limits = "; ".join(why)
-        self.limit_note.setText(place + (f" {limits[:1].upper()}{limits[1:]}."
-                                         if why else ""))
+        extra = []
+        if self._privacy().hide_text:
+            extra.append("Text typed into settings is hidden.")
+        if limits:
+            extra.append(f"{limits[:1].upper()}{limits[1:]}.")
+        self.sees_line.setText(" ".join([LEVEL_SEES[level]] + extra))
+        self.sees_line.setToolTip(LEVEL_TIPS[level])
 
         if self._has_history() and level < self._chat_level:
             self.new_chat(note=(
@@ -339,29 +500,36 @@ class FloPanel(QWidget):
         return (f"Switched to {profile.name} — started a fresh chat, so "
                 f"nothing from the last one goes to {where}.")
 
-    def _on_profile_chosen(self, index: int) -> None:
-        profile_id = self.profile_combo.itemData(index)
-        if self.profiles is None or profile_id == self.profiles.active_id:
+    def choose_profile(self, profile_id: str) -> None:
+        if self.profiles is None or profile_id == self.profiles.active_id \
+                or self.profiles.get(profile_id) is None:
             return
         self.profiles.active_id = profile_id
         try:
             save_profiles(self.profiles)
         except OSError:
             pass  # still in force for this session
+        for action in self.connection_menu.actions():
+            if action.isCheckable():
+                action.setChecked(action.data() == profile_id)
         if self._has_history():
             self.new_chat(note=self._switched_note(self.profile()))
         else:
             self._reset_chat()
         self.refresh_header()
 
-    def _on_level_chosen(self, index: int) -> None:
-        self.settings.setValue("flo/level", int(self.level_combo.itemData(index)))
+    def choose_level(self, level: int) -> None:
+        self.settings.setValue("flo/level", int(level))
         self.refresh_header()
 
-    def _on_autonomy_chosen(self, _index: int) -> None:
-        self.settings.setValue("flo/autonomy", self.autonomy())
+    def choose_autonomy(self, key: str) -> None:
+        self.autonomy_actions[key].setChecked(True)
+        self.settings.setValue("flo/autonomy", key)
+        self.refresh_header()
 
     def edit_privacy(self) -> None:
+        if self._busy:
+            return    # it would land inside the AI's undo step
         from ..commands import SetAiPrivacyCommand
         from .privacy_dialog import PrivacyDialog
         dialog = PrivacyDialog(self.graph, self.cache, self)
@@ -393,32 +561,57 @@ class FloPanel(QWidget):
         bar = self.scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
 
-    def _bubble(self, kind: str, *labels: QLabel) -> QFrame:
+    def _block(self, *widgets: QWidget, name: str = "",
+               margins: tuple = (0, 0, 0, 0)) -> QFrame:
         frame = QFrame()
-        frame.setObjectName(kind)
+        if name:
+            frame.setObjectName(name)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(4)
-        for label in labels:
-            label.linkActivated.connect(self._on_link)
-            layout.addWidget(label)
-        return self._add(frame)
+        layout.setContentsMargins(*margins)
+        layout.setSpacing(6)
+        for widget in widgets:
+            if isinstance(widget, QLabel):
+                widget.linkActivated.connect(self._on_link)
+            layout.addWidget(widget)
+        return frame
+
+    def _hide_welcome(self) -> None:
+        if self._welcome is not None:
+            self._welcome.hide()
+            self._welcome.deleteLater()
+            self._welcome = None
 
     def _clear_thread(self) -> None:
         while self.thread_layout.count() > 1:
             item = self.thread_layout.takeAt(0)
             if item.widget() is not None:
                 item.widget().deleteLater()
-        self._bubble("flo_notice", _label(
-            "**Ask for a change to this flow** — for example *“Add a bar "
-            "chart of sales by region from my Excel reader.”*\n\n"
-            "*Sees* sets how much of your data it is told about, *Can* "
-            "whether it may change the flow. Nothing is sent until you "
-            "press Send, and *What was sent* under each reply shows "
-            "exactly what went.", markdown=True))
+        self._welcome = None
+        title = _label("What should we build?", name="flo_title")
+        sub = _label("Describe a change and Flo will add and wire the nodes. "
+                     "Nothing is sent until you press Enter, and every reply "
+                     "says exactly what left.", muted=True)
+        chips = []
+        for text in SUGGESTIONS:
+            chip = QPushButton(text)
+            chip.setObjectName("flo_chip")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, t=text: self._use_suggestion(t))
+            chips.append(chip)
+        self._welcome = self._add(self._block(title, sub, *chips,
+                                              margins=(4, 12, 4, 4)))
+
+    def _use_suggestion(self, text: str) -> None:
+        self.input.setPlainText(text)
+        self.input.setFocus()
+        cursor = self.input.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.input.setTextCursor(cursor)
 
     def notice(self, text: str) -> None:
-        self._bubble("flo_notice", _label(text, muted=True))
+        label = _label(text, muted=True)
+        label.setAlignment(Qt.AlignCenter)
+        self._add(self._block(label, margins=(16, 0, 16, 0)))
 
     def _reset_chat(self) -> None:
         """Drop the conversation; a worker still out is cut loose."""
@@ -484,23 +677,55 @@ class FloPanel(QWidget):
         self._chat_profile = profile.to_dict()
         return True
 
+    def _agreed_to(self, profile, level: int) -> bool:
+        """An online server: has sending at this level been agreed to?"""
+        if profile.is_local() or (profile.id, level) in self._agreed:
+            return True
+        stored = self.settings.value(f"flo/agreed/{profile.id}", -1, type=int)
+        return stored >= level
+
+    def _ask_consent(self, profile, level: int) -> tuple[bool, bool]:
+        """(send?, remember?) — the dialog, kept apart so tests can answer."""
+        from .consent import ConsentDialog
+        dialog = ConsentDialog(_host(profile), profile.name, level,
+                               self._privacy(), self)
+        ok = dialog.exec() == QDialog.Accepted
+        return ok, dialog.remember.isChecked()
+
     def send(self, text: Optional[str] = None) -> bool:
         if self._busy:
             return False
         text = (self.input.toPlainText() if text is None else text).strip()
-        if not text or not self._ensure_chat():
+        if not text:
+            return False
+        level, autonomy, profile = self.level(), self.autonomy(), self.profile()
+        if not self._agreed_to(profile, level):
+            ok, remember = self._ask_consent(profile, level)
+            if not ok:
+                return False
+            self._agreed.add((profile.id, level))
+            if remember:
+                self.settings.setValue(f"flo/agreed/{profile.id}", level)
+        if not self._ensure_chat():
             return False
         self.input.clear()
-        level, autonomy, profile = self.level(), self.autonomy(), self.profile()
+        self._hide_welcome()
         self.toolbox.set_view(disc.Disclosure(level, self._privacy()), autonomy)
         self._chat_level = max(self._chat_level, level)
-        user = _label(text)
-        bubble = self._bubble("flo_user", user)
+        bubble = self._block(_label(text), name="flo_user", margins=(12, 8, 12, 8))
+        bubble.setMaximumWidth(max(220, int(self.scroll.viewport().width() * 0.85)))
+        row = QWidget()
+        line = QHBoxLayout(row)
+        line.setContentsMargins(24, 0, 0, 0)
+        line.addStretch(1)
+        line.addWidget(bubble)
+        self._add(row)
         self._turn = {
             "bubble": bubble, "text": text, "start": len(self.chat.outbox),
             "before": (self.chat.outbox[-1]["messages"]
                        if self.chat.outbox else []),
             "to": "this PC" if profile.is_local() else _host(profile),
+            "local": profile.is_local(),
             "meta": {"connection": profile.name,
                      "to": profile.where_label(),
                      "model": self.chat.connection.model,
@@ -508,7 +733,7 @@ class FloPanel(QWidget):
             "confirm": self.action_confirm.isChecked(),
         }
         self._cancel = False
-        self._doing = "Waiting for the AI"
+        self._doing = "Thinking"
         self._set_busy(True)
         chat, bridge = self.chat, self.bridge
         bridge.start(lambda: chat.send(text, cancelled=lambda: self._cancel,
@@ -535,15 +760,18 @@ class FloPanel(QWidget):
             confirm=True)
         return dialog.exec() == QDialog.Accepted
 
+    def _set_send_face(self, busy: bool) -> None:
+        self.send_btn.setText("■" if busy else "↑")
+        self.send_btn.setToolTip("Stop" if busy else "Send  (Enter)")
+
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        self.send_btn.setText("Stop" if busy else "Send")
-        for widget in (self.profile_combo, self.level_combo,
-                       self.autonomy_combo, self.columns_btn):
+        self._set_send_face(busy)
+        for widget in (self.connection_btn, self.sees_btn, self.can_btn,
+                       self.privacy_btn):
             # a dial moved mid-turn would apply halfway through it, and a
             # privacy edit would land inside the AI's undo step
             widget.setEnabled(not busy)
-        self.action_new_chat.setEnabled(True)
         self.progress.setVisible(busy)
         if busy:
             self._started = time.monotonic()
@@ -560,7 +788,7 @@ class FloPanel(QWidget):
         if self._cancel:
             return
         if event.kind == "thinking":
-            self._doing = "Waiting for the AI"
+            self._doing = "Thinking"
         elif event.kind == "tool":
             self._doing = TOOL_WORDS.get(event.name, event.name)
         self._show_progress()
@@ -572,8 +800,40 @@ class FloPanel(QWidget):
         self._error(f"Something went wrong inside flograph: {message}")
 
     def _error(self, text: str) -> None:
-        self._bubble("flo_error", _label(text), _label(
-            '<a href="settings:">Check the connection…</a>', rich=True))
+        self._add(self._block(_label(text), _label(
+            '<a href="settings:">Check the connection…</a>', rich=True),
+            name="flo_error", margins=(12, 8, 12, 8)))
+
+    def _receipt_label(self, receipt: receipts.Receipt) -> QLabel:
+        details = "<br>".join(_escape(line) for line in receipt.details())
+        label = _label(f"{_escape(receipt.summary())}"
+                       + (' <a href="receipt:">details</a>'
+                          if receipt.sent_anything else ""),
+                       rich=True, muted=True)
+        label.setProperty("details", details)
+        label.setProperty("summary", receipt.summary())
+        icon = QLabel()
+        icon.setPixmap(shield_icon(LOCAL_TINT if receipt.local else ONLINE_TINT,
+                                   12).pixmap(QSize(12, 12)))
+        row = QWidget()
+        line = QHBoxLayout(row)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(6)
+        line.addWidget(icon, 0, Qt.AlignTop)
+        line.addWidget(label, 1)
+        label.linkActivated.connect(lambda _href, lbl=label: self._toggle_details(lbl))
+        label._row = row
+        return label
+
+    def _toggle_details(self, label: QLabel) -> None:
+        open_now = not label.property("open")
+        label.setProperty("open", open_now)
+        summary = _escape(label.property("summary"))
+        if open_now:
+            label.setText(f'{summary} <a href="receipt:">hide</a><br>'
+                          f'{label.property("details")}')
+        else:
+            label.setText(f'{summary} <a href="receipt:">details</a>')
 
     def _on_finished(self, result: Optional[TurnResult]) -> None:
         self._set_busy(False)
@@ -584,44 +844,50 @@ class FloPanel(QWidget):
             note = _label("The AI got this as: " + result.sent_text, muted=True)
             turn["bubble"].layout().addWidget(note)
         index = len(self._turns)
+        entries = self.chat.outbox[turn["start"]:]
         record = {"start": turn["start"], "end": len(self.chat.outbox),
                   "before": turn["before"], "to": turn["to"],
                   "undo_index": (self.undo_stack.index()
                                  if result.actions else None),
                   "undone": False}
+        record["receipt"] = receipts.build(
+            entries, turn["before"], self.toolbox.disclosure,
+            destination=turn["to"], local=turn["local"])
         self._turns.append(record)
 
-        labels = []
+        parts: list[QWidget] = []
         if result.stopped == "error":
-            kind = "flo_error"
-            labels.append(_label(result.text))
+            parts.append(self._block(_label(result.text), name="flo_error",
+                                     margins=(12, 8, 12, 8)))
         else:
-            kind = "flo_ai"
-            labels.append(_label(result.text or "(no answer)", markdown=True))
+            parts.append(_label(result.text or "(no answer)", markdown=True))
         if result.actions:
             lines = []
             for action in result.actions:
-                line = _escape(action.summary)
+                mark = ACTION_MARK.get(action.tool, "•")
+                line = f"{mark}&nbsp;&nbsp;{_escape(action.summary)}"
                 live = [n for n in action.node_ids if n in self.graph.nodes]
                 if live:
-                    line += f' · <a href="node:{live[-1]}">show</a>'
-                lines.append("• " + line)
-            labels.append(_label("<br>".join(lines), rich=True))
+                    line += f' &nbsp;<a href="node:{live[-1]}">show</a>'
+                lines.append(line)
+            changes = _label("<br>".join(lines), rich=True)
+            parts.append(self._block(changes, name="flo_changes",
+                                     margins=(10, 6, 10, 6)))
+        receipt_label = self._receipt_label(record["receipt"])
+        record["receipt_label"] = receipt_label
+        parts.append(receipt_label._row)
         links = []
         if result.actions:
             links.append(f'<a href="undo:{index}">Undo these changes</a>')
-        sent = record["end"] - record["start"]
-        if sent:
-            links.append(f'<a href="sent:{index}">What was sent</a> '
-                         f'({sent} request{"s" if sent != 1 else ""} to '
-                         f'{_escape(turn["to"])})')
+        if record["end"] - record["start"]:
+            links.append(f'<a href="sent:{index}">What was sent</a>')
         if result.stopped == "error":
             links.append('<a href="settings:">Check the connection…</a>')
         if links:
             footer = _label(" · ".join(links), rich=True, muted=True)
             record["footer"] = footer
-            labels.append(footer)
-        self._bubble(kind, *labels)
+            parts.append(footer)
+        self._add(self._block(*parts))
 
     # -- links ---------------------------------------------------------------------
 
@@ -662,10 +928,13 @@ class FloPanel(QWidget):
         record = self._turns[index]
         entries = self.chat.outbox[record["start"]:record["end"]]
         text = format_requests(entries, record["to"], before=record["before"])
-        SentDialog("What Was Sent",
-                   f"Everything this reply sent to {record['to']}, request by "
-                   "request. Each request also repeats the conversation before "
-                   "it; only what is new is shown.", text, self).exec()
+        receipt = record.get("receipt")
+        intro = (f"Everything this reply sent to {record['to']}, request by "
+                 "request. Each request also repeats the conversation before "
+                 "it; only what is new is shown.")
+        if receipt is not None:
+            intro = receipt.summary() + "\n\n" + intro
+        SentDialog("What Was Sent", intro, text, self).exec()
 
     def focus_input(self) -> None:
         self.input.setFocus()

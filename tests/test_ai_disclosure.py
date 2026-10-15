@@ -152,3 +152,21 @@ def test_other_kinds_of_value():
     out = disclosure.describe(series)
     assert out["kind"] == "column" and out["name"] == "score" and out["max"] == 2.0
     assert disclosure.describe({"k": 1})["keys"] == ["k"]
+
+
+class TestHideText:
+    def test_typed_text_is_hidden_but_column_names_are_not(self):
+        disclosure = Disclosure(d.SCHEMA, Privacy(hide_text=True),
+                                known_columns=["region", "sales"])
+        assert disclosure.param_value('region == "Jane Smith"', "string") \
+            == "<text, 22 characters>"
+        assert disclosure.param_value("region", "string") == "region"
+        assert disclosure.param_value("region, sales", "text") == "region, sales"
+        assert disclosure.param_value("bar", "choice") == "bar"
+        assert disclosure.param_value("", "string") == ""
+
+    def test_off_by_default_and_saved_in_the_flow(self):
+        disclosure = Disclosure(d.SCHEMA, Privacy())
+        assert disclosure.param_value('x == "Jane"', "string") == 'x == "Jane"'
+        assert Privacy.from_dict({"hide_text": True}).to_dict() == {"hide_text": True}
+        assert not Privacy.from_dict({}).hide_text
