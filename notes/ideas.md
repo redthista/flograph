@@ -410,31 +410,21 @@ look-alike rows → real sample → run and read), with per-column *Sensitive*
 and *Alias* overrides, and **what it can do** (Advise / Propose / Act, plus
 a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
 
-- *Today:* phase 0 shipped 2026-10-15 (CHANGELOG 0.1.30, *AI
-  connections*). `flograph/llm/wire.py` is the one HTTP implementation
-  (Ask AI and the LLM nodes both call it); `llm/profiles.py` holds the
-  named connections with their location and ceiling; `llm/keys.py` keeps
-  keys in the keychain. What is missing is everything the assistant
-  itself needs: tool calling, streaming, conversation — `wire.chat()` is
-  still one request, one text reply.
-- *What helps:* QUndoCommands are the only things that change the graph,
-  so an AI turn becomes one undo macro. The registry and `NODE` specs are
-  a real catalogue to hand the model. `wire_fit` `suggest` hints rank
-  ports. `parse_spec` already checks AI-written node code.
+- *Today:* phases 0–2 shipped 2026-10-15 (CHANGELOG 0.1.30, *AI
+  connections* and *Flo Assistant*): the dock with Advise + Act, levels
+  0–2, privacy card, receipt, online consent, Privacy… (cap, Sensitive,
+  Alias, hide typed text), outbox and send log. Dan ran it against Codex
+  mini on OpenRouter: works.
 - *The rule that matters:* the disclosure level is enforced by **which
   tools the model is given**, built in one Qt-free `core/ai_disclosure.py`,
   never by asking it nicely in the prompt. Look-alike rows are generated,
   not shuffled; shuffling leaks every real value.
-- *Tool calling:* native in both formats *and* a JSON-action fallback —
-  Dan tests against local servers, the work gateway, Anthropic/OpenAI and
-  OpenRouter, so neither alone covers it.
-- *Phases left:* 1 headless engine and 2 the dock (Advise + Act,
-  outbox, send log, Columns… privacy grid) are built on branch
-  `worktree-ai-copilot-design`, waiting for Dan to test — `llm/toolcall.py`,
-  `core/ai_disclosure.py`, `flo/`, `ui/flo/`. Still to do: streaming the
-  reply text, conversations saved with the flow, attach-a-node, then
-  3 Propose with ghost-node preview; 4 levels 3–5 (+ run_node,
-  write_user_node). Privacy settings live in the flow (decided).
+- *Left:* streaming the reply text; **Ask Flo** from the right-click menu
+  of a node / frame / selection (not drag — dropping onto the dock
+  scrolls the canvas), with ready-made asks; 3 Propose with ghost-node
+  preview; 4 levels 3–5 (+ `run_node`, `write_user_node`). Not wanted:
+  conversations saved in the flow — chats stay at the user level (Dan,
+  2026-10-15).
 - *Open:* an org-level cap file for work rollouts (not now); whether Propose earns
   its cost over one-undo-per-turn; turn limit / mid-build check-ins.
 
