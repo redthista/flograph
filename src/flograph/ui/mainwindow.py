@@ -677,7 +677,8 @@ class MainWindow(QMainWindow):
         # until asked for: Tools ▸ Flo Assistant, Ctrl+Shift+A, or the title
         # bar's button.
         self.flo_panel = FloPanel(self.graph, self.registry, self.undo_stack,
-                                  self.engine.cache, settings=self.settings)
+                                  self.engine.cache, settings=self.settings,
+                                  engine=self.engine)
         self.flo_panel.navigate_requested.connect(self._navigate_to)
         self.flo_panel.settings_requested.connect(self._show_ai_settings)
         self.flo_dock = QDockWidget("Flo Assistant", host)

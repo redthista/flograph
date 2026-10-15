@@ -28,6 +28,7 @@ result. Two rules are enforced here because only the dock sees them happen:
 from __future__ import annotations
 
 import re
+import threading
 import time
 from typing import Optional
 
@@ -85,7 +86,9 @@ TOOL_WORDS = {
     "set_params": "Changing settings",
     "rename_node": "Renaming a node",
     "delete_nodes": "Deleting nodes",
+    "run_nodes": "Running nodes",
 }
+RUN_TIMEOUT = 600.0    # seconds a run_nodes call waits before giving up
 ACTION_MARK = {"add_node": "+", "delete_nodes": "−", "connect": "→",
                "disconnect": "×"}
 SUGGESTIONS = (
@@ -246,8 +249,10 @@ class FloPanel(QWidget):
     settings_requested = Signal()
 
     def __init__(self, graph, registry, undo_stack, cache=None, *,
-                 settings: Optional[QSettings] = None, parent=None) -> None:
+                 settings: Optional[QSettings] = None, engine=None,
+                 parent=None) -> None:
         super().__init__(parent)
+        self.engine = engine
         self.graph = graph
         self.registry = registry
         self.undo_stack = undo_stack
@@ -770,7 +775,9 @@ class FloPanel(QWidget):
         level = self.level()
         self.toolbox = Toolbox(self.graph, self.registry, self.undo_stack,
                                disclosure=disc.Disclosure(level, self._privacy()),
-                               autonomy=self.autonomy(), cache=self.cache)
+                               autonomy=self.autonomy(), cache=self.cache,
+                               runner=(self._run_nodes if self.engine is not None
+                                       else None))
         self.bridge = TurnBridge(self)
         self.bridge.event.connect(self._on_event)
         self.bridge.finished.connect(self._on_finished)
@@ -782,6 +789,45 @@ class FloPanel(QWidget):
                                  stream=True)
         self._chat_profile = profile.to_dict()
         return True
+
+    def _run_nodes(self, node_ids: list, cancelled) -> str:
+        """run_nodes, on the worker: start the run on the GUI thread, wait
+        here for the engine to finish, cancel it if Stop is pressed."""
+        bridge, engine = self.bridge, self.engine
+        if bridge is None or engine is None:
+            return "not available"
+        finished = threading.Event()
+
+        def on_finished(*_args) -> None:
+            finished.set()
+
+        def start() -> None:
+            engine.run_finished.connect(on_finished)
+            engine.run_targets(list(node_ids))
+            if not engine.active:          # all up to date: nothing to run
+                finished.set()
+
+        def stop_listening() -> None:
+            try:
+                engine.run_finished.disconnect(on_finished)
+            except (RuntimeError, TypeError):
+                pass
+
+        bridge.on_ui(start)
+        outcome, deadline = "done", time.monotonic() + RUN_TIMEOUT
+        try:
+            while not finished.wait(0.25):
+                if cancelled():
+                    bridge.on_ui(engine.cancel)
+                    outcome = "cancelled — the user pressed Stop"
+                    break
+                if time.monotonic() > deadline:
+                    outcome = (f"still running after {int(RUN_TIMEOUT)} s — "
+                               "not waited for")
+                    break
+        finally:
+            bridge.on_ui(stop_listening)
+        return outcome
 
     def _agreed_to(self, profile, level: int) -> bool:
         """An online server: has sending at this level been agreed to?"""

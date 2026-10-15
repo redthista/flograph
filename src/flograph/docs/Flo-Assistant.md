@@ -93,6 +93,23 @@ Flo**:
   often quote the data they choked on, so quoted values in an error go to
   the AI as `'<value>'`; column names in it follow the usual rules.
 
+## How it works on your flow
+
+- It is given the whole node library with every request, so it knows what
+  exists without guessing search words.
+- A node it adds is placed beside, and wired to, the node that feeds it in
+  one step. If it still leaves a required input empty, flograph tells it
+  before it may answer, once per reply.
+- Under **Act** it can run nodes on this PC to check its work or to learn
+  the columns of something that has not run. What it is told about the
+  result follows **Sees** — never rows. Running a node does what the node
+  does: a writer writes its file.
+- It is told not to delete, replace or rewire your nodes unless you ask for
+  exactly that; asked to "improve" a flow, it suggests first.
+
+Smaller free models often struggle with multi-step building. If replies
+are muddled, try a stronger model on the same connection.
+
 ## Changes and undo
 
 Each reply is **one undo step**, however many nodes it touched. The changes

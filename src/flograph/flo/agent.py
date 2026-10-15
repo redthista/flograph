@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 from ..core import ai_disclosure as disc
 from ..llm import toolcall, wire
 from ..llm.profiles import level_label
-from .tools import ACT, Toolbox
+from .tools import ACT, Toolbox, catalogue
 
 DEFAULT_MAX_STEPS = 40
 STEP_CHOICES = (20, 40, 80, 150)
@@ -46,11 +46,20 @@ How to work:
 - Start with describe_flow to see what is there — or, when the user \
 points at nodes, with get_node on those. Nodes are referred to by handles \
 such as n1, n2 — use them exactly.
-- Before adding a node, find its type with find_node_types and read it with \
-get_node_type, so you use real type ids, port names and setting names. \
-Never invent them.
-- Build the smallest flow that does what was asked, wiring each new node to \
-the one that feeds it (use 'near' to place it beside that node).
+- The node library is listed at the end. Pick from it, and read a type with \
+get_node_type before adding it, so you use its real port and setting \
+names. Never invent type ids, ports or settings.
+- Every node you add must be wired to what feeds it: give add_node \
+input_from (e.g. "n3"), which places and wires it in one go. A chart, a \
+table or a transform with nothing wired in does nothing. Results tell you \
+"unwired_inputs" — wire them before you finish.
+- A setting that takes a column needs a real column name. Read it with \
+get_output first; if the node has not run, run_nodes runs it.
+- Build the smallest change that does what was asked. Never delete, \
+replace or rewire the user's existing nodes unless they asked for exactly \
+that — to improve a flow, say what you would change and let them agree.
+- You cannot write code: Script nodes need their code written by the user. \
+Use library nodes.
 - If a tool returns an error, read it — it says what is valid — and fix the \
 call. Don't repeat a failing call unchanged.
 - Each of your replies is one step, and a turn has a limited number of \
@@ -106,6 +115,7 @@ class Conversation:
         self._ui = on_ui or (lambda fn: fn())
         self.before_send = before_send
         self.stream = stream
+        self._catalogue: Optional[str] = None
         self.outbox: list[dict] = []
         self.messages: list[dict] = [{"role": "system",
                                       "content": self.system_prompt()}]
@@ -113,14 +123,22 @@ class Conversation:
     def system_prompt(self) -> str:
         level = self.toolbox.disclosure.level
         abilities = ("You can change the flow with add_node, connect, "
-                     "set_params, rename_node, disconnect and delete_nodes. "
-                     "Each of your turns is one undo step for the user."
+                     "set_params, rename_node, disconnect and delete_nodes"
+                     + (", and run nodes on this PC with run_nodes"
+                        if self.toolbox.runner is not None else "")
+                     + ". Each of your turns is one undo step for the user."
                      if self.toolbox.autonomy == ACT else
                      "You can only look and advise: you cannot change the "
                      "flow. Say what the user should do instead.")
-        return SYSTEM_PROMPT.format(abilities=abilities,
-                                    level=level_label(level).split(" — ")[0],
-                                    visibility=_VISIBILITY[level])
+        prompt = SYSTEM_PROMPT.format(abilities=abilities,
+                                      level=level_label(level).split(" — ")[0],
+                                      visibility=_VISIBILITY[level])
+        if self._catalogue is None:
+            self._catalogue = catalogue(self.toolbox.registry)
+        # appended, not formatted in: a label may hold braces
+        return (prompt + "\n\nThe node library, by category (label = type "
+                "id; the 'flograph.' prefix is left off, either form works):\n"
+                + self._catalogue)
 
     def _ask(self, emit: Callable[[Event], None] = lambda e: None,
              cancelled: Callable[[], bool] = lambda: False) -> toolcall.Reply:
@@ -158,6 +176,7 @@ class Conversation:
         self.messages[0]["content"] = self.system_prompt()
         if text is not None:
             self.messages.append({"role": "user", "content": result.sent_text})
+        checked = False
         try:
             while True:
                 if cancelled():
@@ -174,8 +193,20 @@ class Conversation:
                     **({"tool_calls": [c.to_dict() for c in reply.tool_calls]}
                        if reply.tool_calls else {})})
                 if reply.done:
-                    result.text = reply.text
-                    break
+                    missing = ([] if checked or self.toolbox.autonomy != ACT
+                               else self._ui(self.toolbox.unwired_added))
+                    if not missing:
+                        result.text = reply.text
+                        break
+                    # once per turn: the commonest slip is a node added and
+                    # never wired, and the model rarely notices on its own
+                    checked = True
+                    self.messages.append({"role": "user", "content": (
+                        "[Check from flograph, not the user: these nodes you "
+                        "added have required inputs with nothing wired in — "
+                        + "; ".join(missing) + ". Wire them with connect, or "
+                        "if leaving them open is right, say why. Then answer.]")})
+                    continue
                 stop = cancelled()
                 for call in reply.tool_calls:
                     if stop:
@@ -184,7 +215,13 @@ class Conversation:
                         outcome = '{"error": "not run: the user pressed Stop"}'
                     else:
                         emit(Event("tool", call.name))
-                        outcome = self._ui(lambda c=call: self.toolbox.execute(c))
+                        if self.toolbox.runs_off_ui(call):
+                            # waits for the engine: on this thread, not the GUI's
+                            outcome = self.toolbox.execute_run(call, self._ui,
+                                                               cancelled)
+                        else:
+                            outcome = self._ui(
+                                lambda c=call: self.toolbox.execute(c))
                         emit(Event("result", call.name, outcome))
                     self.messages.append({"role": "tool", "tool_call_id": call.id,
                                           "name": call.name, "content": outcome})

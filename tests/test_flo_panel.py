@@ -531,3 +531,26 @@ def test_a_long_build_pauses_and_continues(qtbot, monkeypatch, registry,
     # a stale Continue does nothing
     panel._on_link("continue:0")
     assert not panel._busy
+
+
+def test_run_nodes_runs_the_real_engine(qtbot, monkeypatch, registry, settings,
+                                        user_dir):
+    from flograph.engine import ExecutionEngine
+    graph = Graph()
+    table = registry.instantiate("flograph.io.table", (0, 0))
+    graph.add_node(table)
+    engine = ExecutionEngine(graph)
+    model = ScriptedModel(monkeypatch, [
+        [("describe_flow", {})],
+        [("run_nodes", {"nodes": ["n1"]})],
+        "It ran."])
+    profiles.save(ProfileSet([LOCAL, ONLINE], LOCAL.id))
+    panel = FloPanel(graph, registry, QUndoStack(), engine.cache,
+                     settings=settings, engine=engine)
+    qtbot.addWidget(panel)
+    _turn(qtbot, panel, "run the table")
+    result = json.loads(model.bodies[2]["messages"][-1]["content"])
+    assert result["run"] == "done"
+    assert result["nodes"][0]["status"] == "up to date"
+    assert "outputs" in result["nodes"][0]
+    assert not engine.active

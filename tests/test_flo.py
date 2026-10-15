@@ -152,7 +152,8 @@ class TestAgentBuildsAFlow:
             [("add_node", {"type_id": "flograph.viz.bar_chart"})],
             [("add_node", {"type_id": PLOTLY, "params": {"knd": "bar"}})],
             [("add_node", {"type_id": PLOTLY, "params": {"kind": "bar"}})],
-            "Done."])
+            "Done.",
+            "Left unwired on purpose: there is no data yet."])
         box = _toolbox(registry, stack)
         Conversation(wire.Connection(model="m"), box).send("chart")
         results = [m["content"] for m in model.bodies[-1]["messages"]
@@ -204,8 +205,8 @@ class TestAgentBuildsAFlow:
 
         Conversation(wire.Connection(model="m"), _toolbox(registry, stack),
                      on_ui=on_ui).send("go")
-        # open the turn + 5 tool calls + close the turn
-        assert len(calls) == 7
+        # open the turn + 5 tool calls + the unwired check + close the turn
+        assert len(calls) == 8
 
     def test_server_failure_mid_turn(self, monkeypatch, registry, stack):
         replies = iter([_Reply({"choices": [{"message": {"tool_calls": [{
@@ -365,3 +366,135 @@ class TestTools:
     def test_usual_nodes_exist(self, registry):
         for type_id in set(tools_mod.USUAL_NODE.values()):
             assert registry.maybe_get(type_id) is not None, type_id
+
+
+
+class TestQualityAids:
+    """What keeps a weaker model on the rails: wiring done for it, ports
+    picked for it, a check before 'done', and the library in the prompt."""
+
+    def test_add_node_wires_from_input_from(self, monkeypatch, registry, stack):
+        box = _toolbox(registry, stack)
+        reader = json.loads(box.execute(ToolCall("a", "add_node", {"type_id": CSV})))
+        chart = json.loads(box.execute(ToolCall("b", "add_node", {
+            "type_id": PLOTLY, "input_from": reader["node"]})))
+        assert chart["wired"] == "n1.table -> n2.table"
+        assert "unwired_inputs" not in chart
+        conn = box.graph.input_connection(box._handles["n2"], "table")
+        assert conn is not None
+
+    def test_connect_picks_the_ports(self, registry, stack):
+        box = _toolbox(registry, stack)
+        box.execute(ToolCall("a", "add_node", {"type_id": CSV}))
+        box.execute(ToolCall("b", "add_node", {"type_id": PLOTLY}))
+        out = json.loads(box.execute(ToolCall("c", "connect", {
+            "from_node": "n1", "to_node": "n2"})))
+        assert out["connected"] == "n1.table -> n2.table"
+
+    def test_a_named_port_that_does_not_exist_still_says_so(self, registry, stack):
+        box = _toolbox(registry, stack)
+        box.execute(ToolCall("a", "add_node", {"type_id": CSV}))
+        box.execute(ToolCall("b", "add_node", {"type_id": PLOTLY}))
+        out = json.loads(box.execute(ToolCall("c", "connect", {
+            "from_node": "n1", "to_node": "n2", "to_port": "tabel"})))
+        assert "no input 'tabel'" in out["error"]
+
+    def test_unwired_inputs_are_reported(self, registry, stack):
+        box = _toolbox(registry, stack)
+        chart = json.loads(box.execute(ToolCall("a", "add_node", {"type_id": PLOTLY})))
+        assert chart["unwired_inputs"] == ["table"]
+        flow = json.loads(box.execute(ToolCall("b", "describe_flow", {})))
+        assert flow["nodes"][0]["unwired_inputs"] == ["table"]
+
+    def test_the_agent_checks_wiring_before_done(self, monkeypatch, registry, stack):
+        model = ScriptedModel(monkeypatch, [
+            [("add_node", {"type_id": CSV})],
+            [("add_node", {"type_id": PLOTLY})],
+            "Done!",
+            [("connect", {"from_node": "n1", "to_node": "n2"})],
+            "Done — wired now."])
+        box = _toolbox(registry, stack)
+        result = Conversation(wire.Connection(model="m"), box).send("chart")
+        assert result.text == "Done — wired now."
+        check = [m for m in model.bodies[3]["messages"]
+                 if m["role"] == "user" and "Check from flograph" in str(m["content"])]
+        assert check and "n2" in check[0]["content"]
+        assert box.graph.input_connection(box._handles["n2"], "table") is not None
+
+    def test_the_check_is_asked_once(self, monkeypatch, registry, stack):
+        ScriptedModel(monkeypatch, [[("add_node", {"type_id": PLOTLY})],
+                                    "Done.", "Still done."])
+        result = Conversation(wire.Connection(model="m"),
+                              _toolbox(registry, stack)).send("chart")
+        assert result.text == "Still done."
+
+    def test_advise_is_not_checked(self, monkeypatch, registry, stack):
+        ScriptedModel(monkeypatch, ["Add a chart."])
+        result = Conversation(wire.Connection(model="m"),
+                              _toolbox(registry, stack, autonomy=ADVISE)).send("x")
+        assert result.text == "Add a chart."
+
+    def test_the_library_is_in_the_prompt(self, registry, stack):
+        prompt = Conversation(wire.Connection(model="m"),
+                              _toolbox(registry, stack)).system_prompt()
+        assert "Show Plotly=viz.show_plotly" in prompt
+        assert "Read CSV=io.read_csv" in prompt
+
+    def test_short_type_ids_work(self, registry, stack):
+        box = _toolbox(registry, stack)
+        out = json.loads(box.execute(ToolCall("a", "add_node",
+                                              {"type_id": "viz.show_plotly"})))
+        assert out["node"] == "n1"
+
+    def test_unknown_arguments_are_ignored_not_fatal(self, registry, stack):
+        box = _toolbox(registry, stack)
+        out = json.loads(box.execute(ToolCall("a", "describe_flow",
+                                              {"timeout": "infinite"})))
+        assert out["ignored_arguments"] == ["timeout"] and "error" not in out
+
+    def test_get_output_picks_the_table(self, registry, stack):
+        graph = Graph()
+        node = registry.instantiate(PLOTLY, (0, 0))
+        graph.add_node(node)
+        cache = _Cache({node.id: {"table": pd.DataFrame({"a": [1]})}})
+        box = _toolbox(registry, stack, graph=graph, cache=cache)
+        box.handle(node.id)
+        out = json.loads(box.execute(ToolCall("a", "get_output", {"node": "n1"})))
+        assert out["port"] == "table" and out["columns"][0]["name"] == "a"
+
+    def test_names_on_record_are_hidden_at_structure(self, registry, stack):
+        class Spilled(_Cache):
+            def get(self, node_id):
+                class Entry:
+                    column_names = {"table": ("patient_name",)}
+                return Entry()
+        graph = Graph()
+        node = registry.instantiate(PLOTLY, (0, 0))
+        node.params["x"] = "patient_name"
+        graph.add_node(node)
+        box = _toolbox(registry, stack, graph=graph, cache=Spilled(),
+                       level=disc.STRUCTURE)
+        flow = box.execute(ToolCall("a", "describe_flow", {}))
+        assert "patient_name" not in flow
+
+    def test_run_nodes_runs_on_the_worker_and_reports(self, monkeypatch, registry,
+                                                      stack):
+        ran = []
+        model = ScriptedModel(monkeypatch, [
+            [("add_node", {"type_id": CSV})],
+            [("run_nodes", {"nodes": ["n1"]})],
+            "Ran it."])
+        box = _toolbox(registry, stack)
+        box.runner = lambda ids, cancelled: ran.append(ids) or "done"
+        Conversation(wire.Connection(model="m"), box).send("run it")
+        assert ran == [[box._handles["n1"]]]
+        result = json.loads(model.bodies[2]["messages"][-1]["content"])
+        assert result["run"] == "done" and result["nodes"][0]["node"] == "n1"
+
+    def test_run_nodes_only_when_acting_with_a_runner(self, registry, stack):
+        box = _toolbox(registry, stack)
+        assert "run_nodes" not in {t.name for t in box.specs()}
+        box.runner = lambda ids, cancelled: "done"
+        assert "run_nodes" in {t.name for t in box.specs()}
+        box.autonomy = ADVISE
+        assert "run_nodes" not in {t.name for t in box.specs()}
