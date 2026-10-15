@@ -41,6 +41,8 @@ STRUCTURE, SCHEMA, PROFILE, LOOKALIKE, SAMPLE, ANALYSE = range(6)
 BUILT_MAX = PROFILE           # the highest level this module can serve
 HIDDEN_COLUMN = "<column>"
 HIDDEN_SECRET = "<hidden>"
+# a quoted piece of an error message: 'x' or "x", on one line
+_QUOTED = re.compile(r"""(['"])([^'"\n]{1,200})\1""")
 # setting types whose value is whatever the user typed
 _FREE_TEXT = {"", "string", "text", "date", "auto", "code", "expression"}
 
@@ -297,6 +299,19 @@ class Disclosure:
         if isinstance(value, dict):
             return {self.scrub(str(k)): self.param_value(v) for k, v in value.items()}
         return value
+
+    def error_text(self, message: str) -> str:
+        """A node's error, safe to send. Errors quote the data they choked
+        on ("could not convert string to float: 'Jane Smith'"), so every
+        quoted piece that is not a column name goes as '<value>' — at
+        these levels no cell value is ever sent, errors included."""
+        def quoted(match: "re.Match") -> str:
+            inner = match.group(2)
+            if inner.strip() in self._known or inner.strip() in self._aliases():
+                return match.group(0)
+            return f"{match.group(1)}<value>{match.group(1)}"
+
+        return self.scrub(_QUOTED.sub(quoted, message or ""))
 
     def _only_columns(self, value: str) -> bool:
         """A setting that just names columns ("region" or "a, b")."""

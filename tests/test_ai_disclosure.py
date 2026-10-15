@@ -170,3 +170,18 @@ class TestHideText:
         assert disclosure.param_value('x == "Jane"', "string") == 'x == "Jane"'
         assert Privacy.from_dict({"hide_text": True}).to_dict() == {"hide_text": True}
         assert not Privacy.from_dict({}).hide_text
+
+
+class TestErrorText:
+    def test_quoted_values_are_withheld_column_names_kept(self):
+        disclosure = Disclosure(d.SCHEMA, Privacy(), known_columns=["price"])
+        out = disclosure.error_text(
+            "could not convert string to float: 'Jane Smith' in column 'price'")
+        assert "Jane" not in out
+        assert out == ("could not convert string to float: '<value>' "
+                       "in column 'price'")
+
+    def test_structure_hides_the_column_too(self):
+        disclosure = Disclosure(d.STRUCTURE, Privacy(), known_columns=["price"])
+        out = disclosure.error_text('KeyError: "price"')
+        assert "price" not in out

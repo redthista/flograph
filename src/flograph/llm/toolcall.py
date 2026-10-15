@@ -309,22 +309,29 @@ def _refuses_tools(exc: wire.LLMError) -> bool:
 
 
 def chat_with_tools(conn: wire.Connection, messages: list[dict],
-                    tools: list[ToolSpec], mode: str = "auto") -> Reply:
-    """One model turn: the text it wrote, and the tools it wants called."""
+                    tools: list[ToolSpec], mode: str = "auto", *,
+                    on_text=None, cancelled=None) -> Reply:
+    """One model turn: the text it wrote, and the tools it wants called.
+
+    `on_text` streams the reply's text as it arrives (see `llm.stream`);
+    the Reply is still built from the whole of it."""
     if mode not in MODES:
         mode = "auto"
+    stream = {"on_text": on_text, "cancelled": cancelled}
     if not tools:
-        return Reply(wire.chat(conn, _openai_messages(messages)
-                               if conn.provider != "anthropic"
-                               else _anthropic_messages(messages)), [], "native")
+        converted = (_openai_messages(messages) if conn.provider != "anthropic"
+                     else _anthropic_messages(messages))
+        data = wire.exchange(conn, lambda tweaks: wire.chat_body(
+            conn, converted, tweaks), **stream)
+        return Reply(wire.reply_text(data, conn.provider), [], "native")
     if mode in ("auto", "native"):
         try:
             data = wire.exchange(conn, lambda tweaks: request_body(
-                conn, messages, tools, "native", tweaks))
+                conn, messages, tools, "native", tweaks), **stream)
             return _parse_native(data, conn.provider)
         except wire.LLMError as exc:
             if mode == "native" or not _refuses_tools(exc):
                 raise
     data = wire.exchange(conn, lambda tweaks: request_body(
-        conn, messages, tools, "json", tweaks))
+        conn, messages, tools, "json", tweaks), **stream)
     return parse_fallback(wire.reply_text(data, conn.provider))

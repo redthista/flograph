@@ -420,3 +420,71 @@ def test_privacy_dialog_hide_text_round_trips(qtbot):
     qtbot.addWidget(dialog)
     assert dialog.hide_text.isChecked()
     assert dialog.privacy() == {"hide_text": True}
+
+
+def test_the_reply_shows_while_it_streams(qtbot, monkeypatch, registry, settings,
+                                          user_dir):
+    from tests.test_llm_stream import _SSE
+    gate = threading.Event()
+
+    class Held(_SSE):
+        def iter_lines(self):
+            for index, line in enumerate(self._lines):
+                if index == 2:
+                    gate.wait(5)     # hold the reply half-written
+                yield line
+
+    response = Held([{"choices": [{"delta": {"content": "Building "}}]},
+                     {"choices": [{"delta": {"content": "your chart."},
+                                   "finish_reason": "stop"}]}])
+    monkeypatch.setattr(wire, "_post_stream", lambda *a: response)
+    panel = _panel(qtbot, registry, settings)
+    assert panel.send("chart please")
+    qtbot.waitUntil(lambda: panel._live is not None
+                    and panel._live.text() == "Building", timeout=3000)
+    gate.set()
+    qtbot.waitUntil(lambda: not panel._busy, timeout=3000)
+    assert panel._live is None          # the finished reply took its place
+    assert response.closed
+
+
+class TestAskAbout:
+    def test_the_message_names_the_nodes_it_points_at(self, qtbot, monkeypatch,
+                                                      registry, settings, user_dir):
+        model = ScriptedModel(monkeypatch, ["It reads a CSV file."])
+        graph = Graph()
+        node = registry.instantiate(CSV, (0, 0))
+        graph.add_node(node)
+        panel = _panel(qtbot, registry, settings, graph=graph)
+        panel.ask_about([node.id], f'the node "{node.label}"',
+                        "Explain this")
+        qtbot.waitUntil(lambda: not panel._busy, timeout=5000)
+        sent = model.bodies[0]["messages"][-1]["content"]
+        assert sent.startswith(f'[I\'m pointing at the node "{node.label}": n1')
+        assert sent.endswith("Explain this")
+        assert not panel.about_row.isVisibleTo(panel)   # used up by the send
+
+    def test_without_a_prompt_it_waits_for_your_words(self, qtbot, registry,
+                                                      settings, user_dir):
+        graph = Graph()
+        node = registry.instantiate(CSV, (0, 0))
+        graph.add_node(node)
+        panel = _panel(qtbot, registry, settings, graph=graph)
+        panel.ask_about([node.id], "the node")
+        assert panel.about_row.isVisibleTo(panel) and not panel._busy
+        panel.clear_about()
+        assert not panel.about_row.isVisibleTo(panel)
+
+    def test_window_menu_offers_it(self, qtbot, registry, user_dir):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        win._save_window_state = lambda: None
+        qtbot.addWidget(win)
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu()
+        win._add_flo_menu(menu, ["x"], "the node")
+        sub = menu.findChildren(QMenu)[0]
+        labels = [a.text() for a in sub.actions() if a.text()]
+        assert labels[0] == "Ask About This…" and "Explain This" in labels
+        assert "Why Did It Fail?" not in labels

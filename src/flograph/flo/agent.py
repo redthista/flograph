@@ -42,8 +42,9 @@ flows along wires from an output to an input; a node runs when its inputs \
 have run.
 
 How to work:
-- Start with describe_flow to see what is there. Nodes are referred to by \
-handles such as n1, n2 — use them exactly.
+- Start with describe_flow to see what is there — or, when the user \
+points at nodes, with get_node on those. Nodes are referred to by handles \
+such as n1, n2 — use them exactly.
 - Before adding a node, find its type with find_node_types and read it with \
 get_node_type, so you use real type ids, port names and setting names. \
 Never invent them.
@@ -82,7 +83,7 @@ class TurnResult:
 
 @dataclass
 class Event:
-    kind: str                  # "thinking" | "tool" | "result"
+    kind: str                  # "thinking" | "text" | "tool" | "result"
     name: str = ""
     detail: str = ""
 
@@ -91,13 +92,15 @@ class Conversation:
     def __init__(self, connection: wire.Connection, toolbox: Toolbox, *,
                  tool_mode: str = "auto", max_steps: int = DEFAULT_MAX_STEPS,
                  on_ui: Optional[Callable[[Callable[[], Any]], Any]] = None,
-                 before_send: Optional[Callable[[dict], bool]] = None):
+                 before_send: Optional[Callable[[dict], bool]] = None,
+                 stream: bool = False):
         self.connection = connection
         self.toolbox = toolbox
         self.tool_mode = tool_mode
         self.max_steps = max_steps
         self._ui = on_ui or (lambda fn: fn())
         self.before_send = before_send
+        self.stream = stream
         self.outbox: list[dict] = []
         self.messages: list[dict] = [{"role": "system",
                                       "content": self.system_prompt()}]
@@ -114,7 +117,8 @@ class Conversation:
                                     level=level_label(level).split(" — ")[0],
                                     visibility=_VISIBILITY[level])
 
-    def _ask(self) -> toolcall.Reply:
+    def _ask(self, emit: Callable[[Event], None] = lambda e: None,
+             cancelled: Callable[[], bool] = lambda: False) -> toolcall.Reply:
         tools = self.toolbox.specs()
         entry = {"time": time.time(),
                  "messages": copy.deepcopy(self.messages),
@@ -123,8 +127,10 @@ class Conversation:
         if self.before_send is not None and not self.before_send(entry):
             raise _Declined
         self.outbox.append(entry)
+        streaming = ({"on_text": lambda text: emit(Event("text", detail=text)),
+                      "cancelled": cancelled} if self.stream else {})
         reply = toolcall.chat_with_tools(self.connection, self.messages,
-                                         tools, self.tool_mode)
+                                         tools, self.tool_mode, **streaming)
         if reply.mode == "json" and self.tool_mode == "auto":
             self.tool_mode = "json"
         return reply
@@ -152,7 +158,7 @@ class Conversation:
                     break
                 result.steps += 1
                 emit(Event("thinking"))
-                reply = self._ask()
+                reply = self._ask(emit, cancelled)
                 self.messages.append({
                     "role": "assistant", "content": reply.text,
                     **({"tool_calls": [c.to_dict() for c in reply.tool_calls]}
@@ -179,6 +185,8 @@ class Conversation:
             result.stopped, result.error = "error", str(exc)
         except _Declined:
             result.stopped = "declined"
+        except wire.Cancelled:
+            result.stopped = "cancelled"
         finally:
             self._ui(self.toolbox.end_turn)
             result.actions = list(self.toolbox.actions)

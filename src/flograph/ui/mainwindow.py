@@ -3839,6 +3839,49 @@ class MainWindow(QMainWindow):
         AiSettingsDialog(self).exec()
         self.flo_panel.reload_profiles()
 
+    # what each Ask Flo entry sends; "Ask About…" sends nothing yet
+    _FLO_ASKS = (
+        ("Explain This", "Explain what this does and how it is set up, "
+         "in a few short lines."),
+        ("Add a Chart From This", "Add a suitable chart fed from this."),
+        ("Suggest a Next Step", "What would be a sensible next step after "
+         "this? Suggest it, but don't change anything yet."),
+    )
+
+    def _add_flo_menu(self, menu: QMenu, ids: list, title: str) -> None:
+        """Ask Flo ▸ on a node, a selection or a frame: the chat opens
+        already pointed at them — instead of dragging onto the dock, which
+        would scroll the canvas under the drag."""
+        if not ids:
+            return
+        from .window_frame import frame_icon
+        sub = menu.addMenu(frame_icon("sparkle", theme.BUTTON_ACCENT), "Ask Flo")
+        sub.setToolTipsVisible(True)
+        ask = sub.addAction("Ask About This…")
+        ask.setToolTip("Open the Flo Assistant with these nodes attached to "
+                       "your next message")
+        ask.triggered.connect(lambda: self.ask_flo(ids, title))
+        failed = [i for i in ids if i in self.graph.nodes and getattr(
+            self.graph.nodes[i].status, "value", "") == "error"]
+        if failed:
+            why = sub.addAction("Why Did It Fail?")
+            why.setToolTip("Quoted values in the error are withheld; "
+                           "column names follow what Flo may see")
+            why.triggered.connect(lambda: self.ask_flo(
+                failed, title, "This failed. What went wrong, and how do I "
+                "fix it?"))
+        sub.addSeparator()
+        for label, prompt in self._FLO_ASKS:
+            action = sub.addAction(label)
+            action.triggered.connect(
+                lambda _=False, p=prompt: self.ask_flo(ids, title, p))
+
+    def ask_flo(self, ids: list, title: str, prompt: str = "") -> None:
+        dock = self.flo_dock
+        dock.show()
+        dock.raise_()
+        self.flo_panel.ask_about(list(ids), title, prompt or None)
+
     def toggle_flo(self) -> None:
         """Open the Flo Assistant with the cursor in its box, or put it
         away when it is already the panel in front."""
@@ -4465,6 +4508,8 @@ class MainWindow(QMainWindow):
         tab_action = menu.addAction(
             "Go to Its Tab" if self._frame_tab_of(frame_id)
             else "Open in New Tab")
+        frame_title = self.graph.frames[frame_id].title or "untitled"
+        self._add_flo_menu(menu, targets, f'the frame "{frame_title}"')
         menu.addSeparator()
         # The same two run flags the node menu offers, carried by the frame
         # itself rather than stamped onto the nodes that happen to be inside
@@ -4934,6 +4979,8 @@ class MainWindow(QMainWindow):
             menu.addSection(f"{len(ids)} nodes selected")
         run_to = menu.addAction("Run These Nodes" if many
                                 else "Run To This Node")
+        self._add_flo_menu(menu, ids, f"these {len(ids)} nodes" if many
+                           else f'the node "{node.label}"')
         menu.addSeparator()
         edit_code = open_window = rename = properties = None
         if not many:

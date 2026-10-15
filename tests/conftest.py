@@ -74,6 +74,16 @@ from flograph.core import Graph, NodeInstance, NodeRegistry, parse_spec
 
 
 @pytest.fixture(autouse=True)
+def _streams_go_through_post(monkeypatch):
+    """A streamed AI request goes through `wire._post`, looked up when it is
+    made — so a test that fakes `_post` fakes streaming too, and no test
+    can open a real stream. test_llm_stream fakes `_post_stream` itself."""
+    from flograph.llm import wire
+    monkeypatch.setattr(wire, "_post_stream",
+                        lambda *args: wire._post(*args))
+
+
+@pytest.fixture(autouse=True)
 def _drain_qt_after_each_test():
     """Destroy each test's Qt debris deterministically, right here.
 

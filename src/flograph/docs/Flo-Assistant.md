@@ -79,6 +79,20 @@ These, and the flow's limit, are saved in the flow. Whoever you send it to
 gets the same limit: their connection can lower it but not raise it. It is
 a setting rather than a lock, so anyone who edits the flow can change it.
 
+## Ask Flo about a node or a frame
+
+Right-click a node, a selection of nodes, or a frame and choose **Ask
+Flo**:
+
+- **Ask About This…** opens the chat with them attached — an *About* chip
+  above the box — so "this" in your message means exactly those nodes.
+  Click **×** on the chip to send without it.
+- **Explain This**, **Add a Chart From This** and **Suggest a Next Step**
+  send that request straight away.
+- **Why Did It Fail?** appears when one of them has failed. Error messages
+  often quote the data they choked on, so quoted values in an error go to
+  the AI as `'<value>'`; column names in it follow the usual rules.
+
 ## Changes and undo
 
 Each reply is **one undo step**, however many nodes it touched. The changes
@@ -87,8 +101,8 @@ node, and **Undo these changes** takes the whole reply back (or use
 **Ctrl+Z**). Anything you change on the canvas while a reply is still
 running joins that reply's undo step.
 
-**Stop** takes effect as soon as the AI next answers: whatever it asked to
-do in that answer is not done.
+Replies appear as they are written. **Stop** ends a reply mid-sentence,
+and nothing the AI asked for in that unfinished answer is done.
 
 ## The receipt
 
@@ -119,4 +133,5 @@ names), and every tool result. From the **⋯** menu:
 ## Not yet
 
 It does not see real rows or run nodes yet, and it cannot write new node
-code — those come later, behind the same dials.
+code — those come later, behind the same dials. Chats are not saved in the
+flow: a flow you send someone never carries your conversation.

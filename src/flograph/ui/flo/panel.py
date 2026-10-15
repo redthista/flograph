@@ -27,6 +27,7 @@ result. Two rules are enforced here because only the dock sees them happen:
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Optional
 
@@ -91,6 +92,21 @@ SUGGESTIONS = (
     "What could be simpler here?",
 )
 
+_THINK = re.compile(r"<think>.*?(</think>|$)", re.DOTALL | re.IGNORECASE)
+_TOOL_FENCE = re.compile(r"```\s*(tool|json)\b", re.IGNORECASE)
+
+
+def visible_text(raw: str) -> str:
+    """What of a reply still arriving is worth showing: no reasoning
+    blocks, and nothing from a JSON tool call on (the fallback protocol
+    writes its calls into the text)."""
+    text = _THINK.sub("", raw or "")
+    fence = _TOOL_FENCE.search(text)
+    if fence:
+        text = text[:fence.start()]
+    return text.strip()
+
+
 LOCAL_TINT = QColor(74, 222, 128)
 ONLINE_TINT = QColor(250, 204, 21)
 
@@ -124,6 +140,7 @@ QPushButton#flo_chip { border: 1px solid rgba(127,127,127,0.30);
     border-radius: 12px; padding: 5px 12px; text-align: left;
     background: transparent; }
 QPushButton#flo_chip:hover { background: rgba(127,127,127,0.14); }
+QFrame#flo_about { background: rgba(124,108,246,0.14); border-radius: 10px; }
 QLabel#flo_muted { color: palette(placeholder-text); }
 QLabel#flo_title { font-size: 15px; font-weight: 600; }
 """
@@ -225,6 +242,14 @@ class FloPanel(QWidget):
         self._started = 0.0
         self._doing = ""
         self._welcome: Optional[QWidget] = None
+        self._about: list[str] = []           # node ids "this" means
+        self._about_title = ""
+        self._live: Optional[QLabel] = None   # the reply as it arrives
+        self._live_raw = ""
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(50)
+        self._live_timer.timeout.connect(self._paint_live)
         self.setStyleSheet(_STYLE)
         self._build()
         self.reload_profiles()
@@ -356,6 +381,22 @@ class FloPanel(QWidget):
         self._tick = QTimer(self)
         self._tick.setInterval(1000)
         self._tick.timeout.connect(self._show_progress)
+
+        # -- what "this" means: set from a node's or frame's Ask Flo menu
+        self.about_row = QFrame()
+        self.about_row.setObjectName("flo_about")
+        about = QHBoxLayout(self.about_row)
+        about.setContentsMargins(10, 3, 4, 3)
+        self.about_label = _label()
+        about.addWidget(self.about_label, 1)
+        clear = QToolButton()
+        clear.setObjectName("flo_flat")
+        clear.setText("×")
+        clear.setToolTip("Don't send this with the message")
+        clear.clicked.connect(self.clear_about)
+        about.addWidget(clear)
+        self.about_row.hide()
+        outer.addWidget(self.about_row)
 
         # -- the input
         box = QFrame()
@@ -621,6 +662,7 @@ class FloPanel(QWidget):
         if self.toolbox is not None:
             self.toolbox.end_turn()   # a stopped turn's undo step stays whole
         self.chat = self.toolbox = self.bridge = None
+        self._drop_live()
         self._chat_profile = None
         self._chat_level = -1
         self._turns = []
@@ -649,7 +691,7 @@ class FloPanel(QWidget):
     def stop(self) -> None:
         if self._busy:
             self._cancel = True
-            self._doing = "Stopping once the AI answers"
+            self._doing = "Stopping"
             self._show_progress()
 
     def _ensure_chat(self) -> bool:
@@ -673,7 +715,8 @@ class FloPanel(QWidget):
         self.chat = Conversation(connection, self.toolbox,
                                  tool_mode=profile.tool_mode or "auto",
                                  on_ui=self.bridge.on_ui,
-                                 before_send=self._before_send)
+                                 before_send=self._before_send,
+                                 stream=True)
         self._chat_profile = profile.to_dict()
         return True
 
@@ -708,11 +751,17 @@ class FloPanel(QWidget):
                 self.settings.setValue(f"flo/agreed/{profile.id}", level)
         if not self._ensure_chat():
             return False
+        about_title = self._about_title if self._about else ""
+        context = self._about_context()
+        self.clear_about()
         self.input.clear()
         self._hide_welcome()
         self.toolbox.set_view(disc.Disclosure(level, self._privacy()), autonomy)
         self._chat_level = max(self._chat_level, level)
-        bubble = self._block(_label(text), name="flo_user", margins=(12, 8, 12, 8))
+        parts = [_label(text)]
+        if about_title:
+            parts.append(_label(f"About: {about_title}", muted=True))
+        bubble = self._block(*parts, name="flo_user", margins=(12, 8, 12, 8))
         bubble.setMaximumWidth(max(220, int(self.scroll.viewport().width() * 0.85)))
         row = QWidget()
         line = QHBoxLayout(row)
@@ -720,8 +769,9 @@ class FloPanel(QWidget):
         line.addStretch(1)
         line.addWidget(bubble)
         self._add(row)
+        message = context + text
         self._turn = {
-            "bubble": bubble, "text": text, "start": len(self.chat.outbox),
+            "bubble": bubble, "text": message, "start": len(self.chat.outbox),
             "before": (self.chat.outbox[-1]["messages"]
                        if self.chat.outbox else []),
             "to": "this PC" if profile.is_local() else _host(profile),
@@ -736,7 +786,7 @@ class FloPanel(QWidget):
         self._doing = "Thinking"
         self._set_busy(True)
         chat, bridge = self.chat, self.bridge
-        bridge.start(lambda: chat.send(text, cancelled=lambda: self._cancel,
+        bridge.start(lambda: chat.send(message, cancelled=lambda: self._cancel,
                                        on_event=bridge.event.emit))
         return True
 
@@ -789,11 +839,44 @@ class FloPanel(QWidget):
             return
         if event.kind == "thinking":
             self._doing = "Thinking"
+            self._live_raw = ""          # a new step writes afresh
+            self._paint_live()
+        elif event.kind == "text":
+            self._doing = "Writing"
+            self._live_raw += event.detail
+            if not self._live_timer.isActive():
+                self._live_timer.start()
         elif event.kind == "tool":
             self._doing = TOOL_WORDS.get(event.name, event.name)
         self._show_progress()
 
+    def _paint_live(self) -> None:
+        """Show the reply so far — at most every 50 ms, however fast it
+        streams, since a Markdown relayout per token would stall the
+        window on a long answer."""
+        text = visible_text(self._live_raw)
+        if not text:
+            if self._live is not None:
+                self._live.hide()
+            return
+        if self._live is None:
+            self._live = _label(markdown=True)
+            self._live.linkActivated.connect(self._on_link)
+            self._add(self._live)
+        self._live.setText(text)
+        self._live.show()
+        QTimer.singleShot(0, self._scroll_to_end)
+
+    def _drop_live(self) -> None:
+        self._live_timer.stop()
+        self._live_raw = ""
+        if self._live is not None:
+            self._live.hide()
+            self._live.deleteLater()
+            self._live = None
+
     def _on_failed(self, message: str) -> None:
+        self._drop_live()
         if self.toolbox is not None:
             self.toolbox.end_turn()
         self._set_busy(False)
@@ -836,12 +919,14 @@ class FloPanel(QWidget):
             label.setText(f'{summary} <a href="receipt:">details</a>')
 
     def _on_finished(self, result: Optional[TurnResult]) -> None:
+        self._drop_live()
         self._set_busy(False)
         if result is None or self.chat is None:
             return
         turn = self._turn
         if result.sent_text and result.sent_text != turn["text"]:
-            note = _label("The AI got this as: " + result.sent_text, muted=True)
+            note = _label("The AI got this as: " + result.sent_text.split(
+                "]\n", 1)[-1], muted=True)
             turn["bubble"].layout().addWidget(note)
         index = len(self._turns)
         entries = self.chat.outbox[turn["start"]:]
@@ -938,6 +1023,42 @@ class FloPanel(QWidget):
 
     def focus_input(self) -> None:
         self.input.setFocus()
+
+    # -- "this": nodes picked from the canvas --------------------------------------
+
+    def ask_about(self, node_ids: list[str], title: str,
+                  prompt: Optional[str] = None) -> None:
+        """Point the next message at these nodes (Ask Flo on a node, a
+        selection or a frame). With `prompt`, send it straight away."""
+        self._about = [n for n in node_ids if n in self.graph.nodes]
+        self._about_title = title
+        if not self._about:
+            self.clear_about()
+            return
+        self.about_label.setText(f"About: {title}")
+        self.about_label.setToolTip("Sent with your next message, so the AI "
+                                    "knows which nodes you mean")
+        self.about_row.show()
+        if prompt and not self._busy:
+            self.send(prompt)
+        else:
+            self.focus_input()
+
+    def clear_about(self) -> None:
+        self._about = []
+        self._about_title = ""
+        self.about_row.hide()
+
+    def _about_context(self) -> str:
+        """The line that tells the model which nodes "this" is."""
+        ids = [n for n in self._about if n in self.graph.nodes][:30]
+        if not ids or self.toolbox is None:
+            return ""
+        named = "; ".join(
+            f'{self.toolbox.handle(n)} "{self.graph.nodes[n].label}" '
+            f"({self.graph.nodes[n].type_id})" for n in ids)
+        return (f"[I'm pointing at {self._about_title}: {named}. "
+                "Read them with get_node first.]\n")
 
 
 def _host(profile) -> str:

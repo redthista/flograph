@@ -237,7 +237,7 @@ class Toolbox:
         out = {"status": "error" if status == "error" else
                ("out of date" if node.dirty else "up to date")}
         if status == "error" and node.status_message:
-            out["error"] = self.disclosure.scrub(node.status_message[:500])
+            out["error"] = self.disclosure.error_text(node.status_message[:500])
         return out
 
     def _changed_params(self, node) -> dict:

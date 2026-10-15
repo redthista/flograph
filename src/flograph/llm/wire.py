@@ -58,6 +58,10 @@ _PATHS = {"openai": "/chat/completions", "anthropic": "/messages"}
 _ENDPOINT_SUFFIXES = ("/chat/completions", "/messages", "/models")
 
 
+class Cancelled(Exception):
+    """Stop was pressed while a streamed reply was arriving."""
+
+
 class LLMError(RuntimeError):
     """The AI server couldn't be reached, refused the request, or its reply
     wasn't usable. The message carries the server's own words.
@@ -101,6 +105,51 @@ def _post(url: str, headers: dict, body: dict, timeout: float, verify: bool):
         return httpx.post(url, headers=headers, json=body, timeout=timeout,
                           verify=verify)
     except httpx.HTTPError as exc:
+        raise LLMError(
+            f"could not reach the AI server at {url} — is it running, and "
+            f"is the Base URL right? ({exc})") from exc
+
+
+class _Streamed:
+    """An httpx response read as it arrives, with its client to close."""
+
+    def __init__(self, response, client) -> None:
+        self._response, self._client = response, client
+        self.status_code = response.status_code
+        self.headers = response.headers
+
+    @property
+    def text(self) -> str:
+        try:
+            self._response.read()
+            return self._response.text
+        except Exception:  # noqa: BLE001 — only used to word an error
+            return ""
+
+    def json(self):
+        self._response.read()
+        return self._response.json()
+
+    def iter_lines(self):
+        return self._response.iter_lines()
+
+    def close(self) -> None:
+        self._response.close()
+        self._client.close()
+
+
+def _post_stream(url: str, headers: dict, body: dict, timeout: float,
+                 verify: bool):
+    """Like `_post`, but the reply is read as it arrives. Tests replace
+    this too; whatever it returns needs status_code, headers, text,
+    json(), iter_lines() and close()."""
+    httpx = _httpx()
+    client = httpx.Client(timeout=timeout, verify=verify)
+    try:
+        request = client.build_request("POST", url, headers=headers, json=body)
+        return _Streamed(client.send(request, stream=True), client)
+    except httpx.HTTPError as exc:
+        client.close()
         raise LLMError(
             f"could not reach the AI server at {url} — is it running, and "
             f"is the Base URL right? ({exc})") from exc
@@ -173,18 +222,22 @@ def describe_http_error(url: str, status: int, body: str) -> str:
 
 
 def _send(method: str, urls: list[str], conn: Connection, timeout: float,
-          body: Optional[dict] = None):
+          body: Optional[dict] = None, *, stream: bool = False):
     """One request across the candidate URLs; raises LLMError on failure."""
     headers = auth_headers(conn)
     for index, url in enumerate(urls):
         if method == "GET":
             response = _get(url, headers, timeout, conn.verify_ssl)
+        elif stream:
+            response = _post_stream(url, headers, body, timeout, conn.verify_ssl)
         else:
             response = _post(url, headers, body, timeout, conn.verify_ssl)
         if response.status_code < 400:
             return response
         message = describe_http_error(
             url, response.status_code, getattr(response, "text", "") or "")
+        if stream and hasattr(response, "close"):
+            response.close()
         # Only "no such endpoint" is worth retrying at the other URL shape;
         # a 400 or 401 came from the real endpoint and is the answer.
         if response.status_code not in (404, 405) or index == len(urls) - 1:
@@ -262,6 +315,8 @@ def chat_body(conn: Connection, messages: list[dict],
 def _tweak_for(message: str) -> Optional[str]:
     """Which part of the request a 400 is complaining about, if any."""
     text = message.lower()
+    if "stream" in text:
+        return "no_stream"
     if "max_completion_tokens" in text:
         return "max_completion_tokens"
     if "temperature" in text:
@@ -323,25 +378,44 @@ def reply_text(data: dict, provider: str) -> str:
     return content
 
 
-def exchange(conn: Connection, build_body) -> dict:
+def exchange(conn: Connection, build_body, *, on_text=None,
+             cancelled=None) -> dict:
     """POST to the chat endpoint and return the decoded reply.
 
     `build_body(tweaks)` makes the request body; it is called again with
     the 400 climb-down's tweaks when the server names a parameter it won't
     take. Shared by plain chat and tool calling (`llm.toolcall`).
+
+    With `on_text`, the reply is streamed: text goes to `on_text` as it
+    arrives, and the result is still the whole reply (`llm.stream`). A
+    server that refuses `stream` is asked again without it.
     """
     urls = candidate_urls(conn, _PATHS.get(conn.provider, _PATHS["openai"]))
     tweaks: set = set()
     while True:
+        stream = on_text is not None and "no_stream" not in tweaks
+        body = build_body(frozenset(tweaks))
+        if stream:
+            body = {**body, "stream": True}
         try:
-            response = _send("POST", urls, conn, conn.timeout,
-                             build_body(frozenset(tweaks)))
+            response = _send("POST", urls, conn, conn.timeout, body,
+                             stream=stream)
             break
         except LLMError as exc:
             tweak = _tweak_for(str(exc)) if "HTTP 400" in str(exc) else None
+            if tweak == "no_stream" and not stream:
+                tweak = None
             if tweak is None or tweak in tweaks:
                 raise
             tweaks.add(tweak)  # server named a parameter it won't take — drop it
+    if stream:
+        from . import stream as streaming
+        try:
+            return streaming.read(response, conn.provider, on_text, cancelled)
+        finally:
+            close = getattr(response, "close", None)
+            if close is not None:
+                close()
     try:
         return response.json()
     except ValueError as exc:

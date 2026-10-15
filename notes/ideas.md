@@ -419,12 +419,13 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
   tools the model is given**, built in one Qt-free `core/ai_disclosure.py`,
   never by asking it nicely in the prompt. Look-alike rows are generated,
   not shuffled; shuffling leaks every real value.
-- *Left:* streaming the reply text; **Ask Flo** from the right-click menu
-  of a node / frame / selection (not drag — dropping onto the dock
-  scrolls the canvas), with ready-made asks; 3 Propose with ghost-node
-  preview; 4 levels 3–5 (+ `run_node`, `write_user_node`). Not wanted:
-  conversations saved in the flow — chats stay at the user level (Dan,
-  2026-10-15).
+- *Built on the branch, waiting for Dan's test:* streaming
+  (`llm/stream.py`, Stop mid-reply) and **Ask Flo** on the node / frame /
+  selection menu (not drag — dropping onto the dock scrolls the canvas);
+  error messages lose their quoted values (`Disclosure.error_text`).
+- *Left:* 3 Propose with ghost-node preview; 4 levels 3–5 (+ `run_node`,
+  `write_user_node`). Not wanted: conversations saved in the flow — chats
+  stay at the user level (Dan, 2026-10-15).
 - *Open:* an org-level cap file for work rollouts (not now); whether Propose earns
   its cost over one-undo-per-turn; turn limit / mid-build check-ins.
 
