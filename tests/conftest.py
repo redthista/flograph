@@ -29,6 +29,17 @@ for _format in (QSettings.NativeFormat, QSettings.IniFormat):
     QSettings.setPath(_format, QSettings.UserScope, _SETTINGS_DIR)
 atexit.register(shutil.rmtree, _SETTINGS_DIR, ignore_errors=True)
 
+# The same for the user folder and for secrets. AI connection profiles are
+# saved in the user folder and their keys in the system keychain, and the
+# first read migrates the old QSettings connection into both — so any test
+# that opened the editor would otherwise write a profile into the real
+# ai_profiles.json and a key into the developer's real keychain. Tests that
+# want a folder of their own still monkeypatch FLOGRAPH_USER_DIR over this.
+_USER_DIR = tempfile.mkdtemp(prefix="flograph-test-user-")
+os.environ.setdefault("FLOGRAPH_USER_DIR", _USER_DIR)
+os.environ.setdefault("FLOGRAPH_KEYS", "file")
+atexit.register(shutil.rmtree, _USER_DIR, ignore_errors=True)
+
 # Cycles are collected in one place only: _drain_qt_after_each_test, between
 # tests. Left automatic, the collector ran wherever an allocation tipped its
 # threshold — inside a Qt-to-Python callback (a layout's itemAt, a signal

@@ -494,8 +494,11 @@ the layout and manifest.
 
 ### AI assistant (optional)
 
-**Tools > AI Assistant Settings** points flograph at any local
-OpenAI-compatible chat server — Ollama, LM Studio, llama.cpp. You can then
+**Tools > AI Assistant Settings** points flograph at a chat server — local
+(Ollama, LM Studio, llama.cpp) or online (a work gateway, Anthropic,
+OpenAI, OpenRouter), speaking either the OpenAI or the Anthropic API
+format. Several named connections can be kept; API keys go to the system
+keychain (`keyring`, part of the `ai` extra). You can then
 describe a change in English ("filter out rows where price is negative") and
 get a rewritten node script. It is never applied automatically: the reply
 lands in the editor for you to read, and Apply stays a separate, explicit

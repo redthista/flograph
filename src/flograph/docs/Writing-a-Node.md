@@ -388,12 +388,15 @@ then delete the rows you don't want.
 
 ## Editing with AI (optional)
 
-**Tools ▸ AI Assistant Settings** points flograph at any local
-OpenAI-compatible chat server (Ollama, LM Studio, llama.cpp). Describe a
-change in English and get a rewritten script. It is never applied
-automatically — the reply lands in the editor and **Apply** stays a separate
-action. Nothing leaves your machine unless you point it somewhere that isn't
-local.
+**Tools ▸ AI Assistant Settings** points flograph at a chat server — a
+local one (Ollama, LM Studio, llama.cpp) or an online one (a work gateway,
+Anthropic, OpenAI, OpenRouter), in either the OpenAI or the Anthropic API
+format. Keep as many named connections as you like and pick the one in use;
+the badge says whether it is on this PC or online, and API keys are kept in
+your system keychain, not in a settings file. Describe a change in English
+and get a rewritten script. It is never applied automatically — the reply
+lands in the editor and **Apply** stays a separate action. Nothing leaves
+your machine unless you point it somewhere that isn't local.
 
 ## Trying it headless
 

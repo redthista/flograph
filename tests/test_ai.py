@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from flograph import ai
+from flograph.llm import wire
 
 VALID_NODE = '''"""Format Date
 
@@ -51,8 +52,7 @@ class TestChatCompletion:
                 {"choices": [{"message": {"content": "hello"}}]}
             )
 
-        import requests
-        monkeypatch.setattr(requests, "post", fake_post)
+        monkeypatch.setattr(wire, "_post", fake_post)
 
         result = ai.chat_completion([{"role": "user", "content": "hi"}])
 
@@ -70,8 +70,7 @@ class TestChatCompletion:
             captured["headers"] = headers
             return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
 
-        import requests
-        monkeypatch.setattr(requests, "post", fake_post)
+        monkeypatch.setattr(wire, "_post", fake_post)
 
         config = ai.LLMConfig(api_key="secret")
         ai.chat_completion([{"role": "user", "content": "hi"}], config)
@@ -85,35 +84,33 @@ class TestChatCompletion:
             captured["verify"] = verify
             return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
 
-        import requests
-        monkeypatch.setattr(requests, "post", fake_post)
+        monkeypatch.setattr(wire, "_post", fake_post)
 
         config = ai.LLMConfig(verify_ssl=False)
         ai.chat_completion([{"role": "user", "content": "hi"}], config)
 
         assert captured["verify"] is False
 
-    def test_missing_requests_raises_actionable_error(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "requests", None)
+    def test_missing_httpx_raises_actionable_error(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "httpx", None)
 
-        with pytest.raises(ai.LLMError, match="requests"):
+        with pytest.raises(ai.LLMError, match="httpx"):
             ai.chat_completion([{"role": "user", "content": "hi"}])
 
     def test_connection_failure_raises_llm_error(self, monkeypatch):
-        import requests
+        import httpx
 
         def fake_post(*a, **k):
-            raise requests.ConnectionError("refused")
+            raise httpx.ConnectError("refused")
 
-        monkeypatch.setattr(requests, "post", fake_post)
+        monkeypatch.setattr(httpx, "post", fake_post)
 
         with pytest.raises(ai.LLMError, match="could not reach"):
             ai.chat_completion([{"role": "user", "content": "hi"}])
 
     def test_malformed_response_raises_llm_error(self, monkeypatch):
-        import requests
         monkeypatch.setattr(
-            requests, "post", lambda *a, **k: _FakeResponse({"nope": True})
+            wire, "_post", lambda *a, **k: _FakeResponse({"nope": True})
         )
 
         with pytest.raises(ai.LLMError, match="unexpected response"):
@@ -133,8 +130,7 @@ class TestListModels:
                 {"data": [{"id": "qwen2.5-coder"}, {"id": "llama3.1"}]}
             )
 
-        import requests
-        monkeypatch.setattr(requests, "get", fake_get)
+        monkeypatch.setattr(wire, "_get", fake_get)
 
         result = ai.list_models()
 
@@ -151,8 +147,7 @@ class TestListModels:
             captured["headers"] = headers
             return _FakeResponse({"data": []})
 
-        import requests
-        monkeypatch.setattr(requests, "get", fake_get)
+        monkeypatch.setattr(wire, "_get", fake_get)
 
         ai.list_models(ai.LLMConfig(api_key="secret"))
         assert captured["headers"]["Authorization"] == "Bearer secret"
@@ -164,31 +159,29 @@ class TestListModels:
             captured["verify"] = verify
             return _FakeResponse({"data": []})
 
-        import requests
-        monkeypatch.setattr(requests, "get", fake_get)
+        monkeypatch.setattr(wire, "_get", fake_get)
 
         ai.list_models(ai.LLMConfig(verify_ssl=False))
         assert captured["verify"] is False
 
-    def test_missing_requests_raises_actionable_error(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "requests", None)
-        with pytest.raises(ai.LLMError, match="requests"):
+    def test_missing_httpx_raises_actionable_error(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "httpx", None)
+        with pytest.raises(ai.LLMError, match="httpx"):
             ai.list_models()
 
     def test_connection_failure_raises_llm_error(self, monkeypatch):
-        import requests
+        import httpx
 
         def fake_get(*a, **k):
-            raise requests.ConnectionError("refused")
+            raise httpx.ConnectError("refused")
 
-        monkeypatch.setattr(requests, "get", fake_get)
+        monkeypatch.setattr(httpx, "get", fake_get)
         with pytest.raises(ai.LLMError, match="could not reach"):
             ai.list_models()
 
     def test_malformed_response_raises_llm_error(self, monkeypatch):
-        import requests
         monkeypatch.setattr(
-            requests, "get", lambda *a, **k: _FakeResponse({"nope": True})
+            wire, "_get", lambda *a, **k: _FakeResponse({"nope": True})
         )
         with pytest.raises(ai.LLMError, match="unexpected response"):
             ai.list_models()
@@ -196,9 +189,8 @@ class TestListModels:
 
 class TestSuggestNodeUpdate:
     def _mock_reply(self, monkeypatch, content):
-        import requests
         monkeypatch.setattr(
-            requests, "post",
+            wire, "_post",
             lambda *a, **k: _FakeResponse(
                 {"choices": [{"message": {"content": content}}]}
             ),
@@ -244,8 +236,7 @@ class _Reply:
 
 
 def _record_posts(monkeypatch, replies):
-    """Patch requests.post with a scripted list of replies; return the log."""
-    import requests
+    """Patch the outgoing POST with a scripted list of replies; return the log."""
 
     calls = []
     queue = list(replies)
@@ -254,7 +245,7 @@ def _record_posts(monkeypatch, replies):
         calls.append({"url": url, "headers": headers, "json": json})
         return queue.pop(0) if len(queue) > 1 else queue[0]
 
-    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(wire, "_post", fake_post)
     return calls
 
 
@@ -312,7 +303,9 @@ class TestEndpointShapes:
             "https://x.example.com/openai/deployments/gpt4/chat/completions"
             "?api-version=2026-01-01")
 
-    def test_404_falls_back_to_versioned_path(self, monkeypatch):
+    def test_404_falls_back_to_the_bare_path(self, monkeypatch):
+        """Nearly every server lives at /v1, so that is tried first; a
+        gateway rooted at the host answers the second try."""
         calls = _record_posts(monkeypatch, [
             _Reply(status=404, text="not found"),
             _Reply({"choices": [{"message": {"content": "ok"}}]}),
@@ -324,8 +317,8 @@ class TestEndpointShapes:
 
         assert result == "ok"
         assert [call["url"] for call in calls] == [
-            "https://gw.corp/chat/completions",
             "https://gw.corp/v1/chat/completions",
+            "https://gw.corp/chat/completions",
         ]
 
 

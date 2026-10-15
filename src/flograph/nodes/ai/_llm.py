@@ -143,38 +143,10 @@ def parse_extra(raw, where: str = "this node") -> dict:
 
 
 def thinking_fields(provider: str, mode: str, max_tokens: int) -> dict:
-    """The request fields that ask for `mode` on this wire format.
-
-    There is no cross-provider standard here, so this maps to the dialect
-    each format actually speaks and says so out loud rather than pretending
-    to be universal. A gateway that wants a third thing will reject what it
-    is sent, naming the field — which is a readable failure — and **Extra
-    request JSON** is how you answer it. `default` sends nothing at all, so
-    the model does whatever it was going to do.
-    """
-    if mode in ("", "default", None):
-        return {}
-    if provider == "anthropic":
-        # Anthropic-format thinking is opt-*in*, so "off" is simply silence.
-        if mode == "off":
-            return {}
-        # budget_tokens must be >= 1024 and leave room for an answer, so a
-        # small Max tokens cannot carry it — better to say that than to send
-        # a request the server will reject for reasons of our making.
-        budget = 1024 if mode == "low" else max(1024, int(max_tokens * 0.6))
-        if max_tokens <= budget:
-            raise ValueError(
-                f"thinking '{mode}' needs room to think: raise 'Max tokens' "
-                f"above {budget} (it is {max_tokens}), or set Thinking to "
-                f"'default'")
-        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-    # OpenAI-format gateways: OpenRouter's `reasoning` object is what most
-    # of them read. OpenAI's own `reasoning_effort` is deliberately not sent
-    # alongside it — that API rejects unknown fields, so sending both would
-    # break the case it was meant to cover.
-    if mode == "off":
-        return {"reasoning": {"enabled": False}}
-    return {"reasoning": {"effort": mode}}
+    """The request fields that ask for `mode` on this wire format — see
+    `flograph.llm.wire.thinking_fields`, which is where the mapping lives."""
+    from flograph.llm import wire
+    return wire.thinking_fields(provider, mode, max_tokens)
 
 
 def chat_with(conn: dict, system: str, user: str, max_tokens: int,
@@ -191,94 +163,29 @@ def chat(provider: str, base_url: str, api_key: str, model: str,
          *, thinking: str = "default", extra: dict = None) -> str:
     """One completion. Returns the assistant text; raises on an API error.
 
+    The HTTP side is `flograph.llm.wire`, shared with Ask AI and the Flo
+    Assistant, so a gateway that works for one works for all of them. Its
+    `LLMError` is a RuntimeError, which is what this has always raised.
+
     `thinking` and `extra` are keyword-only with defaults so that a node
     forked before they existed — its script is saved inside the .flograph —
     keeps calling this successfully.
     """
-    import httpx
+    from flograph.llm import wire
 
-    url = endpoint(provider, base_url)
-    if provider == "anthropic":
-        headers = {"content-type": "application/json",
-                   "anthropic-version": "2023-06-01"}
-        if api_key:
-            headers["x-api-key"] = api_key
-        body: dict = {"model": model, "max_tokens": max_tokens,
-                      "messages": [{"role": "user", "content": user}]}
-        if system.strip():
-            body["system"] = system
-    else:
-        headers = {"content-type": "application/json"}
-        if api_key:
-            headers["authorization"] = f"Bearer {api_key}"
-        messages = []
-        if system.strip():
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": user})
-        body = {"model": model, "messages": messages, "max_tokens": max_tokens}
-
-    body.update(thinking_fields(provider, thinking, max_tokens))
-    # Last, so it wins: the escape hatch has to be able to correct anything
-    # above it, including a Thinking mapping that is wrong for this gateway.
-    body.update(extra or {})
-
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.post(url, headers=headers, json=body)
-    if resp.status_code >= 400:
-        raise RuntimeError(
-            f"{provider} API returned {resp.status_code}: "
-            f"{resp.text[:400].strip()}")
-
-    return reply_text(resp.json(), provider).strip()
+    messages = []
+    if system.strip():
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": user})
+    conn = wire.Connection(
+        provider=provider, base_url=base_url or "", model=model,
+        api_key=api_key or "", timeout=timeout, max_tokens=max_tokens,
+        thinking=thinking or "default", extra=dict(extra or {}))
+    return wire.chat(conn, messages).strip()
 
 
 def reply_text(data: dict, provider: str) -> str:
-    """The assistant's text, across the shapes servers actually return.
-
-    The same ground `flograph.ai._reply_text` covers for the AI assistant:
-    a gateway can answer 200 with no text at all, and `content` may be
-    absent, present-but-null, a plain string, or a list of parts. When
-    there is no text the stop reason is the only clue the user gets, so it
-    goes in the message rather than into a silently blank cell.
-    """
-    if provider == "anthropic":
-        parts = data.get("content") or []
-        if isinstance(parts, str):
-            return parts
-        text = "".join(
-            block.get("text", "") for block in parts
-            if isinstance(block, dict) and block.get("type") == "text")
-        if not text.strip():
-            raise RuntimeError(
-                _empty_reply("stop_reason", data.get("stop_reason")))
-        return text
-
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError(
-            "the model returned no choices — the request may have been "
-            "filtered by the gateway")
-    message = choices[0].get("message") or {}
-    content = message.get("content")
-    if isinstance(content, list):  # some gateways return OpenAI content parts
-        content = "".join(part.get("text", "") for part in content
-                          if isinstance(part, dict))
-    if not (content or "").strip():
-        # Reasoning models put the visible answer here when content is empty.
-        content = message.get("reasoning_content") or ""
-    if not (content or "").strip():
-        if message.get("refusal"):
-            raise RuntimeError(
-                f"the model refused the request: {message['refusal']}")
-        raise RuntimeError(
-            _empty_reply("finish_reason", choices[0].get("finish_reason")))
-    return content
-
-
-def _empty_reply(field: str, reason) -> str:
-    why = str(reason or "unknown")
-    hint = ("raise 'Max tokens' — a reasoning model can spend the whole "
-            "budget thinking before it writes an answer"
-            if why in ("length", "max_tokens") else
-            "the model may have hit its token limit")
-    return f"the model returned an empty reply ({field}: {why}) — {hint}"
+    """The assistant's text, across the shapes servers actually return —
+    see `flograph.llm.wire.reply_text`."""
+    from flograph.llm import wire
+    return wire.reply_text(data, provider)

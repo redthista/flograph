@@ -186,12 +186,24 @@ the model can say "I can't see that column" instead of guessing.
 
 - **Taken (2026-10-15):** both local and online servers, configurable API
   format (openai/anthropic), base URL, model and token per connection.
-- **Assumed, to confirm:** privacy settings live in the flow (can only be
-  lowered by a receiver); real values (levels 4–5) wait for phase 4; first
+  Privacy settings live in the flow (a receiver can only lower them).
+  Build phase 0, then stop for Dan to test. It must work against local
+  servers, the work gateway, Anthropic/OpenAI direct *and* OpenRouter — so
+  phase 1 needs native tool calling in both formats *and* the JSON
+  fallback, not one or the other. No org-level cap for now.
+- **Assumed, to confirm:** real values (levels 4–5) wait for phase 4; first
   release is Advise + Act, Propose follows.
+- **Phase 0 built (2026-10-15, branch `worktree-ai-copilot-design`):**
+  `flograph/llm/` — `wire.py` (the one HTTP implementation; `ai.py` and
+  `nodes/ai/_llm.py` both call it, on httpx), `profiles.py` (named
+  connections, `ai_profiles.json` in the user folder, location + ceiling),
+  `keys.py` (system keychain via `keyring`, owner-only file fallback that
+  says so). Tools ▸ AI Assistant Settings edits the profiles; the old
+  QSettings connection migrates on first read and its key moves to the
+  keychain. Behaviour change: a host-rooted Base URL now tries `/v1` first.
 - **Open:**
-  - Should there be an org-level lock (an admin file that caps the level
-    for every flow on a machine), for the work rollout?
+  - An org-level lock (an admin file that caps the level for every flow
+    on a machine) — not now; revisit for the work rollout.
   - Is the ghost-node preview worth its cost, given one-undo-per-turn
     already exists?
   - The turn limit, and whether a long multi-step build stops to check in
