@@ -400,7 +400,7 @@ banked; nothing is built.
 
 ---
 
-## AH. AI Copilot
+## AH. Flow Assistant
 
 **AH1. An assistant that builds the flow with you** (Dan, 2026-10-15).
 A chat dock on the right: "I've put my data in this Excel reader, make me
@@ -408,7 +408,7 @@ a bar chart of revenue by region", and it adds the nodes. Two separate
 dials: **what it can see** (structure → schema → profile → generated
 look-alike rows → real sample → run and read), with per-column *Sensitive*
 and *Alias* overrides, and **what it can do** (Advise / Propose / Act, plus
-a tick box for running nodes). Full write-up: `ideas/ai-copilot.md`.
+a tick box for running nodes). Full write-up: `ideas/flow-assistant.md`.
 
 - *Today:* `ai.py` speaks OpenAI and Anthropic formats to local and online
   servers, one connection in QSettings (key in plain text). It is one-shot

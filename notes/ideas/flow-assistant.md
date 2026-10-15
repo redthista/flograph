@@ -1,4 +1,4 @@
-# AI Copilot — an assistant that builds the flow with you
+# Flow Assistant — an assistant that builds the flow with you
 
 **Status:** designed, not started (In-Tray chunk **AH**). **Planned against:**
 0.1.30, commit `e9e675c` (2026-10-15). Anything in the codebase may have
@@ -78,7 +78,7 @@ with an answer.
 Bearer, Anthropic `/messages` with `x-api-key`). It handles the 400
 parameter climb-down, `/v1` URL shapes, `?api-version=` and `<think>`
 blocks. Tools ▸ AI Assistant Settings already stores provider, base URL,
-model, key and verify-SSL. The copilot extends this rather than adding a
+model, key and verify-SSL. The Flow Assistant extends this rather than adding a
 second settings screen:
 
 - **Named connection profiles** — e.g. *Local Ollama* and *Work gateway* —
@@ -113,7 +113,7 @@ second settings screen:
 - **Streaming** for the chat text (SSE in both formats), so a slow local
   model visibly does something. Tool calls are applied once complete,
   never half-parsed.
-- `ai.py` and `nodes/ai/_llm.py` already drift (see memory). The copilot
+- `ai.py` and `nodes/ai/_llm.py` already drift (see memory). The Flow Assistant
   goes in `ai.py`. Pulling the shared wire code into one Qt-free module both
   can use is worth doing as phase 0, or the drift becomes three-way.
 
@@ -179,7 +179,7 @@ the model can say "I can't see that column" instead of guessing.
    needs a scratch graph the commands can be replayed into.
 4. **Levels 3–5.** Look-alike generator, real samples, run-and-read. Gated
    behind the outbox having been used, and behind the per-profile ceiling.
-5. **Later:** the copilot editing report pages and dashboards (pages are
+5. **Later:** the Flow Assistant editing report pages and dashboards (pages are
    graph state with commands too); "explain this flow" as a report page.
 
 ## Decisions taken / still open
