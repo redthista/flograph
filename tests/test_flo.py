@@ -333,9 +333,9 @@ class TestTools:
 
     def test_connect_refuses_a_loop(self, registry, stack):
         box = _toolbox(registry, stack)
-        for _ in range(2):
-            box.execute(ToolCall("x", "add_node", {"type_id": "flograph.transform.sort"}))
-        box.execute(ToolCall("x", "connect", {"from_node": "n1", "to_node": "n2"}))
+        box.execute(ToolCall("x", "add_node", {"type_id": "flograph.transform.sort"}))
+        box.execute(ToolCall("x", "add_node", {"type_id": "flograph.transform.sort",
+                                               "input_from": "n1"}))
         out = json.loads(box.execute(ToolCall(
             "x", "connect", {"from_node": "n2", "to_node": "n1"})))
         assert "loop" in out["error"]
@@ -498,3 +498,79 @@ class TestQualityAids:
         assert "run_nodes" in {t.name for t in box.specs()}
         box.autonomy = ADVISE
         assert "run_nodes" not in {t.name for t in box.specs()}
+
+
+
+class TestStayingOnTrack:
+    """What stops a model losing its place: its own changes handed back,
+    repeats called out, duplicates refused, column settings checked."""
+
+    def test_changes_come_back_with_every_change(self, registry, stack):
+        box = _toolbox(registry, stack)
+        box.execute(ToolCall("a", "add_node", {"type_id": CSV}))
+        out = json.loads(box.execute(ToolCall("b", "add_node", {
+            "type_id": PLOTLY, "input_from": "n1"})))
+        assert out["this_turn_so_far"][0].startswith("Added Read CSV (n1)")
+        assert len(out["this_turn_so_far"]) == 3     # add, add, connect
+
+    def test_a_repeated_read_is_called_out(self, registry, stack):
+        box = _toolbox(registry, stack)
+        box.execute(ToolCall("a", "describe_flow", {}))
+        again = json.loads(box.execute(ToolCall("b", "describe_flow", {})))
+        assert "already made this exact call" in again["note"]
+        box.execute(ToolCall("c", "add_node", {"type_id": CSV}))
+        fresh = json.loads(box.execute(ToolCall("d", "describe_flow", {})))
+        assert "note" not in fresh or "already" not in fresh["note"]
+
+    def test_a_duplicate_node_is_refused(self, registry, stack):
+        box = _toolbox(registry, stack)
+        box.execute(ToolCall("a", "add_node", {"type_id": CSV}))
+        box.execute(ToolCall("b", "add_node", {"type_id": "flograph.transform.sort",
+                                               "input_from": "n1"}))
+        out = json.loads(box.execute(ToolCall("c", "add_node", {
+            "type_id": "flograph.transform.sort", "input_from": "n1"})))
+        assert "n2 is already that node" in out["error"]
+        assert len(box.graph.nodes) == 2
+
+    def test_a_repeated_run_is_not_run_again(self, registry, stack):
+        box = _toolbox(registry, stack)
+        runs = []
+        box.runner = lambda ids, cancelled: runs.append(ids) or "done"
+        box.execute(ToolCall("a", "add_node", {"type_id": CSV}))
+        call = ToolCall("r", "run_nodes", {"nodes": ["n1"]})
+        box.execute_run(call, lambda fn: fn(), lambda: False)
+        again = json.loads(box.execute_run(call, lambda fn: fn(), lambda: False))
+        assert len(runs) == 1 and "already ran these" in again["note"]
+
+    def test_column_settings_are_checked_against_the_input(self, registry, stack):
+        graph = Graph()
+        reader = registry.instantiate(CSV, (0, 0))
+        graph.add_node(reader)
+        cache = _Cache({reader.id: {"table": pd.DataFrame(
+            {"Test_Name": ["a"], "Result_Value": ["1.5"]})}})
+        box = _toolbox(registry, stack, graph=graph, cache=cache)
+        box.handle(reader.id)
+        out = json.loads(box.execute(ToolCall("a", "add_node", {
+            "type_id": PLOTLY, "input_from": "n1",
+            "params": {"x": "Test_Nme", "y": "Result_Value"}})))
+        text = " ".join(out["warnings"])
+        assert "no column 'Test_Nme'" in text and "Test_Name" in text
+        assert "'Result_Value' is text here" in text
+
+    def test_no_column_warnings_at_structure(self, registry, stack):
+        graph = Graph()
+        reader = registry.instantiate(CSV, (0, 0))
+        graph.add_node(reader)
+        cache = _Cache({reader.id: {"table": pd.DataFrame({"secret": [1]})}})
+        box = _toolbox(registry, stack, graph=graph, cache=cache,
+                       level=disc.STRUCTURE)
+        box.handle(reader.id)
+        out = box.execute(ToolCall("a", "add_node", {
+            "type_id": PLOTLY, "input_from": "n1", "params": {"x": "nope"}}))
+        assert "secret" not in out and "warnings" not in out
+
+    def test_the_prompt_asks_for_a_question_when_unclear(self, registry, stack):
+        prompt = Conversation(wire.Connection(model="m"),
+                              _toolbox(registry, stack)).system_prompt()
+        assert "ask one short question" in prompt
+        assert "this_turn_so_far" in prompt

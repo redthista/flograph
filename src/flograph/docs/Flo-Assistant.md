@@ -106,6 +106,14 @@ Flo**:
   does: a writer writes its file.
 - It is told not to delete, replace or rewire your nodes unless you ask for
   exactly that; asked to "improve" a flow, it suggests first.
+- To keep it from losing its place on a long build, every change it makes
+  is listed back to it; a repeated look-up or run with nothing changed is
+  called out, and a node identical to one it already added is refused.
+- Column settings are checked against what comes into the node: a name
+  that isn't there, or a text column given to a chart's Y, comes back as a
+  warning it can act on.
+- When "this" or "it" is unclear it should ask — or point at the node with
+  **Ask Flo** so there is nothing to guess.
 
 Smaller free models often struggle with multi-step building. If replies
 are muddled, try a stronger model on the same connection.

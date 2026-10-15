@@ -145,6 +145,10 @@ class Toolbox:
         # runs nodes and waits, from the worker thread (the dock gives one)
         self.runner = runner
         self.added: list[str] = []              # node ids added this turn
+        # (tool, arguments) -> the number of changes made when it was last
+        # called, so a repeat with nothing changed since can be called out
+        self._seen: dict[tuple, int] = {}
+        self._last_run: dict[tuple, str] = {}
         self._handles: dict[str, str] = {}      # handle -> node id
         self._by_id: dict[str, str] = {}        # node id -> handle
         self._macro_open = False
@@ -168,6 +172,8 @@ class Toolbox:
         so a turn that only reads leaves no empty step on the stack."""
         self.actions = []
         self.added = []
+        self._seen = {}
+        self._last_run = {}
         summary = " ".join((text or "").split())
         self._macro_text = "Flo Assistant" + (f": {summary[:50]}" if summary else "")
 
@@ -210,6 +216,10 @@ class Toolbox:
                       f"are: {', '.join(sorted(offered))}"}
         else:
             args = self.disclosure.unalias(call.arguments or {})
+            key = (call.name, json.dumps(args, sort_keys=True, default=str))
+            repeat = (call.name in _REPEAT_FREE
+                      and self._seen.get(key) == len(self.actions))
+            self._seen[key] = len(self.actions)
             method = getattr(self, f"_tool_{call.name}")
             known = inspect.signature(method).parameters
             ignored = sorted(k for k in args if k not in known)
@@ -218,13 +228,30 @@ class Toolbox:
                 result = method(**args)
                 if ignored and isinstance(result, dict):
                     result["ignored_arguments"] = ignored
+                if repeat and isinstance(result, dict):
+                    result["note"] = ("you already made this exact call this "
+                                      "turn and nothing has changed since — "
+                                      "use what it told you and move on")
             except TypeError as exc:
                 result = {"error": f"bad arguments for {call.name}: {exc}"}
             except _ToolError as exc:
                 result = {"error": str(exc)}
             except GraphError as exc:
                 result = {"error": self.disclosure.scrub(str(exc))}
+        if isinstance(result, dict) and self.actions and call.name in _WRITES:
+            result["this_turn_so_far"] = self.progress()
         return json.dumps(result, default=str, ensure_ascii=False)
+
+    def progress(self) -> list[str]:
+        """What this turn has changed, short — handed back with every change
+        so a model that loses its place can see what it already did."""
+        out = []
+        for action in self.actions:
+            handles = [self.handle(n) for n in action.node_ids
+                       if n in self.graph.nodes]
+            out.append(self.disclosure.scrub(action.summary)
+                       + (f" ({', '.join(handles)})" if handles else ""))
+        return out[-25:]
 
     # -- handles ----------------------------------------------------------------
 
@@ -247,9 +274,17 @@ class Toolbox:
                 raise _ToolError("name at least one node to run")
         except _ToolError as exc:
             return json.dumps({"error": str(exc)})
+        key = (tuple(sorted(ids)), len(self.actions))
+        if key in self._last_run:
+            result = json.loads(self._last_run[key])
+            result["note"] = ("you already ran these this turn and nothing has "
+                              "changed since — this is that result again")
+            return json.dumps(result, ensure_ascii=False)
         outcome = self.runner(ids, cancelled)
-        return json.dumps(on_ui(lambda: _run_result(self, ids, outcome)),
+        text = json.dumps(on_ui(lambda: _run_result(self, ids, outcome)),
                           default=str, ensure_ascii=False)
+        self._last_run[key] = text
+        return text
 
     def handle(self, node_id: str) -> str:
         if node_id not in self._by_id:
@@ -293,6 +328,69 @@ class Toolbox:
             return dict(self.cache.peek(node_id) or {})
         except Exception:
             return {}
+
+    def _twin(self, type_id: str, source, params: dict) -> Optional[str]:
+        """A node this turn already added with the same type, source and
+        settings — the duplicate a model makes when it loses its place."""
+        for node_id in self.added:
+            if node_id not in self.graph.nodes:
+                continue
+            inst = self.graph.node(node_id)
+            if inst.type_id != type_id:
+                continue
+            feeds = {c.src_node for c in self.graph.connections.values()
+                     if c.dst_node == node_id}
+            if (source is None) != (not feeds):
+                continue
+            if source is not None and source.id not in feeds:
+                continue
+            if all(inst.params.get(k) == v for k, v in params.items()):
+                return node_id
+        return None
+
+    def column_warnings(self, inst, names: Optional[list] = None) -> list[str]:
+        """Column settings checked against what actually comes in: a name
+        that isn't there, or a text column given to a chart's y. Silent at
+        Structure — the warning would name the columns."""
+        if not self.disclosure.allows(disc.SCHEMA):
+            return []
+        incoming: dict[str, str] = {}      # column -> kind ("" if unknown)
+        for conn in self.graph.connections.values():
+            if conn.dst_node != inst.id or is_flow(conn.dst_port):
+                continue
+            outputs = self._outputs(conn.src_node)
+            value = outputs.get(conn.src_port)
+            if value is not None and hasattr(value, "dtypes"):
+                for column in value.columns:
+                    incoming[str(column)] = disc._kind_of(value[column].dtype)
+                continue
+            entry = getattr(self.cache, "get", lambda _id: None)(conn.src_node)
+            for column in ((getattr(entry, "column_names", None) or {})
+                           .get(conn.src_port) or ()):
+                incoming.setdefault(str(column), "")
+        if not incoming:
+            return []
+        warnings = []
+        for pspec in inst.spec.params:
+            if pspec.type != "columns" or (names and pspec.name not in names):
+                continue
+            value = inst.params.get(pspec.name)
+            wanted = [v.strip() for v in (value if isinstance(value, list)
+                                          else str(value or "").split(","))
+                      if str(v).strip()]
+            for column in wanted:
+                shown = self.disclosure.shown_name(column)
+                if column not in incoming:
+                    real = ", ".join(self.disclosure.shown_name(c)
+                                     for c in list(incoming)[:40])
+                    warnings.append(f"{pspec.name}: no column {shown!r} comes "
+                                    f"into {self.handle(inst.id)} — it gets: {real}")
+                elif pspec.name.startswith("y") and incoming[column] == "text":
+                    warnings.append(
+                        f"{pspec.name}: {shown!r} is text here, not numbers — "
+                        "feed this from a node where it has been converted, "
+                        "or convert it first")
+        return warnings
 
     def needs(self, inst) -> list[str]:
         """Required inputs with nothing wired into them."""
@@ -497,6 +595,11 @@ class Toolbox:
         if input_from:
             handle, _, source_port = str(input_from).partition(".")
             source = self._node(handle)
+        twin = self._twin(spec.type_id, source, checked)
+        if twin is not None:
+            raise _ToolError(f"{self.handle(twin)} is already that node, added "
+                             "earlier this turn — use it instead of adding "
+                             "another")
         near_id = (self._node(near).id if near else
                    source.id if source is not None else None)
         pos, canvas = self._place(near_id)
@@ -519,6 +622,9 @@ class Toolbox:
         missing = self.needs(node)
         if missing:
             out["unwired_inputs"] = missing
+        warnings = self.column_warnings(node, list(checked))
+        if warnings:
+            out["warnings"] = warnings
         return out
 
     def _port(self, inst, port, direction: str) -> str:
@@ -601,7 +707,11 @@ class Toolbox:
             self._push(SetParamCommand(self.graph, inst.id, name, value, merge=False))
         self.actions.append(Action(
             "set_params", f"Changed {', '.join(checked)} on {inst.label}", [inst.id]))
-        return {"node": self.handle(inst.id), "changed": sorted(checked)}
+        out = {"node": self.handle(inst.id), "changed": sorted(checked)}
+        warnings = self.column_warnings(inst, list(checked))
+        if warnings:
+            out["warnings"] = warnings
+        return out
 
     def _tool_rename_node(self, node, label) -> dict:
         from ..ui.commands import SetLabelCommand
@@ -644,6 +754,13 @@ def _run_result(box: "Toolbox", node_ids: list, outcome: str) -> dict:
         nodes.append(entry)
     out: dict = {"run": outcome, "nodes": nodes}
     return out
+
+
+# reads that return the same thing until something changes
+_REPEAT_FREE = {"describe_flow", "get_node", "get_output", "get_node_type",
+                "find_node_types"}
+_WRITES = {"add_node", "connect", "disconnect", "set_params", "rename_node",
+           "delete_nodes"}
 
 
 class _ToolError(Exception):
