@@ -9,31 +9,6 @@ nobody reads.
 
 ---
 
-## AI connections (Flo Assistant phase 0) — NEW
-
-Tools ▸ AI Assistant Settings now keeps named connections; Ask AI, the
-LLM nodes and (later) the Flo Assistant share one HTTP implementation.
-
-- [ ] Open the dialog on a machine that had the old single connection: it
-      shows up as the first connection, with its key filled in. Save, then
-      check the key is gone from `flograph.conf` (`[ai] api_key`).
-- [ ] The key line says **Kept in the system keyring (Secret Service)** on
-      Linux / **Windows Credential Manager** on Windows — not the ⚠ file
-      warning. (The warning means `keyring` isn't installed in that venv.)
-- [ ] **New** → name it, point it at each server you use — local Ollama /
-      LM Studio, the work gateway, Anthropic or OpenAI direct, OpenRouter.
-      **Fetch Models** and **Send Test Message** work for each.
-- [ ] The badge reads *Local — nothing leaves this PC* for localhost and
-      *Online — host* otherwise; "Most the assistant may see" defaults to
-      Analyse for local and Schema for online.
-- [ ] Switching connections in the dropdown keeps what you typed in each;
-      **Cancel** throws all of it away (including a Delete).
-- [ ] Ask AI on a node uses the connection showing when you last saved.
-- [ ] LLM Enrich / Classify / Extract still work against your gateway (they
-      now go through the same code, so gain its `/v1` and 400 retries).
-
----
-
 ## The crash, fixed — please try to reproduce it — NEW
 
 The CTD on 2026-08-12: lock a page, then drag a Plotly chart, sluggish
@@ -334,6 +309,8 @@ rediscovered as surprises.
 
 ## Done and signed off
 
+- ~~AI connections (Flo Assistant phase 0): named profiles, keys in the
+  keychain, migration of the old connection~~ — signed off 2026-10-15.
 - ~~Report engine: dedented markdown embeds, a card's contents rendered on
   a page, naming any node by label, and the card editor's Insert menu~~ —
   signed off, `7f5382a`.

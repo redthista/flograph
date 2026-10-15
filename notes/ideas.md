@@ -410,10 +410,13 @@ look-alike rows → real sample → run and read), with per-column *Sensitive*
 and *Alias* overrides, and **what it can do** (Advise / Propose / Act, plus
 a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
 
-- *Today:* `ai.py` speaks OpenAI and Anthropic formats to local and online
-  servers, one connection in QSettings (key in plain text). It is one-shot
-  only: no tool calling, no conversation. `nodes/ai/_llm.py` is a second,
-  drifting copy of the wire code.
+- *Today:* phase 0 shipped 2026-10-15 (CHANGELOG 0.1.30, *AI
+  connections*). `flograph/llm/wire.py` is the one HTTP implementation
+  (Ask AI and the LLM nodes both call it); `llm/profiles.py` holds the
+  named connections with their location and ceiling; `llm/keys.py` keeps
+  keys in the keychain. What is missing is everything the assistant
+  itself needs: tool calling, streaming, conversation — `wire.chat()` is
+  still one request, one text reply.
 - *What helps:* QUndoCommands are the only things that change the graph,
   so an AI turn becomes one undo macro. The registry and `NODE` specs are
   a real catalogue to hand the model. `wire_fit` `suggest` hints rank
@@ -422,16 +425,14 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
   tools the model is given**, built in one Qt-free `core/ai_disclosure.py`,
   never by asking it nicely in the prompt. Look-alike rows are generated,
   not shuffled; shuffling leaks every real value.
-- *Connections:* named profiles (local / online), each with API format,
-  base URL, model, token, verify SSL, Thinking, extra JSON and **a
-  disclosure ceiling** (online defaults to schema). Keys go to the OS
-  keyring. Native tool calling in both formats, with a JSON-action
-  fallback for local models without it.
-- *Phases:* 0 shared wire module + profiles + keyring; 1 headless engine
-  (tools, disclosure 0–2, agent loop); 2 dock with Advise + Act, outbox
-  and send log (**first release**); 3 Propose with ghost-node preview;
-  4 levels 3–5.
-- *Open:* an org-level cap file for work rollouts; whether Propose earns
+- *Tool calling:* native in both formats *and* a JSON-action fallback —
+  Dan tests against local servers, the work gateway, Anthropic/OpenAI and
+  OpenRouter, so neither alone covers it.
+- *Phases left:* 1 headless engine (tools, disclosure 0–2, agent loop);
+  2 dock with Advise + Act, outbox and send log (**first release**);
+  3 Propose with ghost-node preview; 4 levels 3–5. Privacy settings live
+  in the flow (decided).
+- *Open:* an org-level cap file for work rollouts (not now); whether Propose earns
   its cost over one-undo-per-turn; turn limit / mid-build check-ins.
 
 ---
