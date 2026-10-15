@@ -13,7 +13,7 @@ Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
 Q, R, T, V, X, Y, Z, AA, AB, AC and AE) are where shipped work used to be;
-AF and AG are the newest chunks, not gaps. Old numbers are kept
+AF, AG and AH are the newest chunks, not gaps. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -397,6 +397,42 @@ banked; nothing is built.
 - *Later:* a slicer filtering live tables in the browser, with no re-run.
   This is the cross-filtering follow-up from the live report work, and it
   would also work in a saved file.
+
+---
+
+## AH. AI Copilot
+
+**AH1. An assistant that builds the flow with you** (Dan, 2026-10-15).
+A chat dock on the right: "I've put my data in this Excel reader, make me
+a bar chart of revenue by region", and it adds the nodes. Two separate
+dials: **what it can see** (structure → schema → profile → generated
+look-alike rows → real sample → run and read), with per-column *Sensitive*
+and *Alias* overrides, and **what it can do** (Advise / Propose / Act, plus
+a tick box for running nodes). Full write-up: `ideas/ai-copilot.md`.
+
+- *Today:* `ai.py` speaks OpenAI and Anthropic formats to local and online
+  servers, one connection in QSettings (key in plain text). It is one-shot
+  only: no tool calling, no conversation. `nodes/ai/_llm.py` is a second,
+  drifting copy of the wire code.
+- *What helps:* QUndoCommands are the only things that change the graph,
+  so an AI turn becomes one undo macro. The registry and `NODE` specs are
+  a real catalogue to hand the model. `wire_fit` `suggest` hints rank
+  ports. `parse_spec` already checks AI-written node code.
+- *The rule that matters:* the disclosure level is enforced by **which
+  tools the model is given**, built in one Qt-free `core/ai_disclosure.py`,
+  never by asking it nicely in the prompt. Look-alike rows are generated,
+  not shuffled; shuffling leaks every real value.
+- *Connections:* named profiles (local / online), each with API format,
+  base URL, model, token, verify SSL, Thinking, extra JSON and **a
+  disclosure ceiling** (online defaults to schema). Keys go to the OS
+  keyring. Native tool calling in both formats, with a JSON-action
+  fallback for local models without it.
+- *Phases:* 0 shared wire module + profiles + keyring; 1 headless engine
+  (tools, disclosure 0–2, agent loop); 2 dock with Advise + Act, outbox
+  and send log (**first release**); 3 Propose with ghost-node preview;
+  4 levels 3–5.
+- *Open:* an org-level cap file for work rollouts; whether Propose earns
+  its cost over one-undo-per-turn; turn limit / mid-build check-ins.
 
 ---
 
