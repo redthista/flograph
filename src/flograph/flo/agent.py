@@ -15,13 +15,18 @@ refused on every turn after the first.
 
 `send()` blocks on the network, so the UI calls it from a worker thread;
 `cancelled` is polled between steps, and `on_event` reports progress.
+Everything that touches the flow — opening the turn, every tool, closing
+the turn's undo step — goes through `on_ui`, which the dock points at the
+GUI thread; undo commands must never be pushed from a worker.
+`before_send` sees each request as it is about to go (the send log, and
+"confirm every send"); returning False stops the turn without sending.
 """
 from __future__ import annotations
 
 import copy
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from ..core import ai_disclosure as disc
 from ..llm import toolcall, wire
@@ -70,8 +75,9 @@ class TurnResult:
     text: str
     actions: list = field(default_factory=list)
     steps: int = 0
-    stopped: str = ""          # "" | "cancelled" | "step limit" | "error"
+    stopped: str = ""   # "" | "cancelled" | "declined" | "step limit" | "error"
     error: str = ""
+    sent_text: str = ""        # the user's words as the model got them
 
 
 @dataclass
@@ -83,11 +89,15 @@ class Event:
 
 class Conversation:
     def __init__(self, connection: wire.Connection, toolbox: Toolbox, *,
-                 tool_mode: str = "auto", max_steps: int = DEFAULT_MAX_STEPS):
+                 tool_mode: str = "auto", max_steps: int = DEFAULT_MAX_STEPS,
+                 on_ui: Optional[Callable[[Callable[[], Any]], Any]] = None,
+                 before_send: Optional[Callable[[dict], bool]] = None):
         self.connection = connection
         self.toolbox = toolbox
         self.tool_mode = tool_mode
         self.max_steps = max_steps
+        self._ui = on_ui or (lambda fn: fn())
+        self.before_send = before_send
         self.outbox: list[dict] = []
         self.messages: list[dict] = [{"role": "system",
                                       "content": self.system_prompt()}]
@@ -106,10 +116,13 @@ class Conversation:
 
     def _ask(self) -> toolcall.Reply:
         tools = self.toolbox.specs()
-        self.outbox.append({"time": time.time(),
-                            "messages": copy.deepcopy(self.messages),
-                            "tools": [t.name for t in tools],
-                            "mode": self.tool_mode})
+        entry = {"time": time.time(),
+                 "messages": copy.deepcopy(self.messages),
+                 "tools": [t.name for t in tools],
+                 "mode": self.tool_mode}
+        if self.before_send is not None and not self.before_send(entry):
+            raise _Declined
+        self.outbox.append(entry)
         reply = toolcall.chat_with_tools(self.connection, self.messages,
                                          tools, self.tool_mode)
         if reply.mode == "json" and self.tool_mode == "auto":
@@ -119,10 +132,16 @@ class Conversation:
     def send(self, text: str, *, cancelled: Callable[[], bool] = lambda: False,
              on_event: Optional[Callable[[Event], None]] = None) -> TurnResult:
         emit = on_event or (lambda event: None)
-        self.messages.append({"role": "user",
-                              "content": self.toolbox.disclosure.scrub(text)})
-        self.toolbox.begin_turn(text)
         result = TurnResult("")
+
+        def open_turn() -> str:
+            self.toolbox.begin_turn(text)
+            return self.toolbox.disclosure.scrub(text)
+
+        result.sent_text = self._ui(open_turn)
+        # the level or the dials may have moved since the last turn
+        self.messages[0]["content"] = self.system_prompt()
+        self.messages.append({"role": "user", "content": result.sent_text})
         try:
             while True:
                 if cancelled():
@@ -141,24 +160,40 @@ class Conversation:
                 if reply.done:
                     result.text = reply.text
                     break
+                stop = cancelled()
                 for call in reply.tool_calls:
-                    emit(Event("tool", call.name))
-                    outcome = self.toolbox.execute(call)
-                    emit(Event("result", call.name, outcome))
+                    if stop:
+                        # every call still gets an answer, or the next
+                        # request is malformed in both formats
+                        outcome = '{"error": "not run: the user pressed Stop"}'
+                    else:
+                        emit(Event("tool", call.name))
+                        outcome = self._ui(lambda c=call: self.toolbox.execute(c))
+                        emit(Event("result", call.name, outcome))
                     self.messages.append({"role": "tool", "tool_call_id": call.id,
                                           "name": call.name, "content": outcome})
+                if stop:
+                    result.stopped = "cancelled"
+                    break
         except wire.LLMError as exc:
             result.stopped, result.error = "error", str(exc)
+        except _Declined:
+            result.stopped = "declined"
         finally:
-            self.toolbox.end_turn()
+            self._ui(self.toolbox.end_turn)
             result.actions = list(self.toolbox.actions)
         if result.stopped and not result.text:
             done = len(result.actions)
             result.text = {
                 "cancelled": "Stopped.",
+                "declined": "Not sent.",
                 "step limit": f"Stopped after {self.max_steps} steps without "
                               "finishing.",
                 "error": f"The AI server failed: {result.error}",
             }[result.stopped] + (f" {done} change(s) were made — one Undo takes "
                                  "them all back." if done else "")
         return result
+
+
+class _Declined(Exception):
+    """before_send said no."""

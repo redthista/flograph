@@ -183,6 +183,25 @@ def _star(p: QPainter, r: QRectF, color: QColor) -> None:
     p.drawPath(_star_path(r))
 
 
+def _sparkle(p: QPainter, r: QRectF, color: QColor) -> None:
+    """Two four-point sparkles — the Flo Assistant."""
+    p.setPen(Qt.NoPen)
+    p.setBrush(color)
+    w = r.width()
+
+    def spark(cx: float, cy: float, size: float) -> None:
+        pinch = size * 0.22
+        path = QPainterPath(QPointF(cx, cy - size))
+        path.quadTo(QPointF(cx + pinch, cy - pinch), QPointF(cx + size, cy))
+        path.quadTo(QPointF(cx + pinch, cy + pinch), QPointF(cx, cy + size))
+        path.quadTo(QPointF(cx - pinch, cy + pinch), QPointF(cx - size, cy))
+        path.quadTo(QPointF(cx - pinch, cy - pinch), QPointF(cx, cy - size))
+        p.drawPath(path)
+
+    spark(r.left() + w * 0.42, r.top() + w * 0.58, w * 0.38)
+    spark(r.left() + w * 0.78, r.top() + w * 0.24, w * 0.18)
+
+
 def _star_filled(p: QPainter, r: QRectF, color: QColor) -> None:
     """The same star, filled — a starred workflow."""
     p.setPen(_pen(color, max(1.0, r.width() * 0.06)))
@@ -264,7 +283,7 @@ _GLYPHS = {
     "logo": _logo, "hamburger": _hamburger, "chevron": _chevron, "save": _save,
     "clear_cache": _clear_cache, "star": _star, "star_filled": _star_filled,
     "save_as": _save_as, "export": _export, "new_doc": _new_doc,
-    "folder": _folder,
+    "folder": _folder, "sparkle": _sparkle,
     "min": _min, "max": _max, "restore": _restore, "close": _close,
 }
 
@@ -988,6 +1007,22 @@ class TitleBar(QWidget):
         window.engine.run_started.connect(lambda: self._set_running(True))
         window.engine.run_finished.connect(lambda ok: self._set_running(False))
 
+        # the Flo Assistant: opens and closes its dock, lit while it is open
+        self._flo_btn = QToolButton()
+        self._flo_btn.setObjectName("flo_btn")
+        self._flo_btn.setIcon(frame_icon("sparkle", theme.BUTTON_ACCENT))
+        self._flo_btn.setText("Flo")
+        self._flo_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._flo_btn.setCheckable(True)
+        self._flo_btn.setToolTip("Flo Assistant — ask the AI to build, change "
+                                 "or explain this flow  (Ctrl+Shift+A)")
+        self._flo_btn.clicked.connect(lambda: window.toggle_flo())
+        flo_dock = getattr(window, "flo_dock", None)
+        if flo_dock is not None:
+            flo_dock.visibilityChanged.connect(self._flo_btn.setChecked)
+        self._labelled.append(self._flo_btn)
+        row.addWidget(self._flo_btn)
+
         row.addSpacing(6)
 
         self._win_btns = QWidget()
@@ -1100,7 +1135,7 @@ class TitleBar(QWidget):
         """None of the run or cache buttons while there is no flow on
         screen to run — the start screen (O1)."""
         self._run_shown = bool(shown)
-        for btn in (self._run_btn, self._reset_btn):
+        for btn in (self._run_btn, self._reset_btn, self._flo_btn):
             btn.setVisible(self._run_shown)
         self.on_selection(self._selection_count)
 

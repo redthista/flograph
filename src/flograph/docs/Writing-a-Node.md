@@ -396,7 +396,8 @@ the badge says whether it is on this PC or online, and API keys are kept in
 your system keychain, not in a settings file. Describe a change in English
 and get a rewritten script. It is never applied automatically — the reply
 lands in the editor and **Apply** stays a separate action. Nothing leaves
-your machine unless you point it somewhere that isn't local.
+your machine unless you point it somewhere that isn't local. The same
+connections drive the [[Flo Assistant]], which builds and changes flows.
 
 ## Trying it headless
 

@@ -505,6 +505,17 @@ lands in the editor for you to read, and Apply stays a separate, explicit
 action. Nothing leaves your machine unless you point it somewhere that isn't
 local.
 
+**Tools > Flo Assistant** (Ctrl+Shift+A, or **Flo** on the title bar) opens
+a chat that builds and changes the flow itself: "add a bar chart of sales by
+region from my Excel reader". Two dials decide what it gets. **Sees** is the
+flow only, column names and types, or a per-column profile (empty share,
+distinct count, ranges); it never sees rows, and it can be capped per
+connection (an online one starts at names and types) and per flow, with
+per-column *Sensitive* and alias rules saved in the `.flograph`. **Can** is
+Advise (look and explain) or Act (each reply is one undo step). Every
+request can be inspected under its reply, confirmed before it goes, and is
+logged on this PC.
+
 ---
 
 ## Packages

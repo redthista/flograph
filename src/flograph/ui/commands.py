@@ -336,6 +336,25 @@ class SetEnvPathCommand(QUndoCommand):
         self._graph.set_env_path(self._old)
 
 
+class SetAiPrivacyCommand(QUndoCommand):
+    """Change what this flow lets the Flo Assistant see: its level cap and
+    the per-column Sensitive / Alias rules. Saved in the flow, so it is an
+    edit like any other — undoable, and it marks the file changed."""
+
+    def __init__(self, graph: Graph, privacy: dict,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("change AI privacy", parent)
+        self._graph = graph
+        self._old = dict(graph.ai_privacy)
+        self._new = dict(privacy)
+
+    def redo(self) -> None:
+        self._graph.ai_privacy = dict(self._new)
+
+    def undo(self) -> None:
+        self._graph.ai_privacy = dict(self._old)
+
+
 class SetLabelCommand(QUndoCommand):
     def __init__(self, graph: Graph, node_id: str, new_label: Optional[str],
                  parent: Optional[QUndoCommand] = None) -> None:

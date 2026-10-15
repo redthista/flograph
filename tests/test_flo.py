@@ -172,12 +172,40 @@ class TestAgentBuildsAFlow:
         ScriptedModel(monkeypatch, BUILD)
         box = _toolbox(registry, stack)
         steps = []
-        result = Conversation(wire.Connection(model="m"), box).send(
-            "go", cancelled=lambda: len(steps) >= 3,
+        chat = Conversation(wire.Connection(model="m"), box)
+        # Stop pressed while the fourth request was out: its answer arrives,
+        # but the calls in it are not run — only the third step's node stays
+        result = chat.send(
+            "go", cancelled=lambda: len(steps) >= 4,
             on_event=lambda e: steps.append(e) if e.kind == "thinking" else None)
         assert result.stopped == "cancelled"
         assert len(box.graph.nodes) == 1 and stack.count() == 1
         assert "one Undo" in result.text
+        # each skipped call still has its answer, so the next request is valid
+        skipped = [m for m in chat.messages if m["role"] == "tool"][-2:]
+        assert all("not run" in m["content"] for m in skipped)
+
+    def test_before_send_can_refuse(self, monkeypatch, registry, stack):
+        model = ScriptedModel(monkeypatch, ["hello"])
+        seen = []
+        chat = Conversation(wire.Connection(model="m"), _toolbox(registry, stack),
+                            before_send=lambda entry: seen.append(entry) and False)
+        result = chat.send("hi")
+        assert result.stopped == "declined" and result.text == "Not sent."
+        assert len(seen) == 1 and not chat.outbox and not model.bodies
+
+    def test_tools_run_through_on_ui(self, monkeypatch, registry, stack):
+        ScriptedModel(monkeypatch, BUILD)
+        calls = []
+
+        def on_ui(fn):
+            calls.append(fn)
+            return fn()
+
+        Conversation(wire.Connection(model="m"), _toolbox(registry, stack),
+                     on_ui=on_ui).send("go")
+        # open the turn + 5 tool calls + close the turn
+        assert len(calls) == 7
 
     def test_server_failure_mid_turn(self, monkeypatch, registry, stack):
         replies = iter([_Reply({"choices": [{"message": {"tool_calls": [{

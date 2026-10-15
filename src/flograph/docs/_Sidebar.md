@@ -7,6 +7,7 @@
   - [[Nodes and the Library]]
   - [[The Table Spreadsheet]]
   - [[Flow Variables]]
+  - [[Flo Assistant]]
 - **Building nodes**
   - [[Writing a Node]]
   - [[Node Cookbook]]

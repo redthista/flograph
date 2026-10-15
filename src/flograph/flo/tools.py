@@ -131,6 +131,15 @@ class Toolbox:
         self.actions: list[Action] = []
         self._learn_cached_columns()
 
+    def set_view(self, disclosure: Disclosure, autonomy: Optional[str] = None) -> None:
+        """Change what the model may see and do, between turns. The flow's
+        columns are learned again: a node run since the last turn may have
+        brought new names that level 0 has to hide."""
+        self.disclosure = disclosure
+        if autonomy is not None:
+            self.autonomy = autonomy
+        self._learn_cached_columns()
+
     # -- turn bracketing ----------------------------------------------------------
 
     def begin_turn(self, text: str = "") -> None:

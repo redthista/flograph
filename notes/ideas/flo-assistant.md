@@ -223,6 +223,36 @@ the model can say "I can't see that column" instead of guessing.
   - **Not done in phase 1, deliberately:** `write_user_node` (new node
     code needs the editor's review step, so it waits for the dock), and
     `run_node` (needs the engine, which the dock has).
+- **Phase 2 built (2026-10-15, branch, waiting for Dan to test):**
+  `ui/flo/` — `panel.py` (the dock: connection + Local/Online badge, *Sees*
+  and *Can* dials, Columns…, chat thread, change list with show / Undo
+  these changes, What was sent), `bridge.py` (the turn runs on a daemon
+  thread; every tool, and opening/closing the undo step, is posted back to
+  the GUI thread and the worker blocks on it; `close()` retires a chat so a
+  stale turn can't write into the next flow), `privacy_dialog.py` (the
+  flow's cap + Sensitive / Alias / Meaning per column; an alias may not be
+  another column's real name), `sent_view.py`. `flo/sendlog.py` writes
+  `ai_log/YYYY-MM-DD.jsonl`, owner-only, only what is new per request.
+  `SetAiPrivacyCommand` makes privacy edits undoable. Tools ▸ Flo Assistant,
+  Ctrl+Shift+A, title-bar **Flo** button; dock closed by default, tabbed
+  with Navigator/Selection. Handbook page *Flo Assistant*.
+  - **Rules enforced in the dock:** a different connection (or the same
+    one with changed settings) starts a fresh chat; *lowering* the level
+    starts one too, because the history already holds what the higher
+    level let through and every request resends it. Dials and Columns… are
+    disabled mid-turn (a privacy edit would land in the AI's undo step).
+  - **Agent changes:** `on_ui` / `before_send` hooks; Stop now also skips
+    the calls in the answer that arrives after it (each still gets a "not
+    run" result so the history stays valid in both formats); the system
+    prompt is rebuilt every turn; `Toolbox.set_view` re-learns columns.
+  - **Found:** `_replace_graph` copies a loaded flow field by field and
+    did not copy `ai_privacy` — opening a flow lost its privacy settings.
+    Fixed. "What was sent" showed the system prompt twice on a first
+    request. Fixed.
+  - **Deferred:** streaming (progress shows the step and seconds
+    instead), conversations saved with the flow, attach a node/selection,
+    `write_user_node`, `run_node`. A user's own canvas edit during a turn
+    joins that turn's undo step (Qt macro semantics) — documented.
 - **Open:**
   - An org-level lock (an admin file that caps the level for every flow
     on a machine) — not now; revisit for the work rollout.

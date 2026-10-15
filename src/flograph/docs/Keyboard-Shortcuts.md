@@ -81,6 +81,7 @@ While a Table's grid has the keyboard. The full list is on
 | Settings | **Ctrl+,** |
 | Statistics | **Ctrl+Shift+I** |
 | Hide all panels | **Ctrl+Shift+H** |
+| Flo Assistant | **Ctrl+Shift+A** |
 | Documentation (this handbook) | **F1** |
 
 See [[The Canvas]] for what these do in context.

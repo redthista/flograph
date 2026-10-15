@@ -70,6 +70,7 @@ from .editor.editor_dock import EditorPanel
 from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .navigator import NavigatorPanel
+from .flo import FloPanel
 from .selection import SelectionPanel
 from .properties.params_panel import ParamsPanel
 from .properties.shape_panel import ShapePropertiesPanel
@@ -671,6 +672,23 @@ class MainWindow(QMainWindow):
         self.properties_dock.raise_()
         self.selection_dock.hide()
 
+        # ------------------------------------------------------ flo assistant
+        # the AI chat that reads and changes the flow. Same tab group, closed
+        # until asked for: Tools ▸ Flo Assistant, Ctrl+Shift+A, or the title
+        # bar's button.
+        self.flo_panel = FloPanel(self.graph, self.registry, self.undo_stack,
+                                  self.engine.cache, settings=self.settings)
+        self.flo_panel.navigate_requested.connect(self._navigate_to)
+        self.flo_panel.settings_requested.connect(self._show_ai_settings)
+        self.flo_dock = QDockWidget("Flo Assistant", host)
+        self.flo_dock.setObjectName("dock_flo")
+        self.flo_dock.setWidget(self.flo_panel)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.flo_dock)
+        self.flo_dock.show()
+        host.tabifyDockWidget(self.selection_dock, self.flo_dock)
+        self.properties_dock.raise_()
+        self.flo_dock.hide()
+
         # ------------------------------------------------------ inspector
         # on its own at the bottom: it is a wide, table-shaped panel, so it
         # wants the window's full width rather than a 420px column
@@ -686,13 +704,13 @@ class MainWindow(QMainWindow):
         self._model_docks = [
             self.library_dock, self.properties_dock, self.editor_dock,
             self.log_dock, self.navigator_dock, self.selection_dock,
-            self.inspector_dock,
+            self.flo_dock, self.inspector_dock,
         ]
         # docks that start closed on a fresh install (no saved layout) and
         # stay closed through a layout reset -- an occasional aid, not the
         # default working set
         self._docks_closed_by_default = [self.navigator_dock,
-                                         self.selection_dock]
+                                         self.selection_dock, self.flo_dock]
         # which of them to restore on the way back from a dashboard page --
         # switching pages must not reopen what someone deliberately closed
         self._docks_open_on_model_page = [
@@ -885,6 +903,8 @@ class MainWindow(QMainWindow):
                                        self._show_requirements)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
                                       self._show_ai_settings)
+        self.action_flo = act("&Flo Assistant", QKeySequence("Ctrl+Shift+A"),
+                              self.toggle_flo)
         self.action_secrets = act("Sec&rets…", None, self._show_secrets)
 
         file_menu = self._menu_root.addMenu("&File")
@@ -934,6 +954,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.action_weblibs)
         tools_menu.addAction(self.action_node_packs)
         tools_menu.addAction(self.action_requirements)
+        tools_menu.addAction(self.action_flo)
         tools_menu.addAction(self.action_ai_settings)
         tools_menu.addAction(self.action_secrets)
 
@@ -3816,6 +3837,18 @@ class MainWindow(QMainWindow):
     def _show_ai_settings(self) -> None:
         from .ai_settings_dialog import AiSettingsDialog
         AiSettingsDialog(self).exec()
+        self.flo_panel.reload_profiles()
+
+    def toggle_flo(self) -> None:
+        """Open the Flo Assistant with the cursor in its box, or put it
+        away when it is already the panel in front."""
+        dock = self.flo_dock
+        if dock.isVisible() and not dock.visibleRegion().isEmpty():
+            dock.hide()
+            return
+        dock.show()
+        dock.raise_()
+        self.flo_panel.focus_input()
 
     def _show_secrets(self) -> None:
         from .env_dialog import EnvDialog
@@ -6608,6 +6641,10 @@ class MainWindow(QMainWindow):
         # and won't let go of the hand. Clear both before the graph churns.
         self.scene.cancel_active_drags()
         self.view.cancel_pan()
+        # the chat was about the outgoing flow, and a turn still out must not
+        # write into the incoming one; this also closes any open undo step
+        # before the stack is cleared below
+        self.flo_panel.graph_replaced()
         # a warm from the outgoing project is about to be irrelevant
         self._finish_warm_watch()
         # pages opened in a browser belong to the project being closed; the
@@ -6656,6 +6693,7 @@ class MainWindow(QMainWindow):
         self.graph.folded_page_groups = set(loaded.folded_page_groups)
         self.graph.canvases_folded = loaded.canvases_folded
         self.graph.canvas_views = dict(loaded.canvas_views)
+        self.graph.ai_privacy = dict(loaded.ai_privacy)
         for page in loaded.pages.values():
             self.graph.add_page(page)
         self._restoring_pages = False
