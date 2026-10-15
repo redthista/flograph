@@ -142,6 +142,18 @@ QPushButton#flo_chip { border: 1px solid rgba(127,127,127,0.30);
 QPushButton#flo_chip:hover { background: rgba(127,127,127,0.14); }
 QFrame#flo_about { background: rgba(124,108,246,0.14); border-radius: 10px; }
 QLabel#flo_muted { color: palette(placeholder-text); }
+QScrollArea#flo_scroll, QScrollArea#flo_scroll > QWidget > QWidget {
+    background: transparent; }
+QScrollArea#flo_scroll QScrollBar:vertical { width: 8px; margin: 2px 0;
+    background: transparent; border: none; }
+QScrollArea#flo_scroll QScrollBar::handle:vertical {
+    background: rgba(127,127,127,0.35); border-radius: 4px; min-height: 32px; }
+QScrollArea#flo_scroll QScrollBar::handle:vertical:hover {
+    background: rgba(127,127,127,0.55); }
+QScrollArea#flo_scroll QScrollBar::add-line:vertical,
+QScrollArea#flo_scroll QScrollBar::sub-line:vertical { height: 0; }
+QScrollArea#flo_scroll QScrollBar::add-page:vertical,
+QScrollArea#flo_scroll QScrollBar::sub-page:vertical { background: none; }
 QLabel#flo_title { font-size: 15px; font-weight: 600; }
 """
 
@@ -173,13 +185,25 @@ def shield_icon(color: QColor, size: int = 16) -> QIcon:
     return icon
 
 
+def _link_style() -> str:
+    from .. import theme
+    colour = "#a99cff" if theme.is_dark() else "#5b4bd6"
+    return f"color:{colour}; text-decoration:none;"
+
+
+def _styled(html: str) -> str:
+    """Links in the panel's own accent, not the platform's underlined blue
+    — paler on dark, deeper on light, so they read on either."""
+    return html.replace("<a href=", f'<a style="{_link_style()}" href=')
+
+
 def _label(text: str = "", *, muted: bool = False, rich: bool = False,
            markdown: bool = False, name: str = "") -> QLabel:
     label = QLabel()
     label.setWordWrap(True)
     label.setTextFormat(Qt.MarkdownText if markdown else
                         Qt.RichText if rich else Qt.PlainText)
-    label.setText(text)
+    label.setText(_styled(text) if rich else text)
     label.setTextInteractionFlags(Qt.TextBrowserInteraction)
     label.setOpenExternalLinks(False)
     label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -242,6 +266,7 @@ class FloPanel(QWidget):
         self._started = 0.0
         self._doing = ""
         self._welcome: Optional[QWidget] = None
+        self._user_bubbles: list[QFrame] = []
         self._about: list[str] = []           # node ids "this" means
         self._about_title = ""
         self._live: Optional[QLabel] = None   # the reply as it arrives
@@ -365,6 +390,8 @@ class FloPanel(QWidget):
 
         # -- the thread
         self.scroll = QScrollArea()
+        self.scroll.setObjectName("flo_scroll")
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.thread = QWidget()
@@ -406,6 +433,7 @@ class FloPanel(QWidget):
         entry.setSpacing(6)
         self.input = _Input()
         self.input.setPlaceholderText("Ask Flo to build or change something…")
+        self.input.setToolTip("Enter sends · Shift+Enter starts a new line")
         self.input.setFixedHeight(54)
         self.input.submitted.connect(self.send)
         entry.addWidget(self.input, 1)
@@ -415,9 +443,6 @@ class FloPanel(QWidget):
         self.send_btn.clicked.connect(self._on_send_clicked)
         entry.addWidget(self.send_btn, 0, Qt.AlignBottom)
         outer.addWidget(box)
-        self.hint = _label("Enter to send · Shift+Enter for a new line",
-                           muted=True)
-        outer.addWidget(self.hint)
         self._set_send_face(False)
 
     # -- the dials ------------------------------------------------------------------
@@ -598,6 +623,28 @@ class FloPanel(QWidget):
         QTimer.singleShot(0, self._scroll_to_end)
         return widget
 
+    def _fit_bubble(self, bubble: QFrame) -> None:
+        """A word-wrapped label in a right-aligned row settles on its
+        narrowest width, which made every message a thin column. Size the
+        bubble to its longest line instead, capped at 85% of the chat."""
+        from shiboken6 import isValid
+        if not isValid(bubble):
+            return
+        room = max(180, int(self.scroll.viewport().width() * 0.85))
+        widest = 0
+        for label in bubble.findChildren(QLabel):
+            metrics = label.fontMetrics()
+            for line in (label.text() or " ").splitlines() or [" "]:
+                widest = max(widest, metrics.horizontalAdvance(line))
+        margins = bubble.layout().contentsMargins()
+        bubble.setFixedWidth(min(room, widest + margins.left()
+                                 + margins.right() + 6))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        for bubble in self._user_bubbles:
+            self._fit_bubble(bubble)
+
     def _scroll_to_end(self) -> None:
         bar = self.scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
@@ -623,6 +670,7 @@ class FloPanel(QWidget):
             self._welcome = None
 
     def _clear_thread(self) -> None:
+        self._user_bubbles = []
         while self.thread_layout.count() > 1:
             item = self.thread_layout.takeAt(0)
             if item.widget() is not None:
@@ -762,7 +810,8 @@ class FloPanel(QWidget):
         if about_title:
             parts.append(_label(f"About: {about_title}", muted=True))
         bubble = self._block(*parts, name="flo_user", margins=(12, 8, 12, 8))
-        bubble.setMaximumWidth(max(220, int(self.scroll.viewport().width() * 0.85)))
+        self._user_bubbles.append(bubble)
+        self._fit_bubble(bubble)
         row = QWidget()
         line = QHBoxLayout(row)
         line.setContentsMargins(24, 0, 0, 0)
@@ -913,10 +962,10 @@ class FloPanel(QWidget):
         label.setProperty("open", open_now)
         summary = _escape(label.property("summary"))
         if open_now:
-            label.setText(f'{summary} <a href="receipt:">hide</a><br>'
-                          f'{label.property("details")}')
+            label.setText(_styled(f'{summary} <a href="receipt:">hide</a><br>'
+                                  f'{label.property("details")}'))
         else:
-            label.setText(f'{summary} <a href="receipt:">details</a>')
+            label.setText(_styled(f'{summary} <a href="receipt:">details</a>'))
 
     def _on_finished(self, result: Optional[TurnResult]) -> None:
         self._drop_live()
@@ -928,6 +977,7 @@ class FloPanel(QWidget):
             note = _label("The AI got this as: " + result.sent_text.split(
                 "]\n", 1)[-1], muted=True)
             turn["bubble"].layout().addWidget(note)
+            self._fit_bubble(turn["bubble"])
         index = len(self._turns)
         entries = self.chat.outbox[turn["start"]:]
         record = {"start": turn["start"], "end": len(self.chat.outbox),
@@ -1003,9 +1053,9 @@ class FloPanel(QWidget):
         record["undone"] = True
         footer = record.get("footer")
         if footer is not None:
-            footer.setText(footer.text().replace(
-                f'<a href="undo:{index}">Undo these changes</a>',
-                "Undone (Edit ▸ Redo brings it back)"))
+            footer.setText(re.sub(
+                rf'<a [^>]*href="undo:{index}">Undo these changes</a>',
+                "Undone (Edit ▸ Redo brings it back)", footer.text()))
 
     def _show_sent(self, index: int) -> None:
         if self.chat is None:

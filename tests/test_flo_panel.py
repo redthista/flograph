@@ -488,3 +488,20 @@ class TestAskAbout:
         labels = [a.text() for a in sub.actions() if a.text()]
         assert labels[0] == "Ask About This…" and "Explain This" in labels
         assert "Why Did It Fail?" not in labels
+
+
+def test_user_messages_use_the_width(qtbot, monkeypatch, registry, settings, user_dir):
+    ScriptedModel(monkeypatch, ["ok", "ok"])
+    panel = _panel(qtbot, registry, settings)
+    panel.resize(500, 700)
+    panel.show()
+    qtbot.waitExposed(panel)
+    _turn(qtbot, panel, "a long request " * 12)
+    _turn(qtbot, panel, "hi")
+    long_one, short_one = panel._user_bubbles
+    room = panel.scroll.viewport().width()
+    assert long_one.width() >= int(room * 0.8)       # not a thin column
+    assert short_one.width() < room // 3             # a short one stays short
+    panel.resize(800, 700)
+    qtbot.wait(20)
+    assert long_one.width() > int(room * 0.85)       # follows the dock
