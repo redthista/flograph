@@ -428,8 +428,10 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
 - *Tool calling:* native in both formats *and* a JSON-action fallback —
   Dan tests against local servers, the work gateway, Anthropic/OpenAI and
   OpenRouter, so neither alone covers it.
-- *Phases left:* 1 headless engine (tools, disclosure 0–2, agent loop);
-  2 dock with Advise + Act, outbox and send log (**first release**);
+- *Phases left:* 1 headless engine (tools, disclosure 0–2, agent loop)
+  is built on branch `worktree-ai-copilot-design` — `llm/toolcall.py`,
+  `core/ai_disclosure.py`, `flo/tools.py`, `flo/agent.py`, nothing on
+  screen yet; 2 dock with Advise + Act, outbox and send log (**first release**);
   3 Propose with ghost-node preview; 4 levels 3–5. Privacy settings live
   in the flow (decided).
 - *Open:* an org-level cap file for work rollouts (not now); whether Propose earns

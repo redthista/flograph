@@ -236,6 +236,16 @@ class AiSettingsDialog(QDialog):
             "everything above — for anything a gateway wants that flograph "
             "has never heard of.")
 
+        self._tool_mode = QComboBox()
+        self._tool_mode.addItem("Automatic", "auto")
+        self._tool_mode.addItem("The server's tool API", "native")
+        self._tool_mode.addItem("JSON in the reply text", "json")
+        self._tool_mode.setToolTip(
+            "How the Flo Assistant asks this model to use its tools. "
+            "Automatic uses the server's tool API and falls back to JSON in "
+            "the reply when the server refuses it. Choose JSON for a small "
+            "local model that has tools but uses them badly.")
+
         # -- where the data goes ------------------------------------------------
         self._location = QComboBox()
         self._location.addItem("Automatic", "auto")
@@ -279,6 +289,7 @@ class AiSettingsDialog(QDialog):
         form.addRow("Max tokens", self._max_tokens)
         form.addRow("Thinking", self._thinking)
         form.addRow("Extra request JSON", self._extra)
+        form.addRow("Tool calling", self._tool_mode)
         form.addRow("Server is on", where_row)
         form.addRow("", self._where_warning)
         form.addRow("Most the assistant\nmay see", self._ceiling)
@@ -393,6 +404,8 @@ class AiSettingsDialog(QDialog):
         self._max_tokens.setValue(int(profile.max_tokens))
         self._thinking.setCurrentText(profile.thinking or "default")
         self._extra.setPlainText(profile.extra_json or "")
+        self._tool_mode.setCurrentIndex(
+            max(self._tool_mode.findData(profile.tool_mode), 0))
         self._location.setCurrentIndex(
             max(self._location.findData(profile.location), 0))
         self._loading = False
@@ -411,6 +424,7 @@ class AiSettingsDialog(QDialog):
         profile.max_tokens = self._max_tokens.value()
         profile.thinking = self._thinking.currentText()
         profile.extra_json = self._extra.toPlainText().strip()
+        profile.tool_mode = self._tool_mode.currentData()
         profile.location = self._location.currentData()
         profile.ceiling = self._ceiling.currentData()
         self._keys[profile.id] = self._api_key.text().strip()

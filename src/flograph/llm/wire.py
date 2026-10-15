@@ -323,14 +323,19 @@ def reply_text(data: dict, provider: str) -> str:
     return content
 
 
-def chat(conn: Connection, messages: list[dict]) -> str:
-    """POST one chat request in the connection's wire format; return the text."""
+def exchange(conn: Connection, build_body) -> dict:
+    """POST to the chat endpoint and return the decoded reply.
+
+    `build_body(tweaks)` makes the request body; it is called again with
+    the 400 climb-down's tweaks when the server names a parameter it won't
+    take. Shared by plain chat and tool calling (`llm.toolcall`).
+    """
     urls = candidate_urls(conn, _PATHS.get(conn.provider, _PATHS["openai"]))
     tweaks: set = set()
     while True:
         try:
             response = _send("POST", urls, conn, conn.timeout,
-                             chat_body(conn, messages, frozenset(tweaks)))
+                             build_body(frozenset(tweaks)))
             break
         except LLMError as exc:
             tweak = _tweak_for(str(exc)) if "HTTP 400" in str(exc) else None
@@ -338,9 +343,14 @@ def chat(conn: Connection, messages: list[dict]) -> str:
                 raise
             tweaks.add(tweak)  # server named a parameter it won't take — drop it
     try:
-        data = response.json()
+        return response.json()
     except ValueError as exc:
         raise LLMError(f"unexpected response from the AI server: {exc}") from exc
+
+
+def chat(conn: Connection, messages: list[dict]) -> str:
+    """POST one chat request in the connection's wire format; return the text."""
+    data = exchange(conn, lambda tweaks: chat_body(conn, messages, tweaks))
     return reply_text(data, conn.provider)
 
 

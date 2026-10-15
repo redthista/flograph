@@ -105,6 +105,10 @@ class Profile:
     extra_json: str = ""
     location: str = "auto"            # auto | local | online
     ceiling: Optional[int] = None     # None = the default for its location
+    # How the assistant asks this server to call tools — see llm.toolcall.
+    # "auto" tries the native API and falls back if the server refuses it;
+    # "json" is for a model that has tools but uses them badly.
+    tool_mode: str = "auto"
 
     # -- where the data goes ------------------------------------------------
 
@@ -187,6 +191,8 @@ class Profile:
             profile.id = new_id()
         if profile.location not in LOCATIONS:
             profile.location = "auto"
+        if profile.tool_mode not in ("auto", "native", "json"):
+            profile.tool_mode = "auto"
         if profile.ceiling is not None:
             try:
                 profile.ceiling = max(0, min(int(profile.ceiling), len(LEVELS) - 1))

@@ -266,6 +266,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
             # Where `${env:NAME}` reads its secrets from — the path only.
             # The values stay in that file and never enter this one.
             "env_path": graph.env_path,
+            # what the Flo Assistant may see, only when it isn't the default
+            **({"ai_privacy": graph.ai_privacy} if graph.ai_privacy else {}),
             # the tab bar's group colours, only when there are any
             **_group_colors_entry(graph),
             # and how it was left: folded sections, folded canvases, and
@@ -339,6 +341,11 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     # Absent in files written before variables existed, which is what the
     # empty default means anyway: use the per-user secrets file.
     graph.env_path = str(payload.get("env_path", "") or "")
+    # absent before the Flo Assistant, and whenever it is the default
+    raw_privacy = payload.get("ai_privacy")
+    if isinstance(raw_privacy, dict):
+        from .ai_disclosure import Privacy
+        graph.ai_privacy = Privacy.from_dict(raw_privacy).to_dict()
     # absent before groups had colours, and when none has one
     raw_colors = payload.get("page_group_colors") or {}
     if isinstance(raw_colors, dict):

@@ -201,6 +201,28 @@ the model can say "I can't see that column" instead of guessing.
   says so). Tools ▸ AI Assistant Settings edits the profiles; the old
   QSettings connection migrates on first read and its key moves to the
   keychain. Behaviour change: a host-rooted Base URL now tries `/v1` first.
+- **Phase 1 built (2026-10-15, headless, no UI yet):**
+  `llm/toolcall.py` — tool calling in both formats plus the ```tool JSON
+  fallback; `auto` drops to it on a 400/422 that talks about tools, and a
+  conversation stays there once it has. `core/ai_disclosure.py` — levels
+  0–2 (3–5 clamp to 2), Privacy saved as `ai_privacy` in the flow, one
+  `scrub()` for every outgoing string (level 0 hides every known column
+  name as `<column>`; aliases both ways; password params never; paths as
+  file names). `flo/tools.py` — describe_flow, get_node, find_node_types,
+  get_node_type, get_output (level ≥ 1), add_node, connect, disconnect,
+  set_params, rename_node, delete_nodes; short handles n1, n2; errors name
+  what is valid; one undo macro per turn, opened lazily. `flo/agent.py` —
+  `Conversation.send()` with step limit, Stop, outbox. Profiles gained
+  `tool_mode` (Tool calling: Automatic / the server's tool API / JSON in
+  the reply text).
+  - **Found while building:** the palette's fuzzy label search finds
+    nothing for "bar chart" — no node is called that. `flo.tools.
+    search_types` searches label/id/category/doc/setting choices and
+    returns the choice to set (`kind = bar`), plus a short `USUAL_NODE`
+    list (chart → Show Plotly, join → Join, …) tested to resolve.
+  - **Not done in phase 1, deliberately:** `write_user_node` (new node
+    code needs the editor's review step, so it waits for the dock), and
+    `run_node` (needs the engine, which the dock has).
 - **Open:**
   - An org-level lock (an admin file that caps the level for every flow
     on a machine) — not now; revisit for the work rollout.
