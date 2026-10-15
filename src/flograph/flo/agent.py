@@ -33,7 +33,8 @@ from ..llm import toolcall, wire
 from ..llm.profiles import level_label
 from .tools import ACT, Toolbox
 
-DEFAULT_MAX_STEPS = 16
+DEFAULT_MAX_STEPS = 40
+STEP_CHOICES = (20, 40, 80, 150)
 
 SYSTEM_PROMPT = """\
 You are the Flo Assistant inside flograph, a visual data-flow app. A flow is \
@@ -52,6 +53,10 @@ Never invent them.
 the one that feeds it (use 'near' to place it beside that node).
 - If a tool returns an error, read it — it says what is valid — and fix the \
 call. Don't repeat a failing call unchanged.
+- Each of your replies is one step, and a turn has a limited number of \
+them, so ask for several tools in one reply whenever the calls don't depend \
+on each other: look up all the node types you need at once, add the nodes \
+together, then wire them together.
 - When you are done, reply in plain words: what you did, in a few short \
 lines, and anything the user should check or set themselves.
 
@@ -135,19 +140,24 @@ class Conversation:
             self.tool_mode = "json"
         return reply
 
-    def send(self, text: str, *, cancelled: Callable[[], bool] = lambda: False,
+    def send(self, text: Optional[str], *,
+             cancelled: Callable[[], bool] = lambda: False,
              on_event: Optional[Callable[[Event], None]] = None) -> TurnResult:
+        """One turn. `text=None` carries on a turn the step limit paused:
+        no new message, the model just picks up from its last tool results.
+        It is a turn of its own, so it is an undo step of its own."""
         emit = on_event or (lambda event: None)
         result = TurnResult("")
 
         def open_turn() -> str:
-            self.toolbox.begin_turn(text)
-            return self.toolbox.disclosure.scrub(text)
+            self.toolbox.begin_turn(text if text is not None else "carry on")
+            return self.toolbox.disclosure.scrub(text) if text is not None else ""
 
         result.sent_text = self._ui(open_turn)
         # the level or the dials may have moved since the last turn
         self.messages[0]["content"] = self.system_prompt()
-        self.messages.append({"role": "user", "content": result.sent_text})
+        if text is not None:
+            self.messages.append({"role": "user", "content": result.sent_text})
         try:
             while True:
                 if cancelled():
@@ -195,10 +205,10 @@ class Conversation:
             result.text = {
                 "cancelled": "Stopped.",
                 "declined": "Not sent.",
-                "step limit": f"Stopped after {self.max_steps} steps without "
-                              "finishing.",
+                "step limit": f"Paused after {self.max_steps} steps so you can "
+                              "check how it's going — Continue lets it carry on.",
                 "error": f"The AI server failed: {result.error}",
-            }[result.stopped] + (f" {done} change(s) were made — one Undo takes "
+            }[result.stopped] + (f" {done} change(s) so far — one Undo takes "
                                  "them all back." if done else "")
         return result
 

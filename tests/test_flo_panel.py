@@ -505,3 +505,29 @@ def test_user_messages_use_the_width(qtbot, monkeypatch, registry, settings, use
     panel.resize(800, 700)
     qtbot.wait(20)
     assert long_one.width() > int(room * 0.85)       # follows the dock
+
+
+def test_a_long_build_pauses_and_continues(qtbot, monkeypatch, registry,
+                                           settings, user_dir):
+    from tests.test_flo import BUILD
+    settings.setValue("flo/max_steps", 2)
+    ScriptedModel(monkeypatch, BUILD)
+    panel = _panel(qtbot, registry, settings)
+    _turn(qtbot, panel, "build it")
+    first = panel._turns[0]
+    assert "continue:0" in first["footer"].text()
+    assert panel.chat.max_steps == 2
+    panel._on_link("continue:0")
+    qtbot.waitUntil(lambda: not panel._busy, timeout=5000)
+    # 2 more steps, then the scripted answer after one more continue
+    panel._on_link("continue:1")
+    qtbot.waitUntil(lambda: not panel._busy, timeout=5000)
+    assert len(panel.graph.nodes) == 2
+    assert "continue:" not in panel._turns[-1]["footer"].text()
+    # the stretch that made changes is an undo step of its own; the ones
+    # that only looked (steps 1-2) or only answered leave none
+    assert panel.undo_stack.count() == 1
+    assert "undo:1" in panel._turns[1]["footer"].text()
+    # a stale Continue does nothing
+    panel._on_link("continue:0")
+    assert not panel._busy

@@ -43,7 +43,9 @@ from PySide6.QtWidgets import (
 
 from ...core import ai_disclosure as disc
 from ...flo import receipt as receipts
-from ...flo.agent import Conversation, Event, TurnResult
+from ...flo.agent import (
+    DEFAULT_MAX_STEPS, STEP_CHOICES, Conversation, Event, TurnResult,
+)
 from ...flo.sendlog import SendLog, log_dir
 from ...flo.tools import ACT, ADVISE, Toolbox
 from ...llm import wire
@@ -322,6 +324,19 @@ class FloPanel(QWidget):
             self.settings.value("flo/confirm_sends", False, type=bool))
         self.action_confirm.toggled.connect(
             lambda on: self.settings.setValue("flo/confirm_sends", bool(on)))
+        steps = menu.addMenu("Steps per Reply")
+        steps.setToolTipsVisible(True)
+        group = QActionGroup(steps)
+        chosen = self.max_steps()
+        for count in STEP_CHOICES:
+            action = steps.addAction(str(count))
+            action.setCheckable(True)
+            action.setChecked(count == chosen)
+            action.setToolTip("How many requests one reply may make before it "
+                              "pauses to let you check — Continue carries on")
+            action.triggered.connect(
+                lambda _=False, n=count: self.settings.setValue("flo/max_steps", n))
+            group.addAction(action)
         menu.addAction("Open Send Log Folder", self._open_log_folder)
         self.more_btn.setMenu(menu)
         top.addWidget(self.more_btn)
@@ -783,6 +798,32 @@ class FloPanel(QWidget):
         ok = dialog.exec() == QDialog.Accepted
         return ok, dialog.remember.isChecked()
 
+    def max_steps(self) -> int:
+        return self.settings.value("flo/max_steps", DEFAULT_MAX_STEPS, type=int)
+
+    def _consent(self, profile, level: int) -> bool:
+        if self._agreed_to(profile, level):
+            return True
+        ok, remember = self._ask_consent(profile, level)
+        if not ok:
+            return False
+        self._agreed.add((profile.id, level))
+        if remember:
+            self.settings.setValue(f"flo/agreed/{profile.id}", level)
+        return True
+
+    def continue_turn(self) -> bool:
+        """Carry on a reply the step limit paused — no new message."""
+        if self._busy or self.chat is None:
+            return False
+        level, autonomy, profile = self.level(), self.autonomy(), self.profile()
+        if not self._consent(profile, level):
+            return False
+        self.toolbox.set_view(disc.Disclosure(level, self._privacy()), autonomy)
+        self._chat_level = max(self._chat_level, level)
+        self._launch(None, None, profile, level, autonomy)
+        return True
+
     def send(self, text: Optional[str] = None) -> bool:
         if self._busy:
             return False
@@ -790,13 +831,8 @@ class FloPanel(QWidget):
         if not text:
             return False
         level, autonomy, profile = self.level(), self.autonomy(), self.profile()
-        if not self._agreed_to(profile, level):
-            ok, remember = self._ask_consent(profile, level)
-            if not ok:
-                return False
-            self._agreed.add((profile.id, level))
-            if remember:
-                self.settings.setValue(f"flo/agreed/{profile.id}", level)
+        if not self._consent(profile, level):
+            return False
         if not self._ensure_chat():
             return False
         about_title = self._about_title if self._about else ""
@@ -818,9 +854,16 @@ class FloPanel(QWidget):
         line.addStretch(1)
         line.addWidget(bubble)
         self._add(row)
-        message = context + text
+        self._launch(context + text, bubble, profile, level, autonomy)
+        return True
+
+    def _launch(self, message: Optional[str], bubble, profile, level: int,
+                autonomy: str) -> None:
+        """Start a turn on the worker: `message`, or None to carry on."""
+        self.chat.max_steps = self.max_steps()
         self._turn = {
-            "bubble": bubble, "text": message, "start": len(self.chat.outbox),
+            "bubble": bubble, "text": message or "",
+            "start": len(self.chat.outbox),
             "before": (self.chat.outbox[-1]["messages"]
                        if self.chat.outbox else []),
             "to": "this PC" if profile.is_local() else _host(profile),
@@ -837,7 +880,6 @@ class FloPanel(QWidget):
         chat, bridge = self.chat, self.bridge
         bridge.start(lambda: chat.send(message, cancelled=lambda: self._cancel,
                                        on_event=bridge.event.emit))
-        return True
 
     def _before_send(self, entry: dict) -> bool:
         """On the worker thread, just before a request goes."""
@@ -973,7 +1015,8 @@ class FloPanel(QWidget):
         if result is None or self.chat is None:
             return
         turn = self._turn
-        if result.sent_text and result.sent_text != turn["text"]:
+        if turn["bubble"] is not None and result.sent_text \
+                and result.sent_text != turn["text"]:
             note = _label("The AI got this as: " + result.sent_text.split(
                 "]\n", 1)[-1], muted=True)
             turn["bubble"].layout().addWidget(note)
@@ -1016,6 +1059,8 @@ class FloPanel(QWidget):
             links.append(f'<a href="undo:{index}">Undo these changes</a>')
         if record["end"] - record["start"]:
             links.append(f'<a href="sent:{index}">What was sent</a>')
+        if result.stopped == "step limit":
+            links.insert(0, f'<a href="continue:{index}">Continue</a>')
         if result.stopped == "error":
             links.append('<a href="settings:">Check the connection…</a>')
         if links:
@@ -1039,6 +1084,12 @@ class FloPanel(QWidget):
             self._show_sent(int(ident))
         elif kind == "settings":
             self.settings_requested.emit()
+        elif kind == "continue":
+            if int(ident) == len(self._turns) - 1:
+                self.continue_turn()
+            else:
+                self.notice("That reply has been followed by others — ask "
+                            "again to carry on from here.")
 
     def _undo_turn(self, index: int) -> None:
         record = self._turns[index]

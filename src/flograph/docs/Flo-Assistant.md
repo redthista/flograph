@@ -101,6 +101,11 @@ node, and **Undo these changes** takes the whole reply back (or use
 **Ctrl+Z**). Anything you change on the canvas while a reply is still
 running joins that reply's undo step.
 
+A big build takes many steps — each look-up and change is a request to the
+AI. A reply pauses after 40 (**⋯ ▸ Steps per Reply** sets 20 to 150) so
+you can check how it is going; **Continue** under it carries on where it
+stopped, as an undo step of its own.
+
 Replies appear as they are written. **Stop** ends a reply mid-sentence,
 and nothing the AI asked for in that unfinished answer is done.
 
