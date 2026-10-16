@@ -262,25 +262,22 @@ class TestWhatTheModelSees:
         assert cols["salary"]["max"] == 61000.0
         assert "Alice" not in json.dumps(out)
 
-    def test_aliases_both_ways(self, registry, stack):
+    def test_a_hidden_column_never_shows(self, registry, stack):
         graph, cache = self._flow(registry, stack)
-        privacy = Privacy(columns={"salary": ColumnRule(alias="col_1",
-                                                        hint="pay in GBP")})
-        box = _toolbox(registry, stack, graph, disc.SCHEMA, privacy, cache)
+        privacy = Privacy(columns={"salary": ColumnRule(disc.HIDDEN)})
+        box = _toolbox(registry, stack, graph, disc.PROFILE, privacy, cache)
         text = self._all_text(box, [("describe_flow", {}),
-                                    ("get_output", {"node": "n1"})])
-        assert "salary" not in text and "col_1" in text and "pay in GBP" in text
-        box.execute(ToolCall("x", "set_params",
-                             {"node": "n2", "params": {"y": "col_1"}}))
-        chart = next(n for n in graph.nodes.values() if n.type_id == PLOTLY)
-        assert chart.params["y"] == "salary"
+                                    ("get_output", {"node": "n1"}),
+                                    ("get_node", {"node": "n2"})])
+        assert "salary" not in text
 
     def test_the_users_own_words_are_scrubbed_too(self, monkeypatch, registry, stack):
         model = ScriptedModel(monkeypatch, ["ok"])
-        privacy = Privacy(columns={"salary": ColumnRule(alias="col_1")})
+        privacy = Privacy(columns={"salary": ColumnRule(disc.HIDDEN)})
         box = _toolbox(registry, stack, privacy=privacy)
         Conversation(wire.Connection(model="m"), box).send("chart salary by month")
-        assert model.bodies[0]["messages"][-1]["content"] == "chart col_1 by month"
+        assert model.bodies[0]["messages"][-1]["content"] == \
+            "chart <column> by month"
 
     def test_password_params_never_go_out(self, registry, stack):
         spec = next(s for s in registry.all()
@@ -584,7 +581,7 @@ def test_the_receipt_names_shared_values(registry, stack):
     graph.add_node(node)
     cache = _Cache({node.id: {"table": pd.DataFrame({"Test_Name": ["TSH"]})}})
     box = _toolbox(registry, stack, graph=graph, cache=cache, level=disc.SCHEMA,
-                   privacy=Privacy(columns={"Test_Name": ColumnRule(share_values=True)}))
+                   privacy=Privacy(columns={"Test_Name": ColumnRule(disc.VALUES)}))
     box.handle(node.id)
     result = box.execute(ToolCall("a", "get_output", {"node": "n1"}))
     entry = {"messages": [{"role": "system", "content": "s"},
@@ -597,7 +594,7 @@ def test_the_receipt_names_shared_values(registry, stack):
 def test_the_prompt_says_how_to_get_values(registry, stack):
     prompt = Conversation(wire.Connection(model="m"),
                           _toolbox(registry, stack, level=disc.SCHEMA)).system_prompt()
-    assert "Share values" in prompt and "never say what a value is" in prompt
+    assert "Name and values" in prompt and "never say what a value is" in prompt
 
 
 

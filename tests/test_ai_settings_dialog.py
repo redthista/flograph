@@ -455,13 +455,11 @@ class TestWhereTheDataGoes:
         dialog = self._dialog(qtbot)
         dialog._base_url.setText("http://127.0.0.1:1234/v1")
         assert "nothing leaves this PC" in dialog._where.text()
-        assert "Analyse" in dialog._ceiling.itemText(0)
 
-    def test_online_defaults_to_schema(self, qtbot):
+    def test_online_says_where(self, qtbot):
         dialog = self._dialog(qtbot)
         dialog._base_url.setText("https://gw.corp/v1")
         assert "Online — gw.corp" in dialog._where.text()
-        assert "Schema" in dialog._ceiling.itemText(0)
 
     def test_claiming_local_for_a_remote_address_warns(self, qtbot):
         dialog = self._dialog(qtbot)
@@ -471,21 +469,15 @@ class TestWhereTheDataGoes:
         assert dialog._where_warning.isVisible()
         assert "gw.corp" in dialog._where_warning.text()
 
-    def test_ceiling_saves(self, qtbot):
+    def test_location_saves(self, qtbot):
         dialog = self._dialog(qtbot)
-        dialog._ceiling.setCurrentIndex(3)   # Default, then levels 0..5
         dialog._location.setCurrentIndex(dialog._location.findData("online"))
         dialog._save()
-        profile = profiles.load().active()
-        assert profile.ceiling == 2
-        assert profile.location == "online"
-        assert profile.effective_ceiling() == 2
+        assert profiles.load().active().location == "online"
 
-    def test_ceiling_survives_a_location_change(self, qtbot):
-        dialog = self._dialog(qtbot)
-        dialog._ceiling.setCurrentIndex(5)
-        dialog._base_url.setText("https://gw.corp/v1")
-        assert dialog._ceiling.currentData() == 4
+    def test_no_limit_on_the_connection_any_more(self, qtbot):
+        # what Flo sees is the flow's setting now, not the connection's
+        assert not hasattr(self._dialog(qtbot), "_ceiling")
 
     def test_key_store_is_named(self, qtbot):
         dialog = self._dialog(qtbot)

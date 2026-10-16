@@ -17,7 +17,7 @@ from flograph.llm import profiles, wire
 from flograph.llm.profiles import Profile, ProfileSet
 from flograph.ui.commands import SetAiPrivacyCommand
 from flograph.ui.flo import FloPanel
-from flograph.ui.flo.privacy_dialog import PrivacyDialog, known_columns
+from flograph.ui.flo.privacy_dialog import ColumnsDialog, known_columns
 from flograph.ui.flo.sent_view import format_requests
 
 from tests.test_flo import BUILD, CSV, ScriptedModel, _Cache, _Reply
@@ -57,36 +57,44 @@ def _turn(qtbot, panel, text="Bar chart of sales by region"):
 
 
 class TestDials:
-    def test_local_connection_may_see_profile(self, qtbot, registry, settings, user_dir):
-        panel = _panel(qtbot, registry, settings)
-        assert panel.where.text() == "Local — nothing leaves this PC"
-        assert panel.level() == disc.PROFILE
-        assert panel.sees_btn.text().startswith("Sees: Profile")
-        assert "never rows" in panel.sees_line.text()
+    """One level, the flow's: Column names unless the flow says otherwise —
+    the same for a local and an online connection."""
 
-    def test_online_connection_defaults_to_schema(self, qtbot, registry, settings, user_dir):
-        panel = _panel(qtbot, registry, settings, active=ONLINE)
-        assert panel.where.text() == "Online — sent to ai.example.com"
-        assert panel.level() == disc.SCHEMA
-        # above the connection's limit: choosable, but it asks first
-        assert panel.level_actions[disc.PROFILE].isEnabled()
-        assert "ask to allow" in panel.level_actions[disc.PROFILE].text()
-        assert "This connection allows up to Schema" in panel.sees_line.text()
+    def test_column_names_by_default_local_or_online(self, qtbot, registry,
+                                                     settings, user_dir):
+        local = _panel(qtbot, registry, settings)
+        assert local.where.text() == "Local — nothing leaves this PC"
+        assert local.level() == disc.SCHEMA
+        assert local.sees_btn.text().startswith("Flo can see: Column names")
+        online = _panel(qtbot, registry, settings, active=ONLINE)
+        assert online.where.text() == "Online — sent to ai.example.com"
+        assert online.level() == disc.SCHEMA
+        assert all(a.isEnabled() for a in online.level_actions.values())
 
-    def test_the_flow_can_lower_it(self, qtbot, registry, settings, user_dir):
+    def test_the_level_is_the_flows(self, qtbot, registry, settings, user_dir):
         graph = Graph()
         graph.ai_privacy = {"level": 0}
         panel = _panel(qtbot, registry, settings, graph=graph)
         assert panel.level() == disc.STRUCTURE
-        assert "This flow allows up to Structure" in panel.sees_line.text()
+        assert "nothing from your data" in panel.sees_line.text()
 
-    def test_the_chat_choice_is_remembered_but_clamped(self, qtbot, registry, settings, user_dir):
-        settings.setValue("flo/level", disc.SCHEMA)
-        panel = _panel(qtbot, registry, settings)
-        assert panel.level() == disc.SCHEMA
-        settings.setValue("flo/level", disc.PROFILE)
+    def test_choosing_a_level_is_an_undoable_edit_of_the_flow(
+            self, qtbot, registry, settings, user_dir):
         panel = _panel(qtbot, registry, settings, active=ONLINE)
+        panel.choose_level(disc.PROFILE)
+        assert panel.graph.ai_privacy == {"level": disc.PROFILE}
+        assert panel.level() == disc.PROFILE
+        panel.undo_stack.undo()
         assert panel.level() == disc.SCHEMA
+
+    def test_the_card_counts_hidden_and_shared_columns(self, qtbot, registry,
+                                                       settings, user_dir):
+        graph = Graph()
+        graph.ai_privacy = {"columns": {"a": "hidden", "b": "hidden",
+                                        "Test_Name": "values"}}
+        panel = _panel(qtbot, registry, settings, graph=graph)
+        text = panel.sees_line.text()
+        assert "2 columns hidden" in text and "Values shared: Test_Name" in text
 
 
 class TestTurns:
@@ -110,7 +118,7 @@ class TestTurns:
         panel = _panel(qtbot, registry, settings)
         _turn(qtbot, panel)
         panel.undo_stack.push(SetAiPrivacyCommand(panel.graph, {"columns": {
-            "x": {"sensitive": True}}}))
+            "x": "hidden"}}))
         panel._on_link("undo:0")
         assert len(panel.graph.nodes) == 2      # nothing undone behind its back
 
@@ -138,7 +146,7 @@ class TestTurns:
         assert len(files) == 1
         lines = [json.loads(line) for line in files[0].read_text().splitlines()]
         assert len(lines) == len(panel.chat.outbox)
-        assert lines[0]["connection"] == "Local Ollama" and lines[0]["sees"] == "profile"
+        assert lines[0]["connection"] == "Local Ollama" and lines[0]["sees"] == "schema"
         assert lines[0]["messages"][0]["role"] == "system"
         # later lines carry only what is new
         assert all(m["role"] != "system" for line in lines[1:] for m in line["messages"])
@@ -205,7 +213,6 @@ class TestFreshChats:
     def test_raising_it_keeps_the_chat(self, qtbot, monkeypatch,
                                        registry, settings, user_dir):
         ScriptedModel(monkeypatch, ["hello"])
-        settings.setValue("flo/level", disc.SCHEMA)
         panel = _panel(qtbot, registry, settings)
         _turn(qtbot, panel, "hi")
         panel.choose_level(disc.PROFILE)
@@ -244,7 +251,7 @@ class TestFreshChats:
         assert not panel.graph.nodes and panel.undo_stack.count() == 0
 
 
-class TestPrivacyDialog:
+class TestColumnsDialog:
     def test_columns_come_from_cached_outputs(self, qtbot, registry):
         graph = Graph()
         node = registry.instantiate(CSV, (0, 0))
@@ -253,27 +260,24 @@ class TestPrivacyDialog:
         assert known_columns(graph, cache) == {"name": [node.label],
                                                "sales": [node.label]}
 
-    def test_rules_round_trip(self, qtbot, registry):
+    def test_one_choice_per_column_and_the_level_is_kept(self, qtbot, registry):
         graph = Graph()
-        graph.ai_privacy = {"level": 1, "columns": {"name": {"alias": "who"}}}
-        dialog = PrivacyDialog(graph, None)
+        graph.ai_privacy = {"level": 2, "columns": {"name": "hidden"}}
+        dialog = ColumnsDialog(graph, None)
         qtbot.addWidget(dialog)
         assert dialog.privacy() == graph.ai_privacy
-        dialog._sensitive[0].setChecked(True)
-        assert dialog.privacy()["columns"]["name"] == {"sensitive": True,
-                                                       "alias": "who"}
+        dialog.set_mode("name", disc.VALUES)
+        assert dialog.privacy() == {"level": 2, "columns": {"name": "values"}}
+        dialog.set_mode("name", disc.NAME)
+        assert dialog.privacy() == {"level": 2}           # the default says nothing
 
-    def test_an_alias_may_not_be_another_columns_name(self, qtbot, registry):
+    def test_older_rules_show_as_their_new_choice(self, qtbot, registry):
         graph = Graph()
-        graph.ai_privacy = {"columns": {"a": {"alias": "b"},
-                                        "b": {"sensitive": True}}}
-        dialog = PrivacyDialog(graph, None)
+        graph.ai_privacy = {"columns": {"a": {"alias": "x"},
+                                        "b": {"share_values": True}}}
+        dialog = ColumnsDialog(graph, None)
         qtbot.addWidget(dialog)
-        assert "real name of another column" in dialog.alias_problem()
-        dialog.table.item(0, 3).setText("c")
-        assert dialog.alias_problem() == ""
-        dialog.table.item(1, 3).setText("c")
-        assert "both shown as 'c'" in dialog.alias_problem()
+        assert [c.currentData() for c in dialog.modes] == [disc.HIDDEN, disc.VALUES]
 
     def test_the_command_undoes(self, qapp):
         graph = Graph()
@@ -322,7 +326,7 @@ class TestWindow:
 
     def test_opening_a_flow_keeps_its_privacy(self, window):
         loaded = Graph()
-        loaded.ai_privacy = {"level": 0, "columns": {"name": {"sensitive": True}}}
+        loaded.ai_privacy = {"level": 0, "columns": {"name": "hidden"}}
         window._replace_graph(loaded)
         assert window.graph.ai_privacy == loaded.ai_privacy
         assert window.flo_panel.level() == disc.STRUCTURE
@@ -337,7 +341,7 @@ class TestReceipt:
         graph.add_node(node)
         cache = _Cache({node.id: {"table": pd.DataFrame(
             {"region": ["a", "b"], "sales": [1, 5], "secret": [1, 2]})}})
-        graph.ai_privacy = {"columns": {"secret": {"alias": "score"}}}
+        graph.ai_privacy = {"level": 2, "columns": {"secret": "hidden"}}
         ScriptedModel(monkeypatch, [[("get_output", {"node": "n1"})], "done"])
         panel = _panel(qtbot, registry, settings, graph=graph, cache=cache)
         panel.toolbox = None
@@ -347,9 +351,8 @@ class TestReceipt:
         _turn(qtbot, panel, "what's in it?")
         receipt = panel._turns[0]["receipt"]
         assert receipt.local and receipt.message
-        assert receipt.columns == ["region", "sales"]
-        assert receipt.aliased == [("secret", "score")]
-        assert receipt.ranges == ["sales", "score"]
+        assert receipt.columns == ["region", "sales"]      # never "secret"
+        assert receipt.ranges == ["sales"]
         assert receipt.summary().startswith("Stayed on this PC: your message")
         assert "no rows" in receipt.summary()
         assert any("Smallest and largest" in line for line in receipt.details())
@@ -406,22 +409,14 @@ class TestConsent:
 
     def test_the_lists_follow_the_rules(self):
         from flograph.ui.flo.consent import never_sees, will_see
-        privacy = disc.Privacy(columns={"a": disc.ColumnRule(sensitive=True)},
-                               hide_text=True)
+        privacy = disc.Privacy(columns={"a": disc.ColumnRule(disc.HIDDEN),
+                                        "t": disc.ColumnRule(disc.VALUES)})
         seen = " ".join(will_see(disc.PROFILE, privacy))
-        assert "1 marked sensitive" in seen and "smallest and largest" in seen
-        assert "text you typed into settings is hidden" in seen
+        assert "except 1 hidden column" in seen and "lowest and highest" in seen
+        assert "values of the columns you chose to share: t" in seen
+        assert "no text typed" in " ".join(will_see(disc.STRUCTURE, privacy))
         assert "Column names" in " ".join(never_sees(disc.STRUCTURE))
         assert "Column names" not in " ".join(never_sees(disc.SCHEMA))
-
-
-def test_privacy_dialog_hide_text_round_trips(qtbot):
-    graph = Graph()
-    graph.ai_privacy = {"hide_text": True}
-    dialog = PrivacyDialog(graph, None)
-    qtbot.addWidget(dialog)
-    assert dialog.hide_text.isChecked()
-    assert dialog.privacy() == {"hide_text": True}
 
 
 def test_the_reply_shows_while_it_streams(qtbot, monkeypatch, registry, settings,
@@ -556,57 +551,3 @@ def test_run_nodes_runs_the_real_engine(qtbot, monkeypatch, registry, settings,
     assert result["nodes"][0]["status"] == "up to date"
     assert "outputs" in result["nodes"][0]
     assert not engine.active
-
-
-
-class TestAllowingMore:
-    """Online starts at Schema; more is the user's explicit choice."""
-
-    def test_choosing_more_asks_and_allow_raises_the_connection(
-            self, qtbot, monkeypatch, registry, settings, user_dir):
-        panel = _panel(qtbot, registry, settings, active=ONLINE)
-        asked = []
-        monkeypatch.setattr(panel, "_ask_raise",
-                            lambda profile, level: asked.append(level) or True)
-        panel.choose_level(disc.PROFILE)
-        assert asked == [disc.PROFILE]
-        assert panel.level() == disc.PROFILE
-        assert profiles.load().get("web").ceiling == disc.PROFILE   # saved
-
-    def test_cancel_changes_nothing(self, qtbot, monkeypatch, registry, settings,
-                                    user_dir):
-        panel = _panel(qtbot, registry, settings, active=ONLINE)
-        monkeypatch.setattr(panel, "_ask_raise", lambda profile, level: False)
-        panel.choose_level(disc.PROFILE)
-        assert panel.level() == disc.SCHEMA
-        assert profiles.load().get("web").ceiling is None
-
-    def test_within_the_limit_it_does_not_ask(self, qtbot, monkeypatch, registry,
-                                              settings, user_dir):
-        panel = _panel(qtbot, registry, settings)        # local: up to Profile
-        monkeypatch.setattr(panel, "_ask_raise",
-                            lambda *a: pytest.fail("asked within the limit"))
-        panel.choose_level(disc.SCHEMA)
-        panel.choose_level(disc.PROFILE)
-
-    def test_the_flows_own_limit_still_wins(self, qtbot, registry, settings,
-                                            user_dir):
-        graph = Graph()
-        graph.ai_privacy = {"level": disc.SCHEMA}
-        panel = _panel(qtbot, registry, settings, active=ONLINE, graph=graph)
-        assert not panel.level_actions[disc.PROFILE].isEnabled()
-        assert "Privacy" in panel.level_actions[disc.PROFILE].toolTip()
-
-    def test_raising_keeps_the_chat_and_consent_asks_again(
-            self, qtbot, monkeypatch, registry, settings, user_dir):
-        ScriptedModel(monkeypatch, ["hi", "again"])
-        panel = _panel(qtbot, registry, settings, active=ONLINE)
-        consents = []
-        monkeypatch.setattr(panel, "_ask_consent",
-                            lambda p, level: consents.append(level) or (True, False))
-        _turn(qtbot, panel, "hello")
-        monkeypatch.setattr(panel, "_ask_raise", lambda profile, level: True)
-        panel.choose_level(disc.PROFILE)
-        assert panel.chat is not None              # not a reason to start over
-        _turn(qtbot, panel, "more")
-        assert consents == [disc.SCHEMA, disc.PROFILE]

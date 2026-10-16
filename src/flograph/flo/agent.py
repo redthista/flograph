@@ -30,7 +30,6 @@ from typing import Any, Callable, Optional
 
 from ..core import ai_disclosure as disc
 from ..llm import toolcall, wire
-from ..llm.profiles import level_label
 from .tools import ACT, Toolbox, catalogue
 
 DEFAULT_MAX_STEPS = 40
@@ -91,13 +90,16 @@ What you may see of the data: {level}.
 _NO_GUESSING = (
     " You cannot see any other values, so never say what a value is or that "
     "you found one. To filter on a category whose values you can't see, ask "
-    "the user to tick 'Share values' for that column in Privacy… (top of the "
-    "Flo panel) — or to tell you the exact value — and stop there.")
+    "the user to set that column to 'Name and values' in Columns… (top of "
+    "the Flo panel) — or to tell you the exact value — and stop there. Some "
+    "columns may be hidden from you entirely; that is the user's choice.")
 
 _VISIBILITY = {
-    disc.STRUCTURE: "You cannot see column names or any values. Where a "
-                    "setting needs a column, ask the user to name it, or leave "
-                    "it for them and say so. '<column>' marks a hidden name.",
+    disc.STRUCTURE: "You cannot see column names, any values, or text typed "
+                    "into settings. Where a setting needs a column, ask the "
+                    "user to name it, or leave it for them and say so. "
+                    "'<column>' marks a hidden name, '<text, N characters>' "
+                    "hidden typed text.",
     disc.SCHEMA: "You can see column names and types, but no values — "
                  "except where a column lists 'values': the user chose to "
                  "share that column's distinct values." + _NO_GUESSING,
@@ -155,7 +157,7 @@ class Conversation:
                      "You can only look and advise: you cannot change the "
                      "flow. Say what the user should do instead.")
         prompt = SYSTEM_PROMPT.format(abilities=abilities,
-                                      level=level_label(level).split(" — ")[0],
+                                      level=disc.LEVEL_NAMES[level],
                                       visibility=_VISIBILITY[level])
         if self._catalogue is None:
             self._catalogue = catalogue(self.toolbox.registry)

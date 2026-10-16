@@ -358,10 +358,10 @@ class Graph:
         # reference and wrong for offering one: a completion list holding
         # PATH, HOME and everything else the shell exported would be useless.
         self.env_keys: list[str] = []
-        # What the Flo Assistant may see of this flow's data — the most it
-        # allows and the per-column sensitive/alias rules, as
+        # What the Flo Assistant may see of this flow's data — its level and
+        # the per-column Hidden / Name only / Name and values rules, as
         # `core.ai_disclosure.Privacy.to_dict()`. In the file on purpose: a
-        # flow handed to someone keeps its "schema only". Empty = defaults.
+        # flow handed to someone keeps its rules. Empty = defaults.
         self.ai_privacy: dict = {}
         # Wires the file held that no longer fit the nodes they join — a
         # builtin's port renamed since it was saved, a node id the file does

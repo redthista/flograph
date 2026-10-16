@@ -368,6 +368,9 @@ class Toolbox:
             for column in ((getattr(entry, "column_names", None) or {})
                            .get(conn.src_port) or ()):
                 incoming.setdefault(str(column), "")
+        # a hidden column is not there, as far as the model may know
+        incoming = {c: k for c, k in incoming.items()
+                    if not self.disclosure.hides(c)}
         if not incoming:
             return []
         warnings = []
@@ -379,10 +382,11 @@ class Toolbox:
                                           else str(value or "").split(","))
                       if str(v).strip()]
             for column in wanted:
-                shown = self.disclosure.shown_name(column)
+                if self.disclosure.hides(column):
+                    continue
+                shown = column
                 if column not in incoming:
-                    real = ", ".join(self.disclosure.shown_name(c)
-                                     for c in list(incoming)[:40])
+                    real = ", ".join(list(incoming)[:40])
                     warnings.append(f"{pspec.name}: no column {shown!r} comes "
                                     f"into {self.handle(inst.id)} — it gets: {real}")
                 elif pspec.name.startswith("y") and incoming[column] == "text":

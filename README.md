@@ -507,12 +507,11 @@ local.
 
 **Tools > Flo Assistant** (Ctrl+Shift+A, or **Flo** on the title bar) opens
 a chat that builds and changes the flow itself: "add a bar chart of sales by
-region from my Excel reader". Two dials decide what it gets. **Sees** is the
-flow only, column names and types, or a per-column profile (empty share,
-distinct count, ranges); it never sees rows, and it can be capped per
-connection (an online one starts at names and types) and per flow, with
-per-column *Sensitive* and alias rules saved in the `.flograph`. **Can** is
-Advise (look and explain) or Act (each reply is one undo step). Every
+region from my Excel reader". What it sees is two settings saved in the
+`.flograph`: **Flo can see** — nothing from your data, column names (the
+default), or column names and summaries — and, per column, Hidden, Name
+only or Name and values. It never sees rows. **Can** is Advise (look and
+explain) or Act (each reply is one undo step). Every
 request can be inspected under its reply, confirmed before it goes, and is
 logged on this PC.
 

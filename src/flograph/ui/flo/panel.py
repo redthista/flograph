@@ -2,12 +2,14 @@
 
 Privacy is the first thing on the panel, not a setting behind it. The
 **privacy card** under the connection says in plain words where the words
-go (*Local — nothing leaves this PC* / *Online — sent to <host>*), what the
-AI sees and what it never sees, and carries the two dials:
+go (*Local — nothing leaves this PC* / *Online — sent to <host>*) and what
+Flo sees, and carries the controls:
 
-- **Sees** — Structure / Schema / Profile, never above the lowest of the
-  connection's ceiling and the flow's own cap (Privacy… sets that, the
-  per-column Sensitive / Alias rules, and hiding typed setting text);
+- **Flo can see** — Nothing from my data / Column names / Column names and
+  summaries: the flow's own level, saved in it and changed by an undoable
+  command;
+- **Columns…** — per column Hidden / Name only / Name and values, also
+  saved in the flow (`privacy_dialog.py`);
 - **Can** — Advise (look and explain) or Act (change the flow; each reply
   is one undo step).
 
@@ -17,7 +19,7 @@ ranges, and that no rows did. The first send to an online server asks
 first (`consent.py`), listing what it will and won't see.
 
 What the model is shown is decided by `core/ai_disclosure.py` and by which
-tools exist (`flo/tools.py`) — this file only picks the dials and shows the
+tools exist (`flo/tools.py`) — this file only sets the controls and shows the
 result. Two rules are enforced here because only the dock sees them happen:
 
 - a **different connection** starts a fresh chat, so nothing the last
@@ -54,20 +56,22 @@ from ...llm.profiles import LEVELS, ProfileSet, save as save_profiles
 from .bridge import TurnBridge
 from .sent_view import SentDialog, format_requests
 
-LEVEL_NAMES = {0: "Structure", 1: "Schema", 2: "Profile"}
+LEVEL_NAMES = disc.LEVEL_NAMES
 LEVEL_TIPS = {
-    0: "The flow only — node types, wires and settings. No column names: "
-       "they are replaced with <column> everywhere, even in what you type.",
-    1: "Column names and types, as well as the flow. No values.",
-    2: "Column names and types, plus per column its empty share, distinct "
-       "count, smallest and largest value, and what it looks like (emails, "
+    0: "The flow's layout only — which nodes, how they are wired, their "
+       "settings. No column names (they go as <column>, even in what you "
+       "type) and no text typed into settings.",
+    1: "Also column names and types, and settings as you typed them. "
+       "Never rows.",
+    2: "Also, per column: how much is empty, how many different values, "
+       "the lowest and highest value, and what it looks like (emails, "
        "IDs…). Never rows.",
 }
 # what the card says it sees, by level — short, plain, no jargon
 LEVEL_SEES = {
-    0: "Sees the flow only — no column names, never rows.",
-    1: "Sees the flow, column names and types — never rows.",
-    2: "Sees the flow, column names, types and ranges — never rows.",
+    0: "Only the flow's layout — nothing from your data.",
+    1: "The flow and your column names — never rows.",
+    2: "The flow, column names and summaries — never rows.",
 }
 AUTONOMY = ((ADVISE, "Advise", "Look at the flow and explain or suggest — "
              "it cannot change anything"),
@@ -320,7 +324,7 @@ class FloPanel(QWidget):
         self.more_btn.setPopupMode(QToolButton.InstantPopup)
         menu = QMenu(self.more_btn)
         self.action_new_chat = menu.addAction("New Chat", self.new_chat)
-        menu.addAction("Privacy for This Flow…", self.edit_privacy)
+        menu.addAction("Columns…", self.edit_privacy)
         menu.addAction("Connections…", self.settings_requested.emit)
         menu.addSeparator()
         self.action_confirm = menu.addAction("Confirm Every Send")
@@ -366,7 +370,8 @@ class FloPanel(QWidget):
         card.addWidget(self.sees_line)
         dials = QHBoxLayout()
         dials.setSpacing(6)
-        self.sees_btn = _pill("", "How much of your data the AI is told about")
+        self.sees_btn = _pill("", "How much of your data Flo is told about — "
+                              "saved in this flow")
         self.level_menu = QMenu(self.sees_btn)
         self.level_menu.setToolTipsVisible(True)
         self.level_group = QActionGroup(self)
@@ -399,9 +404,8 @@ class FloPanel(QWidget):
         self.can_btn.setMenu(self.autonomy_menu)
         dials.addWidget(self.can_btn)
         dials.addStretch(1)
-        self.privacy_btn = _pill("Privacy…", "What this flow lets the AI see: "
-                                 "its limit, sensitive or renamed columns, "
-                                 "and hiding text typed into settings")
+        self.privacy_btn = _pill("Columns…", "Hide a column from Flo, or let "
+                                 "it see a column's values")
         self.privacy_btn.setPopupMode(QToolButton.DelayedPopup)
         self.privacy_btn.clicked.connect(self.edit_privacy)
         dials.addWidget(self.privacy_btn)
@@ -504,15 +508,10 @@ class FloPanel(QWidget):
     def _privacy(self) -> disc.Privacy:
         return disc.Privacy.from_dict(self.graph.ai_privacy)
 
-    def allowed_level(self) -> int:
-        """The most the dials may be set to: the connection's ceiling and
-        the flow's own cap, whichever is lower."""
-        return disc.effective_level(self.profile().effective_ceiling(),
-                                    self._privacy().level)
-
     def level(self) -> int:
-        wanted = self.settings.value("flo/level", disc.PROFILE, type=int)
-        return disc.effective_level(self.allowed_level(), None, wanted)
+        """What Flo can see: the flow's own setting (Column names unless
+        it says otherwise)."""
+        return self._privacy().effective
 
     def autonomy(self) -> str:
         for key, action in self.autonomy_actions.items():
@@ -551,47 +550,23 @@ class FloPanel(QWidget):
         self.where.setText("Local — nothing leaves this PC" if local
                            else f"Online — sent to {_host(profile)}")
 
-        allowed, level = self.allowed_level(), self.level()
-        # A level above the connection's limit can still be chosen — it asks
-        # first (choose_level). One above the flow's own limit cannot: that
-        # is the flow's say, changed in Privacy….
-        flow_max = disc.effective_level(disc.BUILT_MAX, self._privacy().level)
-        ceiling_name = LEVEL_NAMES.get(min(profile.effective_ceiling(),
-                                           disc.BUILT_MAX), "?")
+        level = self.level()
         for index, action in self.level_actions.items():
-            over = allowed < index <= flow_max
-            action.setEnabled(index <= flow_max)
             action.setChecked(index == level)
-            action.setText(LEVEL_NAMES[index] + ("  (ask to allow…)" if over else ""))
-            action.setToolTip(
-                f"This flow allows up to {LEVEL_NAMES.get(flow_max, '?')} — "
-                "change that in Privacy…" if index > flow_max else
-                f"{_host(profile)} is allowed up to {ceiling_name}. Choosing "
-                "this asks you to allow more for this connection." if over
-                else LEVEL_TIPS[index])
-        self.sees_btn.setText(f"Sees: {LEVEL_NAMES[level]}  ▾")
+        self.sees_btn.setText(f"Flo can see: {LEVEL_NAMES[level]}  ▾")
         self.can_btn.setText(f"Can: {dict((k, n) for k, n, _ in AUTONOMY)[self.autonomy()]}  ▾")
 
-        why = []
-        ceiling = profile.effective_ceiling()
-        flow_cap = self._privacy().level
-        if flow_cap is not None and flow_cap < min(ceiling, disc.BUILT_MAX):
-            why.append(f"this flow allows up to {LEVEL_NAMES.get(flow_cap, '?')}")
-        if ceiling < disc.BUILT_MAX:
-            why.append(f"this connection allows up to "
-                       f"{LEVEL_NAMES.get(ceiling, '?')}")
-        limits = "; ".join(why)
-        extra = []
         privacy = self._privacy()
-        if privacy.hide_text:
-            extra.append("Text typed into settings is hidden.")
-        shared = [n for n, r in privacy.columns.items()
-                  if r.share_values and not r.sensitive]
-        if shared and level >= disc.SCHEMA:
-            extra.append(f"Values shared: {', '.join(sorted(shared)[:4])}"
-                         + ("…" if len(shared) > 4 else "") + ".")
-        if limits:
-            extra.append(f"{limits[:1].upper()}{limits[1:]}.")
+        extra = []
+        if level >= disc.SCHEMA:
+            hidden = privacy.names(disc.HIDDEN)
+            shared = privacy.names(disc.VALUES)
+            if hidden:
+                extra.append(f"{len(hidden)} column{'s' if len(hidden) != 1 else ''} "
+                             "hidden.")
+            if shared:
+                extra.append(f"Values shared: {', '.join(shared[:4])}"
+                             + ("…" if len(shared) > 4 else "") + ".")
         self.sees_line.setText(" ".join([LEVEL_SEES[level]] + extra))
         self.sees_line.setToolTip(LEVEL_TIPS[level])
 
@@ -625,46 +600,16 @@ class FloPanel(QWidget):
         self.refresh_header()
 
     def choose_level(self, level: int) -> None:
-        """Pick what the AI sees. Above the connection's limit, only with
-        the user's say-so: they are asked, and Allow raises that
-        connection's limit — online stays at Schema until someone does."""
-        profile = self.profile()
-        if level > profile.effective_ceiling():
-            if not self._ask_raise(profile, level):
-                self.refresh_header()
-                return
-            profile.ceiling = int(level)
-            try:
-                save_profiles(self.profiles)
-            except OSError:
-                pass  # in force for this session
-            if self._chat_profile is not None \
-                    and self._chat_profile.get("id") == profile.id:
-                # raising is not a reason for a fresh chat; lowering is
-                self._chat_profile = profile.to_dict()
-        self.settings.setValue("flo/level", int(level))
+        """Set what Flo can see — saved in the flow, an undoable edit like
+        any other (and not mid-turn: it would land in the AI's undo step)."""
+        if self._busy or int(level) == self.level():
+            self.refresh_header()
+            return
+        from ..commands import SetAiPrivacyCommand
+        privacy = self._privacy()
+        privacy.level = int(level)
+        self.undo_stack.push(SetAiPrivacyCommand(self.graph, privacy.to_dict()))
         self.refresh_header()
-
-    def _ask_raise(self, profile, level: int) -> bool:
-        """The question before a connection may see more — kept apart so
-        tests can answer it."""
-        from PySide6.QtWidgets import QMessageBox
-        where = "this PC" if profile.is_local() else _host(profile)
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Question)
-        box.setWindowTitle("Allow More?")
-        box.setText(f"Allow {where} to see {LEVEL_NAMES[level]}?")
-        box.setInformativeText(
-            f"The connection “{profile.name}” is set to "
-            f"{LEVEL_NAMES.get(min(profile.effective_ceiling(), disc.BUILT_MAX))}. "
-            f"{LEVEL_TIPS[level]}\n\nIt never sees rows, passwords or full "
-            "file paths. You can lower it again from Sees, or in AI "
-            "Assistant Settings.")
-        allow = box.addButton("Allow for This Connection", QMessageBox.AcceptRole)
-        box.addButton(QMessageBox.Cancel)
-        box.setDefaultButton(QMessageBox.Cancel)
-        box.exec()
-        return box.clickedButton() is allow
 
     def choose_autonomy(self, key: str) -> None:
         self.autonomy_actions[key].setChecked(True)
@@ -675,8 +620,8 @@ class FloPanel(QWidget):
         if self._busy:
             return    # it would land inside the AI's undo step
         from ..commands import SetAiPrivacyCommand
-        from .privacy_dialog import PrivacyDialog
-        dialog = PrivacyDialog(self.graph, self.cache, self)
+        from .privacy_dialog import ColumnsDialog
+        dialog = ColumnsDialog(self.graph, self.cache, self)
         if dialog.exec() != QDialog.Accepted:
             return
         privacy = dialog.privacy()

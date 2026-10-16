@@ -15,79 +15,55 @@ Assistant Settings**, which works with a local server (Ollama, LM Studio,
 llama.cpp) or an online one (a work gateway, Anthropic, OpenAI,
 OpenRouter), in either the OpenAI or the Anthropic API format.
 
-## The privacy card
+## What Flo can see
 
-Under the connection name (top left — click it to switch) sits a card
-that always says where your words go and what the AI sees:
-**Local — nothing leaves this PC** in green, or **Online — sent to
-*host*** in amber. Switching to a different connection starts a fresh
-chat, so nothing the last server was shown goes to the new one.
+Two settings decide it, and both are saved in the flow — so a flow you
+send someone carries its rules with it.
+
+**Flo can see** (on the panel) — one choice for the whole flow:
+
+- **Nothing from my data** — only the flow's layout: which nodes, how they
+  are wired, their settings. No column names (they go as `<column>`, even
+  in what you type) and no text typed into settings.
+- **Column names** — the default. Also column names and types, and
+  settings as you typed them (a filter's values too).
+- **Column names and summaries** — also, per column: how much is empty, how
+  many different values, the lowest and highest value, and what it looks
+  like (emails, IDs…).
+
+Rows are never sent, at any level. Changing the level is an edit to the
+flow like any other — Ctrl+Z puts it back. Lowering it starts a fresh
+chat, because every request repeats the conversation so far.
+
+**Columns…** — one choice per column:
+
+- **Hidden** — Flo never learns the column exists. It is left out of
+  everything sent, and its name goes as `<column>` wherever it turns up.
+- **Name only** — the default.
+- **Name and values** — also its different values (the 100 most common),
+  so Flo can filter on a category — a test name, a region — by its exact
+  spelling instead of guessing.
+
+The level is enforced by what Flo is *able* to ask for, not by asking it
+nicely: at Nothing it is not given the tool that reads columns at all.
+
+Whatever the settings, passwords never go, a file path goes as its file
+name only, and quoted values in an error message go as `'<value>'`.
+
+## Where it goes
+
+The card at the top says where your words go: **Local — nothing leaves
+this PC** in green, or **Online — sent to *host*** in amber. Click the
+connection name to switch; switching starts a fresh chat, so nothing the
+last server was shown goes to the new one.
 
 The first time you send to an online server, Flo asks first and lists
-exactly what that server will see and what it never will. Tick *Don't ask
-again for this connection* to stop it asking; it asks again if you later
-let it see more.
+exactly what it will and will never see. Tick *Don't ask again for this
+connection* to stop it asking; it asks again if the flow later lets it see
+more.
 
-The card carries the two dials:
-
-- **Sees** — how much of your data it is told about:
-  - **Structure** — the flow only: node types, wires and settings. Column
-    names are replaced with `<column>` everywhere, even in what you type.
-  - **Schema** — column names and types too. No rows.
-  - **Profile** — also, per column, how much of it is empty, how many
-    distinct values it has, its numeric or date range, and what it looks
-    like (emails, IDs, a few categories). Never the rows themselves.
-- **Can** — **Advise** lets it look and explain but not change anything;
-  **Act** lets it add, wire, set, rename and delete nodes.
-- **Privacy…** — this flow's own limit, a rule per column, and hiding
-  text typed into settings (below).
-
-*Sees* can never go above the lowest of two limits: the connection's and
-the flow's own. An online connection starts at Schema. To let it see more,
-pick a higher level in **Sees** — it is marked *(ask to allow…)* — and
-flograph asks you first; **Allow for This Connection** raises that
-connection's limit and saves it (AI Assistant Settings can lower it
-again). A level above the flow's own limit can only be unlocked in
-Privacy…. Lowering it starts a fresh chat, because every
-request repeats the conversation so far, and that holds what the higher
-level let through.
-
-The limit is enforced by what the AI is *able* to ask for, not by asking it
-nicely: at Structure it is not given the tool that reads columns at all.
-
-## Privacy for this flow
-
-**Privacy…** sets the most this flow lets the AI see, whatever the
-connection allows.
-
-**Hide text typed into settings.** Node settings go to the AI as written,
-so a filter like `customer == "Jane Smith"` sends Jane's name — at every
-level, even Structure. Tick this and typed text goes as
-`<text, 22 characters>` instead (a setting that is just a column name
-still follows the column rules). The AI can still set such settings; it
-just can't read what is in them.
-
-It also lists every column the flow has in hand (run the flow first,
-so its tables exist) and lets you set, for each one:
-
-- **Sensitive** — send its name and type only: no ranges, counts or
-  guesses at what it holds.
-- **Shown to the AI as** — an alias. The real name is replaced everywhere
-  it is sent, and turned back into the real one in what the AI sends back,
-  so it can set a chart's X axis to your `patient_name` column while only
-  ever knowing it as `Customer`.
-- **Meaning** — a note sent with the alias, standing in for what the real
-  name would have told it.
-- **Share values** — let it see this column's distinct values (the 100
-  most common). Off by default, and the only real values it is shown at
-  Schema or Profile. Tick it for a category you want it to filter on — a
-  test name, a region — so it uses the exact spelling instead of guessing.
-  Never for a sensitive column, never at Structure; the receipt says when
-  values went.
-
-These, and the flow's limit, are saved in the flow. Whoever you send it to
-gets the same limit: their connection can lower it but not raise it. It is
-a setting rather than a lock, so anyone who edits the flow can change it.
+**Can** — **Advise** lets it look and explain but not change anything;
+**Act** lets it add, wire, set, rename and delete nodes, and run them.
 
 ## Ask Flo about a node or a frame
 
@@ -112,7 +88,7 @@ Flo**:
   before it may answer, once per reply.
 - Under **Act** it can run nodes on this PC to check its work or to learn
   the columns of something that has not run. What it is told about the
-  result follows **Sees** — never rows. Running a node does what the node
+  result follows **Flo can see** — never rows. Running a node does what the node
   does: a writer writes its file.
 - It is told not to delete, replace or rewire your nodes unless you ask for
   exactly that; asked to "improve" a flow, it suggests first.
@@ -148,21 +124,20 @@ and nothing the AI asked for in that unfinished answer is done.
 
 Every reply ends with a line saying what it sent and where — for example
 *Sent to ai.example.com: your message, the flow (3 nodes), 6 column
-names, no rows.* **details** lists the column names, which ones went under
-an alias, which had their ranges sent, and whether typed setting text was
-included. The receipt is read back from the requests that actually went,
+names, no rows.* **details** lists the column names, which had their
+values or ranges sent, and whether typed setting text was included. The receipt is read back from the requests that actually went,
 not worked out from the dials, so it reports what left rather than what
 should have.
 
-At **Profile**, the smallest and largest value of number and date columns
-are real values from your data; the receipt names those columns. Mark a
-column *Sensitive* to keep them back.
+At **Column names and summaries**, the lowest and highest value of number
+and date columns are real values from your data; the receipt names those
+columns. Set a column to **Hidden** to keep it out altogether.
 
 ## What was sent
 
 Under every reply, **What was sent** shows the requests behind it, in full:
-the instructions, your message as the AI got it (with any hidden or aliased
-names), and every tool result. From the **⋯** menu:
+the instructions, your message as the AI got it (with any hidden names),
+and every tool result. From the **⋯** menu:
 
 - **Confirm Every Send** shows each request before it goes, with **Send**
   and **Don't Send**.
@@ -173,5 +148,5 @@ names), and every tool result. From the **⋯** menu:
 ## Not yet
 
 It does not see real rows or run nodes yet, and it cannot write new node
-code — those come later, behind the same dials. Chats are not saved in the
+code — those come later, behind the same setting. Chats are not saved in the
 flow: a flow you send someone never carries your conversation.

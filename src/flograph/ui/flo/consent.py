@@ -1,7 +1,7 @@
 """Before the first send to an online server: what it will and won't get.
 
-Asked once per connection and level — again if *Sees* is raised above
-what was agreed — unless the user ticks "don't ask again". A local server
+Asked once per connection and level — again if "Flo can see" is raised
+above what was agreed — unless the user ticks "don't ask again". A local server
 never asks: nothing leaves the PC. The lists are built from the same level
 and privacy rules the disclosure module enforces, so they describe what
 will happen rather than a policy.
@@ -17,31 +17,23 @@ from ...core import ai_disclosure as disc
 
 
 def will_see(level: int, privacy: disc.Privacy) -> list[str]:
-    hidden = sum(1 for rule in privacy.columns.values() if rule.sensitive)
-    aliased = sum(1 for rule in privacy.columns.values() if rule.alias)
     out = ["What you type in this chat",
-           "The flow: which nodes there are, their names, how they are wired, "
-           "and their settings" + (" — text you typed into settings is hidden"
-                                   if privacy.hide_text else
-                                   " — including text you typed into them, "
-                                   "such as a filter's values")]
+           "The flow's layout: which nodes, how they are wired, and their "
+           "settings" + (" — but no text typed into them"
+                         if level < disc.SCHEMA else
+                         ", as typed (a filter's values too)")]
     if level >= disc.SCHEMA:
-        extra = []
-        if aliased:
-            extra.append(f"{aliased} under an alias")
-        if hidden:
-            extra.append(f"{hidden} marked sensitive")
-        out.append("Column names and types" + (f" ({', '.join(extra)})"
-                                               if extra else ""))
-    shared = sorted(name for name, rule in privacy.columns.items()
-                    if rule.share_values and not rule.sensitive)
-    if level >= disc.SCHEMA and shared:
-        out.append("The distinct values of the columns you chose to share: "
-                   + ", ".join(shared))
+        hidden = privacy.names(disc.HIDDEN)
+        out.append("Column names and types" + (
+            f" — except {len(hidden)} hidden column"
+            f"{'s' if len(hidden) != 1 else ''}" if hidden else ""))
+        shared = privacy.names(disc.VALUES)
+        if shared:
+            out.append("The values of the columns you chose to share: "
+                       + ", ".join(shared))
     if level >= disc.PROFILE:
-        out.append("Per column: how much is empty and how many distinct values "
-                   "— and, for numbers and dates, the smallest and largest "
-                   "value" + (" (not for sensitive columns)" if hidden else ""))
+        out.append("Per column: how much is empty, how many different values, "
+                   "and the lowest and highest value")
     return out
 
 

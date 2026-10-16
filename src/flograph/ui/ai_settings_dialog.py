@@ -59,10 +59,10 @@ One caveat: if a literal value (e.g. a file path or key) is hardcoded \
 directly in the node's script instead of set via the Properties panel, it \
 will be included — it's part of the source code sent to the server.
 
-"Most the assistant may see" is for the Flo Assistant: it caps how much of \
-your data that assistant may be shown over this connection — from the flow \
-alone up to real rows. A server on this PC defaults to anything; an online \
-one defaults to column names and types, and has to be raised on purpose.
+What the Flo Assistant may see of your data is set in each flow, from its \
+panel ("Flo can see" and Columns…), not here. "Server is on" decides the \
+badge — this PC or online — and the first send to an online server asks you \
+first.
 
 API keys are kept in your system keychain (Windows Credential Manager, the \
 macOS Keychain, or the Secret Service on Linux), never in a settings file."""
@@ -263,14 +263,6 @@ class AiSettingsDialog(QDialog):
         where_row.addWidget(self._location)
         where_row.addWidget(self._where, 1)
 
-        self._ceiling = QComboBox()
-        self._ceiling.setToolTip(
-            "The most the Flo Assistant may be shown of your data over this "
-            "connection. A chat can always ask for less, never more.")
-        ceiling_note = QLabel(
-            "For the Flo Assistant. Ask AI only ever sends the node's code.")
-        ceiling_note.setStyleSheet("color: palette(mid);")
-
         self._test_btn = QPushButton("Send Test Message")
         self._test_btn.setToolTip(
             "Send one short message to the chat endpoint — the request "
@@ -292,8 +284,6 @@ class AiSettingsDialog(QDialog):
         form.addRow("Tool calling", self._tool_mode)
         form.addRow("Server is on", where_row)
         form.addRow("", self._where_warning)
-        form.addRow("Most the assistant\nmay see", self._ceiling)
-        form.addRow("", ceiling_note)
         form.addRow("", self._test_btn)
 
         buttons = QDialogButtonBox(
@@ -410,8 +400,6 @@ class AiSettingsDialog(QDialog):
             max(self._location.findData(profile.location), 0))
         self._loading = False
         self._refresh_where()
-        self._ceiling.setCurrentIndex(
-            0 if profile.ceiling is None else profile.ceiling + 1)
 
     def _commit_form(self) -> None:
         """The form's values into the profile being shown."""
@@ -426,7 +414,6 @@ class AiSettingsDialog(QDialog):
         profile.extra_json = self._extra.toPlainText().strip()
         profile.tool_mode = self._tool_mode.currentData()
         profile.location = self._location.currentData()
-        profile.ceiling = self._ceiling.currentData()
         self._keys[profile.id] = self._api_key.text().strip()
 
     def _form_profile(self) -> Profile:
@@ -454,19 +441,6 @@ class AiSettingsDialog(QDialog):
         else:
             self._where_warning.hide()
 
-        # The "Default" entry names what the default currently is, which
-        # follows where the server is.
-        chosen = self._ceiling.currentData() if self._ceiling.count() else None
-        had_items = self._ceiling.count() > 0
-        self._ceiling.blockSignals(True)
-        self._ceiling.clear()
-        self._ceiling.addItem(
-            f"Default — {profiles.level_label(profile.default_ceiling())}", None)
-        for index, (_key, label) in enumerate(profiles.LEVELS):
-            self._ceiling.addItem(label, index)
-        self._ceiling.setCurrentIndex(
-            0 if (chosen is None or not had_items) else chosen + 1)
-        self._ceiling.blockSignals(False)
 
     # -- buttons -------------------------------------------------------------------
 

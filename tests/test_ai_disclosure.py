@@ -67,32 +67,31 @@ class TestLevels:
 
 
 class TestColumnRules:
-    def test_sensitive_keeps_name_and_type_but_no_values(self, table):
-        privacy = Privacy(columns={"salary": ColumnRule(sensitive=True)})
-        cols = {c["name"]: c for c in
-                Disclosure(d.PROFILE, privacy).describe(table)["columns"]}
-        assert cols["salary"]["type"] == "number" and cols["salary"]["sensitive"]
-        assert "min" not in cols["salary"] and "max" not in cols["salary"]
-        assert "51234" not in _dump(cols["salary"])
+    def _cols(self, table, level, **modes):
+        privacy = Privacy(columns={k: ColumnRule(v) for k, v in modes.items()})
+        out = Disclosure(level, privacy).describe(table)
+        return out, {c["name"]: c for c in out.get("columns", [])}
 
-    def test_alias_hides_the_name_everywhere(self, table):
-        privacy = Privacy(columns={
-            "customer": ColumnRule(alias="col_1", hint="person name")})
-        disclosure = Disclosure(d.PROFILE, privacy)
-        out = disclosure.describe(table)
-        assert out["columns"][0]["name"] == "col_1"
-        assert out["columns"][0]["hint"] == "person name"
-        assert "customer" not in _dump(out)
-        assert disclosure.scrub("Group by customer, sum salary") == \
-            "Group by col_1, sum salary"
+    def test_hidden_is_left_out_entirely(self, table):
+        out, cols = self._cols(table, d.PROFILE, salary=d.HIDDEN)
+        assert "salary" not in cols and "51234" not in _dump(out)
+        assert out["columns_count"] == len(table.columns) - 1
+        assert "salary" not in _dump(out)
 
-    def test_aliases_come_back_as_real_names(self):
-        privacy = Privacy(columns={"customer": ColumnRule(alias="col_1")})
-        disclosure = Disclosure(d.SCHEMA, privacy)
-        assert disclosure.unalias({"x": "col_1", "cols": ["col_1", "col_10"],
-                                   "expr": "col_1 != ''"}) == {
-            "x": "customer", "cols": ["customer", "col_10"],
-            "expr": "customer != ''"}
+    def test_a_hidden_name_is_scrubbed_from_every_string(self, table):
+        disclosure = Disclosure(d.SCHEMA, Privacy(columns={
+            "salary": ColumnRule(d.HIDDEN)}), known_columns=table.columns)
+        assert disclosure.scrub("Bar chart of salary by region") == \
+            "Bar chart of <column> by region"
+
+    def test_name_only_is_the_default(self, table):
+        _, cols = self._cols(table, d.SCHEMA)
+        assert "values" not in cols["region"]
+
+    def test_values_are_shared_only_when_asked(self, table):
+        _, cols = self._cols(table, d.SCHEMA, region=d.VALUES)
+        assert cols["region"]["values"]
+        assert "values" not in cols["customer"]
 
     def test_structure_hides_every_known_name(self, table):
         disclosure = Disclosure(d.STRUCTURE)
@@ -114,20 +113,40 @@ class TestParams:
     def test_paths_go_out_as_the_file_name(self, path):
         assert Disclosure(d.PROFILE).param_value(path) == "salaries.xlsx"
 
-    def test_column_params_are_scrubbed(self):
+    def test_at_nothing_names_and_typed_text_are_hidden(self):
         disclosure = Disclosure(d.STRUCTURE, known_columns=["salary"])
-        assert disclosure.param_value(["salary", "x"]) == ["<column>", "x"]
+        assert disclosure.param_value(["salary", "Jane"]) == [
+            "<column>", "<text, 4 characters>"]
+        assert disclosure.param_value("x") == "<text, 1 character>"
+
+    def test_from_column_names_up_typed_text_goes_as_typed(self):
+        disclosure = Disclosure(d.SCHEMA, known_columns=["region"])
+        assert disclosure.param_value('region == "North"', "string") == \
+            'region == "North"'
+
+    def test_a_hidden_column_in_a_setting_is_scrubbed(self):
+        disclosure = Disclosure(d.SCHEMA, Privacy(columns={
+            "salary": ColumnRule(d.HIDDEN)}), known_columns=["salary"])
+        assert disclosure.param_value("salary > 10", "string") == "<column> > 10"
 
 
 class TestPrivacy:
     def test_round_trip_and_defaults_write_nothing(self):
         assert Privacy().to_dict() == {} and Privacy().is_default()
-        privacy = Privacy(1, {"a": ColumnRule(sensitive=True),
-                              "b": ColumnRule(), "c": ColumnRule(alias="col_3")})
+        assert Privacy().effective == d.SCHEMA
+        privacy = Privacy(2, {"a": ColumnRule(d.HIDDEN), "b": ColumnRule(),
+                              "c": ColumnRule(d.VALUES)})
         data = privacy.to_dict()
-        assert data == {"level": 1, "columns": {"a": {"sensitive": True},
-                                                "c": {"alias": "col_3"}}}
+        assert data == {"level": 2, "columns": {"a": "hidden", "c": "values"}}
         assert Privacy.from_dict(data).to_dict() == data
+
+    def test_older_settings_convert_on_the_safe_side(self):
+        old = Privacy.from_dict({"level": 2, "hide_text": True, "columns": {
+            "a": {"sensitive": True}, "b": {"alias": "col_2", "hint": "x"},
+            "c": {"share_values": True}, "d": {}}})
+        assert old.level == d.STRUCTURE            # only Nothing hides typed text
+        assert old.mode("a") == old.mode("b") == d.HIDDEN
+        assert old.mode("c") == d.VALUES and old.mode("d") == d.NAME
 
     def test_junk_is_tolerated(self):
         assert Privacy.from_dict({"level": "high", "columns": {"a": 3}}).to_dict() == {}
@@ -137,7 +156,7 @@ class TestPrivacy:
         from flograph.core.serialization import graph_from_dict, graph_to_dict
         from flograph.core.graph import Graph
         graph = Graph()
-        graph.ai_privacy = Privacy(1, {"a": ColumnRule(alias="col_1")}).to_dict()
+        graph.ai_privacy = Privacy(1, {"a": ColumnRule(d.HIDDEN)}).to_dict()
         data = graph_to_dict(graph)
         assert graph_from_dict(data, registry).ai_privacy == graph.ai_privacy
         assert "ai_privacy" not in json.dumps(graph_to_dict(Graph()))
@@ -152,24 +171,6 @@ def test_other_kinds_of_value():
     out = disclosure.describe(series)
     assert out["kind"] == "column" and out["name"] == "score" and out["max"] == 2.0
     assert disclosure.describe({"k": 1})["keys"] == ["k"]
-
-
-class TestHideText:
-    def test_typed_text_is_hidden_but_column_names_are_not(self):
-        disclosure = Disclosure(d.SCHEMA, Privacy(hide_text=True),
-                                known_columns=["region", "sales"])
-        assert disclosure.param_value('region == "Jane Smith"', "string") \
-            == "<text, 22 characters>"
-        assert disclosure.param_value("region", "string") == "region"
-        assert disclosure.param_value("region, sales", "text") == "region, sales"
-        assert disclosure.param_value("bar", "choice") == "bar"
-        assert disclosure.param_value("", "string") == ""
-
-    def test_off_by_default_and_saved_in_the_flow(self):
-        disclosure = Disclosure(d.SCHEMA, Privacy())
-        assert disclosure.param_value('x == "Jane"', "string") == 'x == "Jane"'
-        assert Privacy.from_dict({"hide_text": True}).to_dict() == {"hide_text": True}
-        assert not Privacy.from_dict({}).hide_text
 
 
 class TestErrorText:
@@ -192,40 +193,25 @@ class TestShareValues:
     TABLE = pd.DataFrame({"Test_Name": ["Hematocrit (HCT)", "TSH", "TSH"],
                           "Patient": ["a", "b", "c"]})
 
-    def _cols(self, level, rule):
-        disclosure = Disclosure(level, Privacy(columns={"Test_Name": rule}))
+    def _cols(self, level, mode):
+        disclosure = Disclosure(level, Privacy(columns={"Test_Name": ColumnRule(mode)}))
         return {c["name"]: c for c in disclosure.describe(self.TABLE)["columns"]}
 
-    def test_only_a_shared_column_shows_its_values(self):
-        cols = self._cols(d.SCHEMA, ColumnRule(share_values=True))
+    def test_most_common_first(self):
+        cols = self._cols(d.SCHEMA, d.VALUES)
         assert cols["Test_Name"]["values"] == ["TSH", "Hematocrit (HCT)"]
         assert "values" not in cols["Patient"]
 
-    def test_off_by_default(self):
-        cols = self._cols(d.SCHEMA, ColumnRule())
-        assert "values" not in cols["Test_Name"]
-
-    def test_sensitive_wins(self):
-        cols = self._cols(d.PROFILE, ColumnRule(sensitive=True, share_values=True))
-        assert "values" not in cols["Test_Name"]
-
-    def test_never_at_structure(self):
+    def test_never_at_nothing(self):
         disclosure = Disclosure(d.STRUCTURE, Privacy(columns={
-            "Test_Name": ColumnRule(share_values=True)}))
+            "Test_Name": ColumnRule(d.VALUES)}))
         assert "Hematocrit" not in json.dumps(disclosure.describe(self.TABLE))
 
     def test_capped(self):
         table = pd.DataFrame({"c": [f"v{i}" for i in range(150)]})
-        disclosure = Disclosure(d.SCHEMA, Privacy(columns={
-            "c": ColumnRule(share_values=True)}))
+        disclosure = Disclosure(d.SCHEMA, Privacy(columns={"c": ColumnRule(d.VALUES)}))
         col = disclosure.describe(table)["columns"][0]
         assert len(col["values"]) == 100 and col["values_not_shown"] == 50
-
-    def test_saved_in_the_flow(self):
-        data = Privacy(columns={"c": ColumnRule(share_values=True)}).to_dict()
-        assert data == {"columns": {"c": {"share_values": True}}}
-        assert Privacy.from_dict(data).columns["c"].share_values
-
 
 
 class TestCharts:

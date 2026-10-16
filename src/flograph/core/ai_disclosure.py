@@ -7,26 +7,29 @@ asking the model to behave.** A tool that would need more than the level
 allows is not offered (`flo.tools` asks `allows()`), and every string that
 does go out passes through `scrub()`.
 
-The levels (`llm.profiles.LEVELS`): 0 structure, 1 schema, 2 profile —
-3–5 (look-alike rows, real samples, running nodes) are not built yet and
-are clamped to 2 here, so asking for more cannot accidentally get more.
+Two settings, both saved in the flow (`Privacy`), so a flow handed to
+someone carries its rules:
 
-The level in force is the lowest of three: the connection's ceiling (where
-the data would go), the flow's own setting (saved in the file, so a flow
-handed to someone keeps its "schema only"), and whatever the chat asks for.
+- **The level** — what Flo can see of the data:
+  - *Nothing from my data* (STRUCTURE): the flow's layout only. No column
+    names — any known name in a label, a setting or a message goes as
+    `<column>` — and no text typed into settings.
+  - *Column names* (SCHEMA, the default): names and types, and settings as
+    typed.
+  - *Column names and summaries* (PROFILE): also, per column, how much is
+    empty, how many distinct values, the lowest and highest value, and what
+    it looks like.
+  Rows are never sent, at any level. (Levels 3-5 — made-up rows, real
+  samples, running and reading — are not built and clamp to PROFILE.)
+- **One rule per column**, on top of the level:
+  - *Hidden* — the AI never learns the column exists: it is left out of
+    every table description and its name goes as `<column>` everywhere.
+  - *Name only* — the default.
+  - *Name and values* — also its distinct values (the 100 most common), so
+    it can filter on a category by its exact spelling. Not at Nothing.
 
-Per column, on top of the level:
-
-- **sensitive** — its values never go out at any level: no min/max, no
-  inferred kind. The name and type still do, so the model can wire it up.
-- **alias** — its *name* never goes out either. The model sees `col_7`
-  (and the hint, if one is written) and the tool arguments it sends back
-  are translated to the real name before anything runs.
-
-At level 0 no column name goes out at all: any known name in a label, a
-param or a description is replaced by `<column>`. Password params never go
-out, and a file path goes out as its file name only — a folder path says a
-great deal about whose data this is.
+Whatever the level, password settings never go out, a file path goes as its
+file name only, and quoted pieces of error messages go as `<value>`.
 
 No pandas at module level (the core is imported headless and must stay
 light); values are inspected by duck typing on what they offer.
@@ -39,8 +42,22 @@ from typing import Any, Iterable, Optional
 
 STRUCTURE, SCHEMA, PROFILE, LOOKALIKE, SAMPLE, ANALYSE = range(6)
 BUILT_MAX = PROFILE           # the highest level this module can serve
+DEFAULT_LEVEL = SCHEMA
 HIDDEN_COLUMN = "<column>"
 HIDDEN_SECRET = "<hidden>"
+
+# what each level is called, wherever a person reads it
+LEVEL_NAMES = {
+    STRUCTURE: "Nothing from my data",
+    SCHEMA: "Column names",
+    PROFILE: "Column names and summaries",
+}
+
+# the rule per column
+HIDDEN, NAME, VALUES = "hidden", "name", "values"
+MODES = (HIDDEN, NAME, VALUES)
+MODE_NAMES = {HIDDEN: "Hidden", NAME: "Name only", VALUES: "Name and values"}
+
 # a quoted piece of an error message: 'x' or "x", on one line
 _QUOTED = re.compile(r"""(['"])([^'"\n]{1,200})\1""")
 # setting types whose value is whatever the user typed
@@ -55,75 +72,86 @@ _PATHISH = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/]|\.{1,2}[\\/])")
 
 @dataclass
 class ColumnRule:
-    sensitive: bool = False
-    alias: str = ""
-    hint: str = ""
-    # The user chose to let the AI see this column's distinct values — the
-    # only real values it is ever shown at levels 1-2. For filtering on a
-    # category ("which spelling is haematocrit?"), which it otherwise has to
-    # guess. Never for a sensitive column, never at Structure.
-    share_values: bool = False
+    mode: str = NAME
 
     def is_default(self) -> bool:
-        return not (self.sensitive or self.alias or self.hint
-                    or self.share_values)
+        return self.mode == NAME
+
+    @property
+    def hidden(self) -> bool:
+        return self.mode == HIDDEN
+
+    @property
+    def shares_values(self) -> bool:
+        return self.mode == VALUES
 
 
 @dataclass
 class Privacy:
     """A flow's own privacy settings — saved in the .flograph."""
-    # The most this flow allows, or None for "whatever the connection
-    # allows". Lowering only: the level in force is never above the ceiling.
-    level: Optional[int] = None
+    level: Optional[int] = None                   # None: the default
     columns: dict = field(default_factory=dict)   # real name -> ColumnRule
-    # Text typed into settings (a filter's `name == "Jane"`, a date, a
-    # query) is data too. On, it goes as `<text, N characters>` unless it
-    # is just a column name, which the column rules already cover.
-    hide_text: bool = False
+
+    @property
+    def effective(self) -> int:
+        level = DEFAULT_LEVEL if self.level is None else int(self.level)
+        return max(STRUCTURE, min(level, BUILT_MAX))
+
+    def mode(self, column: str) -> str:
+        rule = self.columns.get(column)
+        return rule.mode if rule else NAME
+
+    def names(self, mode: str) -> list[str]:
+        return sorted(n for n, r in self.columns.items() if r.mode == mode)
 
     def is_default(self) -> bool:
-        return self.level is None and not self.hide_text and all(
+        return self.level is None and all(
             rule.is_default() for rule in self.columns.values())
 
     def to_dict(self) -> dict:
         out: dict = {}
         if self.level is not None:
             out["level"] = self.level
-        if self.hide_text:
-            out["hide_text"] = True
-        cols = {name: {k: v for k, v in vars(rule).items() if v}
-                for name, rule in self.columns.items() if not rule.is_default()}
+        cols = {name: rule.mode for name, rule in self.columns.items()
+                if not rule.is_default()}
         if cols:
             out["columns"] = cols
         return out
 
     @classmethod
     def from_dict(cls, data: Any) -> "Privacy":
+        """Read a flow's settings — and the older, finer-grained ones (a
+        sensitive or aliased column, hiding typed text), converted to the
+        nearest rule that is at least as private."""
         if not isinstance(data, dict):
             return cls()
         level = data.get("level")
         try:
-            level = None if level is None else max(0, min(int(level), ANALYSE))
+            level = None if level is None else max(0, min(int(level), BUILT_MAX))
         except (TypeError, ValueError):
             level = None
+        if data.get("hide_text"):
+            # typed text is only hidden at Nothing now
+            level = STRUCTURE
         columns = {}
         for name, raw in (data.get("columns") or {}).items():
-            if isinstance(raw, dict):
-                columns[str(name)] = ColumnRule(
-                    sensitive=bool(raw.get("sensitive")),
-                    alias=str(raw.get("alias") or ""),
-                    hint=str(raw.get("hint") or ""),
-                    share_values=bool(raw.get("share_values")))
-        return cls(level, columns, bool(data.get("hide_text")))
+            mode = NAME
+            if isinstance(raw, str) and raw in MODES:
+                mode = raw
+            elif isinstance(raw, dict):
+                if raw.get("sensitive") or raw.get("alias"):
+                    mode = HIDDEN
+                elif raw.get("share_values"):
+                    mode = VALUES
+            columns[str(name)] = ColumnRule(mode)
+        return cls(level, columns)
 
 
-def effective_level(ceiling: int, flow_level: Optional[int] = None,
-                    chat_level: Optional[int] = None) -> int:
-    """The lowest of the three, clamped to what is built."""
-    level = int(ceiling)
-    for lower in (flow_level, chat_level):
-        if lower is not None:
-            level = min(level, int(lower))
+def effective_level(*limits: Optional[int]) -> int:
+    """The lowest of the limits given (None ignored), clamped to what is
+    built; the default level when none is given."""
+    given = [int(x) for x in limits if x is not None]
+    level = min(given) if given else DEFAULT_LEVEL
     return max(STRUCTURE, min(level, BUILT_MAX))
 
 
@@ -243,9 +271,8 @@ def _shared_values(column) -> dict:
 
 
 class Disclosure:
-    """One assistant turn's view of the data: the level, the per-column
-    rules, and the translation between real column names and what the
-    model is shown."""
+    """One assistant turn's view of the data: the level and the rule per
+    column, applied to everything that goes out."""
 
     def __init__(self, level: int, privacy: Optional[Privacy] = None,
                  known_columns: Iterable[str] = ()):
@@ -253,7 +280,7 @@ class Disclosure:
         self.privacy = privacy or Privacy()
         self._known: set[str] = set()
         self._pattern: Optional[re.Pattern] = None
-        self._alias_pattern: Optional[re.Pattern] = None
+        self._pattern_key: Optional[tuple] = None
         self.learn(self.privacy.columns.keys())
         self.learn(known_columns)
 
@@ -265,6 +292,10 @@ class Disclosure:
     def rule(self, column: str) -> ColumnRule:
         return self.privacy.columns.get(column) or ColumnRule()
 
+    def hides(self, column: str) -> bool:
+        """Is this column's name kept from the model?"""
+        return self.level < SCHEMA or self.rule(column).hidden
+
     def learn(self, names: Iterable[str]) -> None:
         """Remember column names so scrub() can catch them anywhere."""
         before = len(self._known)
@@ -273,13 +304,7 @@ class Disclosure:
             self._pattern = None
 
     def shown_name(self, column: str) -> str:
-        if self.level < SCHEMA:
-            return HIDDEN_COLUMN
-        return self.rule(column).alias or column
-
-    def _aliases(self) -> dict[str, str]:
-        return {rule.alias: name for name, rule in self.privacy.columns.items()
-                if rule.alias}
+        return HIDDEN_COLUMN if self.hides(column) else column
 
     @staticmethod
     def _word_pattern(words: Iterable[str]) -> Optional[re.Pattern]:
@@ -290,40 +315,25 @@ class Disclosure:
                           + r")(?![\w])")
 
     def scrub(self, text: str) -> str:
-        """An outgoing string with column names hidden as the level says."""
+        """An outgoing string with every name the model may not see — all of
+        them at Nothing, the hidden columns otherwise — replaced."""
         if not text:
             return text
-        if self.level < SCHEMA:
-            names = self._known
-        else:
-            names = {n for n in self._known if self.rule(n).alias}
+        names = {n for n in self._known if self.hides(n)}
         if not names:
             return text
-        if self._pattern is None or getattr(self, "_pattern_level", None) != self.level:
+        key = (self.level, frozenset(names))
+        if self._pattern is None or self._pattern_key != key:
             self._pattern = self._word_pattern(names)
-            self._pattern_level = self.level
+            self._pattern_key = key
         if self._pattern is None:
             return text
-        return self._pattern.sub(lambda m: self.shown_name(m.group(1)), text)
+        return self._pattern.sub(HIDDEN_COLUMN, text)
 
     def unalias(self, value: Any) -> Any:
-        """Tool arguments from the model, with aliases back to real names."""
-        aliases = self._aliases()
-        if not aliases:
-            return value
-        if self._alias_pattern is None:
-            self._alias_pattern = self._word_pattern(aliases)
-        pattern = self._alias_pattern
-
-        def walk(item):
-            if isinstance(item, str):
-                return pattern.sub(lambda m: aliases[m.group(1)], item)
-            if isinstance(item, list):
-                return [walk(v) for v in item]
-            if isinstance(item, dict):
-                return {walk(k): walk(v) for k, v in item.items()}
-            return item
-        return walk(value)
+        """Tool arguments from the model, as given — kept for callers from
+        when columns could be renamed for the model."""
+        return value
 
     # -- params ---------------------------------------------------------------
 
@@ -331,10 +341,11 @@ class Disclosure:
         """A node param as it may be shown."""
         if ptype == "password":
             return HIDDEN_SECRET if value else ""
-        if isinstance(value, str) and self.privacy.hide_text \
+        if isinstance(value, str) and self.level < SCHEMA \
                 and ptype in _FREE_TEXT and value.strip() \
                 and not self._only_columns(value):
-            return f"<text, {len(value)} characters>"
+            # at Nothing, typed text is data too: a filter's "Jane Smith"
+            return f"<text, {len(value)} character{'' if len(value) == 1 else 's'}>"
         if isinstance(value, str):
             if ptype.startswith(("file", "folder", "path", "save", "open")) \
                     or (_PATHISH.match(value) and len(value) < 400):
@@ -349,12 +360,10 @@ class Disclosure:
     def error_text(self, message: str) -> str:
         """A node's error, safe to send. Errors quote the data they choked
         on ("could not convert string to float: 'Jane Smith'"), so every
-        quoted piece that is not a column name goes as '<value>' — at
-        these levels no cell value is ever sent, errors included."""
+        quoted piece that is not a column name goes as '<value>'."""
         def quoted(match: "re.Match") -> str:
-            inner = match.group(2)
-            if inner.strip() in self._known or inner.strip() in self._aliases():
-                return match.group(0)
+            if match.group(2).strip() in self._known:
+                return match.group(0)        # scrub() deals with the name
             return f"{match.group(1)}<value>{match.group(1)}"
 
         return self.scrub(_QUOTED.sub(quoted, message or ""))
@@ -368,20 +377,22 @@ class Disclosure:
 
     def describe(self, value: Any) -> dict:
         """A cached output as the level allows: its kind; then its shape and
-        columns; then a profile of each column. Never a row."""
+        the columns it may see; then a summary of each. Never a row."""
         if _is_table(value):
             self.learn(column_names(value))
             out: dict = {"kind": "table"}
             if self.level >= SCHEMA:
-                rows, cols = value.shape
-                out["rows"], out["columns_count"] = int(rows), int(cols)
+                shown = [name for name in value.columns
+                         if not self.rule(str(name)).hidden]
+                out["rows"] = int(value.shape[0])
+                out["columns_count"] = len(shown)
                 out["columns"] = [self._column(str(name), value[name])
-                                  for name in value.columns]
+                                  for name in shown]
             return out
         if _is_series(value):
             self.learn(column_names(value))
             out = {"kind": "column"}
-            if self.level >= SCHEMA:
+            if self.level >= SCHEMA and not self.rule(str(value.name)).hidden:
                 out["rows"] = int(len(value))
                 out.update(self._column(str(value.name), value))
             return out
@@ -423,13 +434,9 @@ class Disclosure:
         column = series
         if _is_table(column):            # duplicate column names give a frame
             column = column.iloc[:, 0]
-        out: dict = {"name": self.shown_name(name),
+        out: dict = {"name": name,
                      "type": _kind_of(getattr(column, "dtype", ""))}
-        if rule.alias and rule.hint:
-            out["hint"] = rule.hint
-        if rule.sensitive:
-            out["sensitive"] = True
-        elif rule.share_values and self.level >= SCHEMA:
+        if rule.shares_values:
             out.update(_shared_values(column))
         if self.level < PROFILE:
             return out
@@ -439,8 +446,6 @@ class Disclosure:
             out["empty_percent"] = round(100.0 * nulls / total, 1) if total else 0.0
             out["distinct"] = int(column.nunique(dropna=True))
         except Exception:
-            return out
-        if rule.sensitive:
             return out
         kind = out["type"]
         try:

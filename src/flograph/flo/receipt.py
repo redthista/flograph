@@ -89,7 +89,7 @@ class Receipt:
                        f"{_s(self.settings_nodes)}, "
                        + ("with text you typed hidden"
                           if self.text_hidden else
-                          "including text you typed (hide it in Privacy)"))
+                          "including text you typed into them"))
         out.append("Never sent: rows of your data, passwords, full file paths.")
         return out
 
@@ -127,15 +127,16 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
           destination: str, local: bool) -> Receipt:
     receipt = Receipt(destination=destination, local=local,
                       requests=len(entries),
-                      text_hidden=disclosure.privacy.hide_text)
+                      text_hidden=not disclosure.allows(disc.SCHEMA))
     if not entries:
         return receipt
     last = entries[-1].get("messages") or []
     new = [m for m in last[len(before):] if m.get("role") in ("user", "tool")]
 
+    # a hidden name should never be in what went; if one is, it is counted
+    # like any other — the receipt reports what left, not what should have
     real = {name for name in disclosure._known}
-    aliases = {rule.alias: name for name, rule in disclosure.privacy.columns.items()
-               if rule.alias}
+    aliases: dict[str, str] = {}
     found_real: set[str] = set()
     found_alias: set[str] = set()
     described: set[str] = set()

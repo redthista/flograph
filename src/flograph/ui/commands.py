@@ -337,9 +337,10 @@ class SetEnvPathCommand(QUndoCommand):
 
 
 class SetAiPrivacyCommand(QUndoCommand):
-    """Change what this flow lets the Flo Assistant see: its level cap and
-    the per-column Sensitive / Alias rules. Saved in the flow, so it is an
-    edit like any other — undoable, and it marks the file changed."""
+    """Change what this flow lets the Flo Assistant see: its level and the
+    per-column Hidden / Name only / Name and values rules. Saved in the
+    flow, so it is an edit like any other — undoable, and it marks the
+    file changed."""
 
     def __init__(self, graph: Graph, privacy: dict,
                  parent: Optional[QUndoCommand] = None) -> None:
