@@ -90,6 +90,17 @@ _CHART_VARS = (
     "--fg-chart-font. Live tables are .flograph-table. Qt writes inline "
     "styles, so rules that must win need !important.")
 
+# what goes after the bars of an embed — core.report.EMBED_OPTIONS and
+# EMBED_FLAGS, said in words; the model can't use a flag it was never told of
+_EMBED_HELP = (
+    "Options go after bars: height=300 (points), width=50% or 280, "
+    "ratio=16:9, scale=2, rows=20 (a table), radius=8. Flags are bare "
+    "words: live — in the Web preview and the saved web page the real chart "
+    "(hover, zoom, legend clicks) or a table that sorts and folds, instead "
+    "of a picture; this is what 'interactive' or 'live' charts means — "
+    "search — a live table with a search box — and fit — shrink to the "
+    "space left on a printed page. E.g. ![[n3|live|height=400]].")
+
 _PAGE_WRITES = [
     ToolSpec("add_page",
              "Make a page. A dashboard lays out tiles of the given nodes in a "
@@ -97,7 +108,7 @@ _PAGE_WRITES = [
              "slicers, controls, buttons, notes…) can be tiles. A report is "
              "markdown: embed a node's output with ![[n3]] (its handle; it "
              "becomes the node's label). Give a report nodes and no markdown "
-             "and each node is embedded under the title.",
+             "and each node is embedded under the title. " + _EMBED_HELP,
              _schema({"kind": {"type": "string", "enum": ["dashboard", "report"]},
                       "title": {"type": "string"},
                       "nodes": _NODES,
@@ -112,8 +123,8 @@ _PAGE_WRITES = [
              _schema({"page": _PAGE, "nodes": _NODES}, ("page", "nodes"))),
     ToolSpec("write_report",
              "Set a report page's markdown, or add to its end with append. "
-             "Embed a node's output with ![[n3]]; options go after a bar, "
-             "e.g. ![[n3|height=300]]. Link to another page with "
+             "Embed a node's output with ![[n3]]. " + _EMBED_HELP + " "
+             "Link to another page with "
              "[words](page:p4) — its handle, never a bare (p4). A '# ' "
              "heading starts a section, which the web layout can show on "
              "its own (set_report_layout).",
@@ -983,14 +994,96 @@ class Toolbox:
         from ..ui.commands import SetParamCommand
         inst = self._node(node)
         checked = self._checked_params(inst.spec, params)
+        card_report = (inst.spec.card == "report"
+                       and isinstance(checked.get("text"), str))
+        problems: list = []
+        if card_report:
+            checked["text"], problems = self._card_report_text(
+                inst, checked["text"])
         for name, value in checked.items():
             self._push(SetParamCommand(self.graph, inst.id, name, value, merge=False))
         self.actions.append(Action(
             "set_params", f"Changed {', '.join(checked)} on {inst.label}", [inst.id]))
         out = {"node": self.handle(inst.id), "changed": sorted(checked)}
-        warnings = self.column_warnings(inst, list(checked))
+        if card_report:
+            out["embeds"] = self._card_embeds(inst, checked["text"])
+            problems += [f"{e['embed']}: {e['problem']}"
+                         for e in out["embeds"] if "problem" in e]
+        warnings = self.column_warnings(inst, list(checked)) + problems
         if warnings:
             out["warnings"] = warnings
+        return out
+
+    # -- a Report node: markdown on the canvas -----------------------------------
+    #
+    # A Report *node* finds an embed by its own input names first and by a
+    # node's label after (ui.report.render.by_wired_input); a page has no
+    # inputs, so only labels. The model writes ![[n3]] either way, and this
+    # is where it becomes what the card will look up.
+
+    def _card_report_text(self, inst, markdown: str) -> tuple[str, list]:
+        """![[n3]] becomes the input n3 is wired into on this Report, or
+        failing that n3's label — which shows it but is no wire: the card
+        is neither ordered after n3 nor re-run with it, so that is said."""
+        from ..core.report import EMBED_RE
+        wired: dict = {}
+        for conn in self.graph.in_connections(inst.id):
+            if not is_flow(conn.dst_port):
+                wired.setdefault(conn.src_node, conn.dst_port)
+        problems: list = []
+        unwired: list = []
+
+        def name(match) -> str:
+            ref = match.group(1).strip()
+            node_id = self._handles.get(ref)
+            if node_id is None or node_id not in self.graph.nodes:
+                return match.group(0)
+            if node_id in wired:
+                return f"![[{wired[node_id]}{match.group(2)}]]"
+            label = self.graph.node(node_id).label
+            if any(ch in label for ch in "[]|"):
+                problems.append(f"{ref}'s label has a [, ] or | in it, which "
+                                "an embed can't hold — rename the node")
+            elif ref not in unwired:
+                unwired.append(ref)
+            return f"![[{label}{match.group(2)}]]"
+
+        text = EMBED_RE.sub(name, markdown)
+        if unwired:
+            free = [p.name for p in inst.spec.inputs
+                    if not p.spare and not is_flow(p.name)
+                    and self.graph.input_connection(inst.id, p.name) is None]
+            problems.append(
+                f"{', '.join(unwired)} not wired into this Report, so shown by "
+                "label: it shows, but the Report won't wait for it or re-run "
+                "with it" + (f" — connect it to a free input ({', '.join(free)})"
+                             " for that" if free else ""))
+        return text, problems
+
+    def _card_embeds(self, inst, text: str) -> list:
+        """Each ![[...]] in a Report node and what it shows, looked up the
+        way the card will."""
+        from ..core.report import find_embeds
+        inputs = {p.name for p in inst.spec.inputs if not p.spare}
+        out = []
+        for embed in find_embeds(text):
+            ref = embed.ref.strip()
+            if ref not in inputs:
+                out.extend(self._embeds(embed.raw))
+                continue
+            entry = {"embed": self.disclosure.scrub(embed.raw), "input": ref}
+            conn = self.graph.input_connection(inst.id, ref)
+            if conn is None:
+                entry["problem"] = (f"nothing is wired into input {ref} — "
+                                    "connect something to it")
+            else:
+                entry["node"] = self.handle(conn.src_node)
+                if embed.unknown:
+                    from ..core.report import EMBED_FLAGS
+                    entry["problem"] = (
+                        f"unknown option {', '.join(embed.unknown)} — "
+                        f"flags are {', '.join(EMBED_FLAGS)}")
+            out.append(entry)
         return out
 
     def _tool_rename_node(self, node, label) -> dict:
@@ -1083,6 +1176,9 @@ class Toolbox:
             found = nodes_labelled(self.graph, embed.ref)
             if len(found) == 1:
                 entry["node"] = self.handle(found[0].id)
+                problem = self._embed_tail_problem(embed, found[0])
+                if problem:
+                    entry["problem"] = problem
             elif not found:
                 entry["problem"] = "no node has this label"
             else:
@@ -1091,6 +1187,25 @@ class Toolbox:
                                     + ") — rename one so the embed is sure")
             out.append(entry)
         return out
+
+    def _embed_tail_problem(self, embed, inst) -> str:
+        """What is wrong after the bars: an option nobody reads, or a bare
+        word that is neither a flag nor one of the node's outputs — which
+        the renderer would take as a port name, so `|interactive` fails
+        quietly where `|live` was meant."""
+        from ..core.report import EMBED_FLAGS, EMBED_OPTIONS
+        said = []
+        if embed.unknown:
+            said.append(f"unknown option {', '.join(embed.unknown)}")
+        outputs = [p.name for p in inst.spec.outputs]
+        if embed.port and embed.port not in outputs:
+            said.append(f"{embed.port!r} is not an output of "
+                        f"{self.handle(inst.id)} (it has {', '.join(outputs)})")
+        if not said:
+            return ""
+        return ("; ".join(said) + " — options are " + ", ".join(
+            f"{o}=" for o in EMBED_OPTIONS) + "; flags are "
+            + ", ".join(EMBED_FLAGS))
 
     def _tool_get_page(self, page, css=False) -> dict:
         found = self._page(page)

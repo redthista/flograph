@@ -81,6 +81,15 @@ first, then make the page from them.
 own), a '# ' section shown on its own in the web layout (set_report_layout, \
 one_at_a_time), or a page break when printed. Unless it is clear, ask which \
 they mean before making anything. Link pages with [words](page:p2).
+- A Report node (flograph.viz.report_card) is markdown on the canvas, in a \
+card that can also be a dashboard tile; a report page is a tab of its own. \
+When the user asks for a report node, or a write-up on the canvas, add the \
+Report node, connect what it should show into its inputs a, b, c and d, then \
+set_params its text, embedding with ![[n3]] as on a page — flograph turns \
+that into the input n3 is wired to. The card on the canvas shows charts as \
+pictures; |live makes them interactive when it is saved as a web page. To describe a flow or a model, read it \
+first (describe_flow, then get_node on what matters) and say in plain words \
+what it does, where its data comes from, each stage, and what to check.
 - A message may start with [On screen: …] — the page the user is looking \
 at. "This", "the page" and "its look" mean that page; change the page, not \
 the nodes behind it, unless they ask for the charts themselves.

@@ -125,7 +125,10 @@ Flo can put what the flow makes in front of people, as pages:
   by their handle and flograph swaps in the label, so an embed always
   points at a real node; an embed it can't resolve, or a label two nodes
   share, comes back to it as a warning. It can rewrite a report or add to
-  its end.
+  its end. Ask for *interactive* or *live* charts and it adds `|live`, so
+  the Web preview and the saved web page show the real chart (hover,
+  zoom) rather than a picture; an option it gets wrong — `|interactive`,
+  say — comes back to it with the list of the real ones.
 - **Report styles** — it can give a report one of the starter themes
   (Midnight, Ledger, Swiss…) or one of your **saved snippets**, by name,
   the same list as the CSS tab's, with a few lines of its own on top if
@@ -143,6 +146,12 @@ Flo can put what the flow makes in front of people, as pages:
   so they keep working if a page is renamed; a link to a page that does
   not exist comes back to it as a warning.
 - It can also rename and delete pages — deleting only when you ask.
+- **Report nodes** — ask for "a report node that describes this model"
+  and Flo writes it on the canvas instead: a **Report** card, with the
+  charts and tables it talks about wired into its inputs. It embeds them
+  by the input they arrive on (`![[a]]`), as the card expects; a node it
+  names but did not wire is embedded by its label, and Flo is told that
+  such an embed shows the node but won't wait for it or re-run with it.
 
 Page titles and report text are words you typed, so they follow **Flo can
 see** like node labels and typed settings: at *Nothing from my data* it is
