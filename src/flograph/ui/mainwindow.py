@@ -681,6 +681,7 @@ class MainWindow(QMainWindow):
                                   engine=self.engine)
         self.flo_panel.navigate_requested.connect(self._navigate_to)
         self.flo_panel.settings_requested.connect(self._show_ai_settings)
+        self.flo_panel.on_screen = lambda: self.page_bar.current_page_id() or ""
         self.flo_dock = QDockWidget("Flo Assistant", host)
         self.flo_dock.setObjectName("dock_flo")
         self.flo_dock.setWidget(self.flo_panel)

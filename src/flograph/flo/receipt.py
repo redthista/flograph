@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from ..core import ai_disclosure as disc
 
-_FREE_TEXT_KEYS = {"settings", "value", "label"}
+_FREE_TEXT_KEYS = {"settings", "value", "label", "markdown", "title"}
 
 
 @dataclass
@@ -38,6 +38,7 @@ class Receipt:
     values: list = field(default_factory=list)      # shown names, values shared
     rows: int = 0                        # rows of data that went (FULL only)
     settings_nodes: int = 0              # nodes whose settings were sent
+    reports: int = 0                     # report pages whose text was sent
     text_hidden: bool = False            # typed setting text was withheld
 
     @property
@@ -92,6 +93,8 @@ class Receipt:
                        + ("with text you typed hidden"
                           if self.text_hidden else
                           "including text you typed into them"))
+        if self.reports:
+            out.append(f"Text of {self.reports} report page{_s(self.reports)}")
         if self.rows:
             out.append(f"Rows of your data: {self.rows} (you chose All my data)")
             out.append("Never sent: hidden columns, passwords, full file paths.")
@@ -161,6 +164,7 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
     found_alias: set[str] = set()
     described: set[str] = set()
     with_settings: set[str] = set()
+    reports: set[str] = set()
 
     def words(text: str) -> None:
         for name in real:
@@ -198,6 +202,9 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
                     described.add(str(node["node"]))
                 if node.get("settings"):
                     with_settings.add(str(node["node"]))
+        if isinstance(data, dict) and isinstance(data.get("markdown"), str) \
+                and not data["markdown"].startswith("<text,"):
+            reports.add(str(data.get("page")))
         receipt.rows += _count_rows(data)
         for column in _columns_in(data):
             shown = str(column.get("name"))
@@ -210,6 +217,7 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
 
     receipt.nodes = len(described)
     receipt.settings_nodes = len(with_settings)
+    receipt.reports = len(reports)
     receipt.aliased = sorted((aliases[a], a) for a in found_alias)
     receipt.columns = sorted(found_real - {real_name for real_name, _ in receipt.aliased})
     receipt.profiled = sorted(set(receipt.profiled))

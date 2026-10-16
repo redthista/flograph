@@ -69,7 +69,8 @@ connection* to stop it asking; it asks again if the flow later lets it see
 more.
 
 **Can** — **Advise** lets it look and explain but not change anything;
-**Act** lets it add, wire, set, rename and delete nodes, and run them.
+**Act** lets it add, wire, set, rename and delete nodes, run them, and
+make dashboard and report pages.
 
 ## Ask Flo about a node or a frame
 
@@ -94,8 +95,8 @@ Flo**:
   before it may answer, once per reply.
 - Under **Act** it can run nodes on this PC to check its work or to learn
   the columns of something that has not run. What it is told about the
-  result follows **Flo can see** — never rows. Running a node does what the node
-  does: a writer writes its file.
+  result follows **Flo can see** — rows only at *All my data*. Running a
+  node does what the node does: a writer writes its file.
 - It is told not to delete, replace or rewire your nodes unless you ask for
   exactly that; asked to "improve" a flow, it suggests first.
 - To keep it from losing its place on a long build, every change it makes
@@ -109,6 +110,50 @@ Flo**:
 
 Smaller free models often struggle with multi-step building. If replies
 are muddled, try a stronger model on the same connection.
+
+## Pages
+
+Flo can put what the flow makes in front of people, as pages:
+
+- **Dashboards** — "make a dashboard of these charts" adds a page with a
+  tile for each, laid out in rows. Only nodes that show something can be
+  tiles: charts, tables, KPIs, slicers, controls, buttons, notes. Asked to
+  tile a plain node, Flo is told to add a Show Table or a chart first. It
+  can add more tiles to a page (below what is there) and take tiles off.
+- **Reports** — a report page is markdown, and Flo writes it: headings,
+  text, and `![[Label]]` embeds of your charts and tables. It names nodes
+  by their handle and flograph swaps in the label, so an embed always
+  points at a real node; an embed it can't resolve, or a label two nodes
+  share, comes back to it as a warning. It can rewrite a report or add to
+  its end.
+- **Report styles** — it can give a report one of the starter themes
+  (Midnight, Ledger, Swiss…) or one of your **saved snippets**, by name,
+  the same list as the CSS tab's, with a few lines of its own on top if
+  you ask. It replaces the page's CSS; if that was CSS you wrote by hand,
+  it is told so, and Ctrl+Z brings it back. The look shows in the Web
+  preview and the saved web page. For a look of its own — "make it look
+  like frosted glass" — it reads the page's CSS and writes new CSS, which
+  Ctrl+Z takes back like any change.
+- **Web layout** — it can give a report a sidebar or a top bar, show one
+  `#` section at a time (each section reads as a page of its own when
+  picked), and add Previous / Next links. Asked to put something "on its
+  own page" inside a report, it should ask whether you mean that or a
+  separate page.
+- **Links between pages** — it writes them as `[words](page:…)` by page,
+  so they keep working if a page is renamed; a link to a page that does
+  not exist comes back to it as a warning.
+- It can also rename and delete pages — deleting only when you ask.
+
+Page titles and report text are words you typed, so they follow **Flo can
+see** like node labels and typed settings: at *Nothing from my data* it is
+told how long a report is, not what it says. Canvas tabs are not pages to
+Flo.
+
+**Flo knows which page you are on.** Send a message while a dashboard or
+report page is showing and it goes with a note naming that page — your
+message shows *Looking at: <page>* — so "make this report darker" changes
+the report's look, not the charts on the canvas behind it. On the canvas
+nothing is added. Like every other change, a new page is part of the reply's undo step.
 
 ## Changes and undo
 

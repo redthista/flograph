@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -66,6 +67,89 @@ _READ_TOOLS = [
              "choices) and documentation — read it before add_node.",
              _schema({"type_id": {"type": "string"}}, ("type_id",))),
 ]
+
+_PAGE = {"type": "string", "description": "a page handle, e.g. p2, or its title"}
+_NODES = {"type": "array", "items": _NODE}
+
+_PAGE_READ = ToolSpec(
+    "get_page",
+    "One page in full: a dashboard's tiles (which node each shows), or a "
+    "report's markdown and the nodes its ![[...]] embeds show. css: true "
+    "also brings a report's CSS — read it before changing its look.",
+    _schema({"page": _PAGE, "css": {"type": "boolean"}}, ("page",)))
+
+_CHART_VARS = (
+    "Live charts on the page take their colours from CSS variables: "
+    "--fg-chart-paper, --fg-chart-plot, --fg-chart-ink, --fg-chart-grid, "
+    "--fg-chart-font. Live tables are .flograph-table. Qt writes inline "
+    "styles, so rules that must win need !important.")
+
+_PAGE_WRITES = [
+    ToolSpec("add_page",
+             "Make a page. A dashboard lays out tiles of the given nodes in a "
+             "grid; only nodes that show something (charts, tables, KPIs, "
+             "slicers, controls, buttons, notes…) can be tiles. A report is "
+             "markdown: embed a node's output with ![[n3]] (its handle; it "
+             "becomes the node's label). Give a report nodes and no markdown "
+             "and each node is embedded under the title.",
+             _schema({"kind": {"type": "string", "enum": ["dashboard", "report"]},
+                      "title": {"type": "string"},
+                      "nodes": _NODES,
+                      "markdown": {"type": "string",
+                                   "description": "report pages only"}},
+                     ("kind", "title"))),
+    ToolSpec("add_tiles",
+             "Add tiles of nodes to a dashboard page, below what is there.",
+             _schema({"page": _PAGE, "nodes": _NODES}, ("page", "nodes"))),
+    ToolSpec("remove_tiles",
+             "Take the tiles of nodes off a dashboard page (the nodes stay).",
+             _schema({"page": _PAGE, "nodes": _NODES}, ("page", "nodes"))),
+    ToolSpec("write_report",
+             "Set a report page's markdown, or add to its end with append. "
+             "Embed a node's output with ![[n3]]; options go after a bar, "
+             "e.g. ![[n3|height=300]]. Link to another page with "
+             "[words](page:p4) — its handle, never a bare (p4). A '# ' "
+             "heading starts a section, which the web layout can show on "
+             "its own (set_report_layout).",
+             _schema({"page": _PAGE, "markdown": {"type": "string"},
+                      "append": {"type": "boolean"}}, ("page", "markdown"))),
+    ToolSpec("write_report_css",
+             "Set a report page's CSS — its whole look in the Web preview "
+             "and the saved web page — or add rules to its end with append. "
+             "For a look of your own, or to change the one it has. "
+             + _CHART_VARS,
+             _schema({"page": _PAGE, "css": {"type": "string"},
+                      "append": {"type": "boolean"}}, ("page", "css"))),
+    ToolSpec("set_report_layout",
+             "How a report reads in the Web preview and saved web page. "
+             "navigation: none, sidebar (its headings down the left), topbar "
+             "(its '# ' sections across the top) or both. one_at_a_time: "
+             "show one '# ' section at a time, picked from the navigation — "
+             "\"its own page when clicked\" without a separate page. "
+             "pager: Previous / Next links under each section.",
+             _schema({"page": _PAGE,
+                      "navigation": {"type": "string", "enum": [
+                          "none", "sidebar", "topbar", "both"]},
+                      "one_at_a_time": {"type": "boolean"},
+                      "pager": {"type": "boolean"}}, ("page",))),
+    ToolSpec("rename_page",
+             "Give a page a new title.",
+             _schema({"page": _PAGE, "title": {"type": "string"}},
+                     ("page", "title"))),
+    ToolSpec("delete_page",
+             "Delete a page and its tiles (the nodes stay). Only when asked.",
+             _schema({"page": _PAGE}, ("page",))),
+]
+
+_STYLE_TOOL = ToolSpec(
+    "set_report_style",
+    "Give a report page a look: one of the starter themes or the user's "
+    "saved CSS snippets (\"Saved: …\"), by name, or none for the plain "
+    "page. It replaces the page's CSS; extra_css is added after it for any "
+    "change of your own. Shows in the Web preview and the saved web page.",
+    _schema({"page": _PAGE,
+             "style": {"type": "string"},
+             "extra_css": {"type": "string"}}, ("page", "style")))
 
 _OUTPUT_TOOL = ToolSpec(
     "get_output",
@@ -162,6 +246,8 @@ class Toolbox:
         self._last_run: dict[tuple, str] = {}
         self._handles: dict[str, str] = {}      # handle -> node id
         self._by_id: dict[str, str] = {}        # node id -> handle
+        self._page_handles: dict[str, str] = {}  # p1 -> page id
+        self._page_by_id: dict[str, str] = {}
         self._macro_open = False
         self._macro_text = "Flo Assistant"
         self.actions: list[Action] = []
@@ -202,7 +288,7 @@ class Toolbox:
     # -- what is offered ----------------------------------------------------------
 
     def specs(self) -> list[ToolSpec]:
-        tools = list(_READ_TOOLS)
+        tools = list(_READ_TOOLS) + [_PAGE_READ]
         if self.disclosure.allows(disc.SCHEMA):
             profile = (", and per column its empty share, distinct count, "
                        "range and what it looks like"
@@ -217,6 +303,12 @@ class Toolbox:
                 tools.append(_ROWS_TOOL)
         if self.autonomy == ACT:
             tools.extend(_WRITE_TOOLS)
+            tools.extend(_PAGE_WRITES)
+            names = ["none"] + [self.disclosure.scrub(n) for n in report_styles()]
+            params = json.loads(json.dumps(_STYLE_TOOL.parameters))
+            params["properties"]["style"]["enum"] = names
+            tools.append(ToolSpec(_STYLE_TOOL.name, _STYLE_TOOL.description,
+                                  params))
             if self.runner is not None:
                 tools.append(_RUN_TOOL)
         return tools
@@ -484,6 +576,9 @@ class Toolbox:
                            "use get_node for the others")
         if not nodes:
             out["note"] = "the flow is empty"
+        pages = [self._page_brief(page) for page in self._pages()]
+        if pages:
+            out["pages"] = pages
         return out
 
     def _tool_get_node(self, node) -> dict:
@@ -774,6 +869,387 @@ class Toolbox:
         self.actions.append(Action("delete_nodes", f"Deleted {', '.join(labels)}"))
         return {"deleted": [self._by_id[n.id] for n in insts]}
 
+    # -- pages ------------------------------------------------------------------
+    #
+    # Dashboards and reports, never canvas tabs: a canvas tab is a way of
+    # looking at the flow, not something made for whoever reads it. Titles
+    # and report text are words the user typed, so they go out like a
+    # label and a text setting do — at Nothing, a report's text is withheld.
+
+    def _pages(self) -> list:
+        return [p for p in self.graph.pages.values()
+                if p.kind in ("dashboard", "report")]
+
+    def page_handle(self, page_id: str) -> str:
+        if page_id not in self._page_by_id:
+            name = f"p{len(self._page_handles) + 1}"
+            self._page_handles[name] = page_id
+            self._page_by_id[page_id] = name
+        return self._page_by_id[page_id]
+
+    def _page(self, ref: Any, kind: Optional[str] = None):
+        text = str(ref or "").strip()
+        page_id = self._page_handles.get(text)
+        pages = self._pages()
+        if page_id is None:
+            titled = [p for p in pages if p.title.casefold() == text.casefold()]
+            page_id = titled[0].id if len(titled) == 1 else None
+        page = self.graph.pages.get(page_id) if page_id else None
+        if page is None or page.kind not in ("dashboard", "report"):
+            known = ", ".join(f"{self.page_handle(p.id)} "
+                              f"({self.disclosure.scrub(p.title)})"
+                              for p in pages) or "none"
+            raise _ToolError(f"no page {ref!r} — the pages are: {known}")
+        if kind and page.kind != kind:
+            raise _ToolError(f"{self.page_handle(page.id)} is a {page.kind} "
+                             f"page, not a {kind}")
+        return page
+
+    def _page_brief(self, page) -> dict:
+        out = {"page": self.page_handle(page.id), "kind": page.kind,
+               "title": self.disclosure.scrub(page.title)}
+        if page.kind == "report":
+            out["style"] = self.disclosure.scrub(style_of(page.custom_css))
+        shows = (self._tile_nodes(page) if page.kind == "dashboard"
+                 else [e["node"] for e in self._embeds(page.body)
+                       if "node" in e])
+        out["shows"] = shows
+        return out
+
+    def _tile_nodes(self, page) -> list:
+        return [self.handle(t.node_id) for t in page.tiles.values()
+                if t.node_id in self.graph.nodes]
+
+    def _embeds(self, body: str) -> list:
+        """Each ![[...]] in a report and the node it shows, by handle."""
+        from ..core.report import find_embeds, nodes_labelled
+        out = []
+        from ..core.app_facts import FACTS, fact_name
+        for embed in find_embeds(body):
+            entry = {"embed": self.disclosure.scrub(embed.raw)}
+            fact = fact_name(embed.ref)
+            if fact is not None:          # flograph.date: the app, not a node
+                if fact not in FACTS:
+                    entry["problem"] = ("no such app fact — they are: "
+                                        + ", ".join("flograph." + k for k in FACTS))
+                out.append(entry)
+                continue
+            found = nodes_labelled(self.graph, embed.ref)
+            if len(found) == 1:
+                entry["node"] = self.handle(found[0].id)
+            elif not found:
+                entry["problem"] = "no node has this label"
+            else:
+                entry["problem"] = ("several nodes have this label ("
+                                    + ", ".join(self.handle(n.id) for n in found)
+                                    + ") — rename one so the embed is sure")
+            out.append(entry)
+        return out
+
+    def _tool_get_page(self, page, css=False) -> dict:
+        found = self._page(page)
+        out = self._page_brief(found)
+        if found.kind == "dashboard":
+            out["tiles"] = [
+                {"node": self.handle(t.node_id),
+                 "label": self.disclosure.scrub(self.graph.node(t.node_id).label),
+                 "at": [round(v) for v in t.rect]}
+                for t in found.tiles.values() if t.node_id in self.graph.nodes]
+            missing = sum(t.node_id not in self.graph.nodes
+                          for t in found.tiles.values())
+            if missing:
+                out["note"] = f"{missing} tile(s) show a node that was deleted"
+            out.pop("shows")
+        else:
+            out["markdown"] = self.disclosure.param_value(
+                self._links_as_handles(found.body), "text")
+            out["embeds"] = self._embeds(found.body)
+            out["layout"] = _layout_of(found.web)
+            if css:
+                out["css"] = self.disclosure.param_value(found.custom_css, "text")
+            out.pop("shows")
+        return out
+
+    def _tile_able(self, nodes) -> list:
+        from ..ui.dashboard.tile_item import is_tile_able
+        if isinstance(nodes, str):
+            nodes = [nodes]
+        insts = [self._node(n) for n in nodes or []]
+        refused = [f"{self.handle(n.id)} ({self.disclosure.scrub(n.label)})"
+                   for n in insts if not is_tile_able(n)]
+        if refused:
+            raise _ToolError(
+                "these show nothing on a dashboard: " + ", ".join(refused)
+                + " — a tile needs a node that shows something: add a "
+                "Show Table (flograph.viz.show_table) or a chart fed by it, "
+                "and tile that")
+        return insts
+
+    def _lay_out(self, page_id: Optional[str], insts: list) -> list:
+        """Tiles for nodes, in rows under what the page already has."""
+        import uuid
+        from ..core.graph import Tile
+        from ..ui.dashboard.tile_item import default_tile_port, default_tile_size
+        gap, row_width = 20.0, 1300.0
+        page = self.graph.pages.get(page_id) if page_id else None
+        taken = {t.node_id for t in page.tiles.values()} if page else set()
+        y = max((t.rect[1] + t.rect[3] for t in page.tiles.values()),
+                default=-gap) + gap if page else 0.0
+        x, row_height, tiles = 0.0, 0.0, []
+        for inst in insts:
+            if inst.id in taken:
+                continue                # already on the page
+            taken.add(inst.id)
+            width, height = default_tile_size(inst)
+            if x and x + width > row_width:
+                x, y, row_height = 0.0, y + row_height + gap, 0.0
+            tiles.append(Tile(id=uuid.uuid4().hex, node_id=inst.id,
+                              port=default_tile_port(inst),
+                              rect=(x, y, width, height)))
+            x += width + gap
+            row_height = max(row_height, height)
+        return tiles
+
+    def _report_text(self, markdown: Any) -> tuple[str, list]:
+        """The model's markdown with ![[n3]] turned into the node's label,
+        which is what a report page resolves an embed by."""
+        from ..core.report import EMBED_RE
+        problems: list = []
+
+        def label(match) -> str:
+            ref = match.group(1).strip()
+            node_id = self._handles.get(ref)
+            if node_id is None or node_id not in self.graph.nodes:
+                return match.group(0)
+            name = self.graph.node(node_id).label
+            if any(ch in name for ch in "[]|"):
+                problems.append(f"{ref}'s label has a [, ] or | in it, which "
+                                "an embed can't hold — rename the node")
+            return f"![[{name}{match.group(2)}]]"
+
+        text = EMBED_RE.sub(label, str(markdown or ""))
+        return self._links_as_ids(text, problems), problems
+
+    def _links_as_ids(self, text: str, problems: list) -> str:
+        """[words](p4), (page:p4) and (<page:p4>) become a link to that
+        page by id — which keeps working when the page is renamed. A page
+        link naming no page is reported."""
+        from ..core.page_nav import page_for_link
+
+        def link(match) -> str:
+            target = match.group(2).strip().strip("<>").strip()
+            bare = target[5:].strip() if target.lower().startswith("page:") else target
+            page_id = self._page_handles.get(bare)
+            if page_id in self.graph.pages:
+                return f"{match.group(1)}(page:{page_id})"
+            if target.lower().startswith("page:") \
+                    and page_for_link(self.graph.pages, target) is None:
+                problems.append(f"the link to {bare!r} goes to no page — use "
+                                "a page handle, e.g. (page:p2)")
+            elif _HANDLE.fullmatch(target):
+                problems.append(f"({target}) is not a page — use a page "
+                                "handle, e.g. (page:p2)")
+            return match.group(0)
+
+        return _LINK.sub(link, text)
+
+    def _links_as_handles(self, text: str) -> str:
+        """The other way, for reading: (page:<id>) shows the page's handle."""
+        def link(match) -> str:
+            target = match.group(2).strip().strip("<>").strip()
+            if target.lower().startswith("page:") \
+                    and target[5:].strip() in self.graph.pages:
+                return (f"{match.group(1)}"
+                        f"(page:{self.page_handle(target[5:].strip())})")
+            return match.group(0)
+
+        return _LINK.sub(link, text or "")
+
+    def _report_result(self, page, problems: list) -> dict:
+        out = {"page": self.page_handle(page.id),
+               "title": self.disclosure.scrub(page.title),
+               "embeds": self._embeds(page.body)}
+        problems = problems + [f"{e['embed']}: {e['problem']}"
+                               for e in out["embeds"] if "problem" in e]
+        if problems:
+            out["warnings"] = problems
+        return out
+
+    def _tool_add_page(self, kind, title, nodes=None, markdown=None) -> dict:
+        import uuid
+        from ..core.graph import Page
+        from ..ui.commands import AddPageCommand, AddTileCommand
+        kind = str(kind or "").strip().lower()
+        if kind not in ("dashboard", "report"):
+            raise _ToolError("kind is 'dashboard' or 'report'")
+        title = str(title or "").strip() or kind.capitalize()
+        if kind == "dashboard":
+            insts = self._tile_able(nodes)
+            page = Page(id=uuid.uuid4().hex, title=title)
+            self._push(AddPageCommand(self.graph, page))
+            for tile in self._lay_out(None, insts):
+                self._push(AddTileCommand(self.graph, page.id, tile))
+            self.actions.append(Action(
+                "add_page", f"Made dashboard page {title} with "
+                f"{len(page.tiles)} tile{'' if len(page.tiles) == 1 else 's'}",
+                [n.id for n in insts]))
+            return {"page": self.page_handle(page.id),
+                    "tiles": self._tile_nodes(page)}
+        if not markdown and nodes:
+            insts = [self._node(n) for n in
+                     ([nodes] if isinstance(nodes, str) else nodes)]
+            markdown = f"# {title}\n\n" + "\n\n".join(
+                f"![[{self.handle(n.id)}]]" for n in insts) + "\n"
+        body, problems = self._report_text(markdown or f"# {title}\n")
+        page = Page(id=uuid.uuid4().hex, title=title, kind="report",
+                    body=body, preview_mode="web")
+        self._push(AddPageCommand(self.graph, page))
+        self.actions.append(Action("add_page", f"Made report page {title}"))
+        return self._report_result(page, problems)
+
+    def _tool_add_tiles(self, page, nodes) -> dict:
+        from ..ui.commands import AddTileCommand
+        found = self._page(page, "dashboard")
+        insts = self._tile_able(nodes)
+        tiles = self._lay_out(found.id, insts)
+        for tile in tiles:
+            self._push(AddTileCommand(self.graph, found.id, tile))
+        if tiles:
+            self.actions.append(Action(
+                "add_tiles", f"Added {len(tiles)} tile"
+                f"{'' if len(tiles) == 1 else 's'} to {found.title}",
+                [t.node_id for t in tiles]))
+        out = {"page": self.page_handle(found.id),
+               "tiles": self._tile_nodes(found)}
+        if len(tiles) < len(insts):
+            out["note"] = "some were on the page already and were left as they are"
+        return out
+
+    def _tool_remove_tiles(self, page, nodes) -> dict:
+        from ..ui.commands import RemoveTileCommand
+        found = self._page(page, "dashboard")
+        insts = [self._node(n) for n in
+                 ([nodes] if isinstance(nodes, str) else nodes or [])]
+        wanted = {n.id for n in insts}
+        gone = [t for t in found.tiles.values() if t.node_id in wanted]
+        if not gone:
+            raise _ToolError(f"none of those are on {self.page_handle(found.id)}"
+                             f"; it shows: {', '.join(self._tile_nodes(found)) or 'nothing'}")
+        for tile in gone:
+            self._push(RemoveTileCommand(self.graph, found.id, tile.id))
+        self.actions.append(Action(
+            "remove_tiles", f"Took {len(gone)} tile{'' if len(gone) == 1 else 's'} "
+            f"off {found.title}"))
+        return {"page": self.page_handle(found.id),
+                "tiles": self._tile_nodes(found)}
+
+    def _tool_write_report(self, page, markdown, append=False) -> dict:
+        from ..ui.commands import SetPageBodyCommand
+        found = self._page(page, "report")
+        body, problems = self._report_text(markdown)
+        if append and found.body.strip():
+            body = found.body.rstrip("\n") + "\n\n" + body
+        self._push(SetPageBodyCommand(self.graph, found.id, body))
+        self.actions.append(Action("write_report",
+                                   f"{'Added to' if append else 'Wrote'} "
+                                   f"report {found.title}"))
+        return self._report_result(found, problems)
+
+    def _tool_set_report_style(self, page, style, extra_css=None) -> dict:
+        from ..ui.commands import SetPageCustomCssCommand
+        found = self._page(page, "report")
+        styles = report_styles()
+        wanted = str(style or "").strip().casefold()
+        if wanted in ("none", "", "plain"):
+            css, name = "", "none"
+        else:
+            name = next((n for n in styles if wanted in (
+                n.casefold(), n.casefold().removeprefix("saved: "))), None)
+            if name is None:
+                raise _ToolError(
+                    f"no style {style!r} — the styles are: none, "
+                    + ", ".join(self.disclosure.scrub(n) for n in styles))
+            css = styles[name].rstrip() + "\n"
+        if extra_css and str(extra_css).strip():
+            css += ("\n" if css else "") + str(extra_css).rstrip() + "\n"
+        out: dict = {"page": self.page_handle(found.id),
+                     "style": self.disclosure.scrub(name)}
+        old = found.custom_css
+        if old.strip() and style_of(old) == "custom CSS":
+            out["note"] = (f"this replaced {len(old)} characters of CSS the "
+                           "page had of its own — Undo brings them back")
+        self._push(SetPageCustomCssCommand(self.graph, found.id, css,
+                                           merge=False))
+        self.actions.append(Action("set_report_style",
+                                   f"Styled report {found.title}: {name}"))
+        return out
+
+    def _tool_write_report_css(self, page, css, append=False) -> dict:
+        from ..ui.commands import SetPageCustomCssCommand
+        found = self._page(page, "report")
+        text = str(css or "").rstrip() + "\n"
+        if append and found.custom_css.strip():
+            text = found.custom_css.rstrip() + "\n\n" + text
+        self._push(SetPageCustomCssCommand(self.graph, found.id, text,
+                                           merge=False))
+        self.actions.append(Action("write_report_css",
+                                   f"{'Added to' if append else 'Restyled'} "
+                                   f"report {found.title}"))
+        return {"page": self.page_handle(found.id),
+                "style": self.disclosure.scrub(style_of(text)),
+                "css_characters": len(text)}
+
+    def _tool_set_report_layout(self, page, navigation=None,
+                                one_at_a_time=None, pager=None) -> dict:
+        from ..ui.commands import SetPageWebCommand
+        found = self._page(page, "report")
+        web = found.web.copy()
+        if navigation is not None:
+            nav = str(navigation).strip().lower()
+            if nav not in ("none", "sidebar", "topbar", "both"):
+                raise _ToolError("navigation is none, sidebar, topbar or both")
+            web.sidebar = "open" if nav in ("sidebar", "both") else "off"
+            web.topbar = nav in ("topbar", "both")
+        if one_at_a_time is not None:
+            web.paged = "sections" if one_at_a_time else "off"
+        if pager is not None:
+            web.pager = bool(pager)
+        out: dict = {"page": self.page_handle(found.id), "layout": _layout_of(web)}
+        if web.paged != "off" and not web.has_nav():
+            web.topbar = True
+            out["layout"] = _layout_of(web)
+            out["note"] = ("one section at a time needs navigation to pick "
+                           "from, so the top bar is on")
+        self._push(SetPageWebCommand(self.graph, found.id, web))
+        self.actions.append(Action("set_report_layout",
+                                   f"Laid out report {found.title} for the web"))
+        sections = sum(1 for line in found.body.splitlines()
+                       if line.startswith("# "))
+        if web.paged != "off" and sections < 2:
+            out["warning"] = (f"the report has {sections} '# ' section"
+                              f"{'' if sections == 1 else 's'} — each one is a "
+                              "page of its own, so start each part with '# '")
+        return out
+
+    def _tool_rename_page(self, page, title) -> dict:
+        from ..ui.commands import RenamePageCommand
+        found = self._page(page)
+        title = str(title or "").strip()
+        if not title:
+            raise _ToolError("give the page a title")
+        old = found.title
+        self._push(RenamePageCommand(self.graph, found.id, title))
+        self.actions.append(Action("rename_page", f"Renamed page {old} to {title}"))
+        return {"page": self.page_handle(found.id),
+                "title": self.disclosure.scrub(title)}
+
+    def _tool_delete_page(self, page) -> dict:
+        from ..ui.commands import RemovePageCommand
+        found = self._page(page)
+        self._push(RemovePageCommand(self.graph, found.id))
+        self.actions.append(Action("delete_page", f"Deleted page {found.title}"))
+        return {"deleted": self.page_handle(found.id)}
+
 
 def _run_result(box: "Toolbox", node_ids: list, outcome: str) -> dict:
     """After a run, on the GUI thread: how each node came out."""
@@ -796,10 +1272,51 @@ def _run_result(box: "Toolbox", node_ids: list, outcome: str) -> dict:
 
 
 # reads that return the same thing until something changes
+_LINK = re.compile(r"(\[[^\]\n]*\])\(\s*(<[^>\n]*>|[^)\s]+)\s*\)")
+_HANDLE = re.compile(r"p\d+")
+
+
+def _layout_of(web) -> dict:
+    """A report's web layout, in set_report_layout's words."""
+    nav = {(False, False): "none", (True, False): "sidebar",
+           (False, True): "topbar", (True, True): "both"}[
+        (web.sidebar != "off", bool(web.topbar))]
+    return {"navigation": nav, "one_at_a_time": web.paged != "off",
+            "pager": bool(web.pager)}
+
+
+def report_styles() -> dict:
+    """Every look a report page can be given by name: the starter themes,
+    then the user's saved snippets — the same list as the CSS tab's."""
+    from ..ui.report.css_snippets import list_snippets, read_snippet
+    from ..ui.report.html import CSS_TEMPLATES
+    out = dict(sorted(CSS_TEMPLATES.items(), key=lambda i: i[0].casefold()))
+    for path in list_snippets():
+        out[f"Saved: {path.stem}"] = read_snippet(path)
+    return out
+
+
+def style_of(css: str) -> str:
+    """Which style a page's CSS is: a name, a name "with changes", "none",
+    or "custom CSS" for one written by hand."""
+    text = (css or "").strip()
+    if not text:
+        return "none"
+    for name, theme in report_styles().items():
+        theme = theme.strip()
+        if theme and text == theme:
+            return name
+        if theme and text.startswith(theme):
+            return f"{name} with changes"
+    return "custom CSS"
+
+
 _REPEAT_FREE = {"describe_flow", "get_node", "get_output", "get_node_type",
-                "find_node_types", "get_rows"}
+                "find_node_types", "get_rows", "get_page"}
 _WRITES = {"add_node", "connect", "disconnect", "set_params", "rename_node",
-           "delete_nodes"}
+           "delete_nodes", "add_page", "add_tiles", "remove_tiles",
+           "write_report", "rename_page", "delete_page", "set_report_style",
+           "write_report_css", "set_report_layout"}
 
 
 class _ToolError(Exception):

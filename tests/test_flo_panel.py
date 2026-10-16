@@ -308,6 +308,47 @@ class TestWindow:
             for k, v in saved.items():
                 s.setValue(k, v) if v is not None else s.remove(k)
 
+    def test_pages_flo_makes_open_as_pages(self, window, registry):
+        """The window builds the pages from graph events alone, so a page
+        made by Flo is the same as one made from the + menu — and goes with
+        Ctrl+Z."""
+        import json
+        from flograph.flo.tools import Toolbox
+        from flograph.llm.toolcall import ToolCall
+        chart = registry.instantiate("flograph.viz.show_plotly", (0, 0))
+        window.graph.add_node(chart)
+        box = Toolbox(window.graph, registry, window.undo_stack,
+                      disclosure=disc.Disclosure(disc.SCHEMA))
+        box.handle(chart.id)
+        box.begin_turn("pages")
+        made = [json.loads(box.execute(ToolCall("a", "add_page", args)))["page"]
+                for args in ({"kind": "dashboard", "title": "Board", "nodes": ["n1"]},
+                             {"kind": "report", "title": "Paper", "nodes": ["n1"]})]
+        box.end_turn()
+        ids = [box._page_handles[h] for h in made]
+        assert all(i in window._dashboard_pages for i in ids)
+        window.undo_stack.undo()
+        assert not any(i in window._dashboard_pages for i in ids)
+
+    def test_a_message_says_which_page_is_on_screen(self, window, registry):
+        """"Make this report look like…" has to land on the report on
+        screen, not on the charts behind it."""
+        from flograph.core.graph import Page
+        from flograph.flo.tools import Toolbox
+        from flograph.ui.commands import AddPageCommand
+        window.undo_stack.push(AddPageCommand(window.graph, Page(
+            id="rep", title="Monthly", kind="report", preview_mode="web")))
+        window.page_bar.select_page("rep")
+        panel = window.flo_panel
+        panel.toolbox = Toolbox(window.graph, registry, window.undo_stack,
+                                disclosure=disc.Disclosure(disc.SCHEMA))
+        title, line = panel._screen_context()
+        assert title == "Monthly"
+        assert 'report page p1 "Monthly", Web preview' in line
+        assert "write_report_css" in line
+        panel.on_screen = lambda: ""          # the canvas
+        assert panel._screen_context() == ("", "")
+
     def test_closed_by_default_and_opened_by_its_shortcut(self, window, qtbot):
         assert window.flo_dock.isHidden()
         assert window.flo_dock not in window._docks_open_on_model_page

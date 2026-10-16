@@ -637,3 +637,242 @@ def test_the_receipt_counts_rows(registry, stack):
                           {"role": "tool", "name": "get_output", "content": out}]}
     made = receipt.build([entry], [], box.disclosure, destination="x", local=False)
     assert made.rows == 20 and "20 rows of your data" in made.summary()
+
+
+# -- pages ----------------------------------------------------------------------
+
+TABLE = "flograph.viz.show_table"
+
+
+def _charts(registry):
+    """A reader feeding a chart and a table, labelled."""
+    graph = Graph()
+    reader = registry.instantiate(CSV, (0, 0))
+    chart = registry.instantiate(PLOTLY, (300, 0))
+    table = registry.instantiate(TABLE, (300, 200))
+    chart.label_override, table.label_override = "Sales chart", "Sales table"
+    for node in (reader, chart, table):
+        graph.add_node(node)
+    return graph, reader, chart, table
+
+
+def _paged(registry, stack, level=disc.PROFILE, autonomy=ACT):
+    graph, *nodes = _charts(registry)
+    box = _toolbox(registry, stack, graph=graph, level=level, autonomy=autonomy)
+    for node in nodes:
+        box.handle(node.id)          # n1 reader, n2 chart, n3 table
+    return graph, box
+
+
+def _call(box, name, **args):
+    return json.loads(box.execute(ToolCall("a", name, args)))
+
+
+def test_a_dashboard_from_nodes_is_one_undo_step(registry, stack):
+    graph, box = _paged(registry, stack)
+    box.begin_turn("make a dashboard")
+    out = _call(box, "add_page", kind="dashboard", title="Sales",
+                nodes=["n2", "n3"])
+    box.end_turn()
+    assert out["tiles"] == ["n2", "n3"]
+    page = graph.pages[box._page_handles[out["page"]]]
+    first, second = [t.rect for t in page.tiles.values()]
+    assert first[0] == 0 and second[0] > first[2]          # side by side
+    assert box.actions[0].summary == "Made dashboard page Sales with 2 tiles"
+    stack.undo()
+    assert not graph.pages
+
+
+def test_only_nodes_that_show_something_become_tiles(registry, stack):
+    graph, box = _paged(registry, stack)
+    out = _call(box, "add_page", kind="dashboard", title="X", nodes=["n1", "n2"])
+    assert "n1" in out["error"] and "show_table" in out["error"]
+    assert not graph.pages
+
+
+def test_tiles_go_below_and_are_not_doubled(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="dashboard", title="Sales", nodes=["n2"])
+    out = _call(box, "add_tiles", page="Sales", nodes=["n2", "n3"])
+    assert out["tiles"] == ["n2", "n3"] and "already" in out["note"]
+    page = next(iter(graph.pages.values()))
+    first, second = list(page.tiles.values())
+    assert second.rect[1] >= first.rect[1] + first.rect[3]
+    out = _call(box, "remove_tiles", page="p1", nodes=["n2"])
+    assert out["tiles"] == ["n3"]
+
+
+def test_a_report_embeds_by_handle_and_reads_back(registry, stack):
+    graph, box = _paged(registry, stack)
+    out = _call(box, "add_page", kind="report", title="Monthly",
+                markdown="# Monthly\n\n![[n2|height=300]]\n\nText.\n\n![[Nope]]")
+    page = graph.pages[box._page_handles[out["page"]]]
+    assert "![[Sales chart|height=300]]" in page.body
+    assert out["embeds"][0]["node"] == "n2"
+    assert "no node" in out["warnings"][0]
+    _call(box, "write_report", page="p1", markdown="![[n3]]", append=True)
+    assert page.body.endswith("Text.\n\n![[Nope]]\n\n![[Sales table]]")
+    read = _call(box, "get_page", page="p1")
+    assert read["markdown"] == page.body and read["kind"] == "report"
+    flow = _call(box, "describe_flow")
+    assert flow["pages"] == [{"page": "p1", "kind": "report", "title": "Monthly",
+                              "style": "none", "shows": ["n2", "n3"]}]
+
+
+def test_a_report_from_nodes_alone(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="report", title="Quick", nodes=["n2", "n3"])
+    body = next(iter(graph.pages.values())).body
+    assert body == "# Quick\n\n![[Sales chart]]\n\n![[Sales table]]\n"
+
+
+def test_report_text_is_withheld_at_nothing(registry, stack):
+    from flograph.core.graph import Page
+    graph, box = _paged(registry, stack, level=disc.STRUCTURE)
+    graph.add_page(Page(id="r", title="Notes", kind="report",
+                        body="Jane Smith owes 400"))
+    assert _call(box, "get_page", page="Notes")["markdown"] \
+        == "<text, 19 characters>"
+
+
+def test_pages_are_changed_in_act_only(registry, stack):
+    names = {t.name for t in _toolbox(registry, stack, autonomy=ADVISE).specs()}
+    assert "get_page" in names and "add_page" not in names
+    names = {t.name for t in _toolbox(registry, stack).specs()}
+    assert {"add_page", "add_tiles", "remove_tiles", "write_report",
+            "rename_page", "delete_page"} <= names
+
+
+def test_rename_and_delete_a_page(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="dashboard", title="Old", nodes=["n2"])
+    assert _call(box, "rename_page", page="Old", title="New")["title"] == "New"
+    assert next(iter(graph.pages.values())).title == "New"
+    assert "no page" in _call(box, "delete_page", page="Old")["error"]
+    _call(box, "delete_page", page="p1")
+    assert not graph.pages
+
+
+def test_canvas_tabs_are_not_pages_to_flo(registry, stack):
+    from flograph.core.graph import Page
+    graph, box = _paged(registry, stack)
+    graph.add_page(Page(id="c", title="Model 2", kind="canvas"))
+    assert "pages" not in _call(box, "describe_flow")
+    assert "no page" in _call(box, "get_page", page="Model 2")["error"]
+
+
+def test_the_receipt_counts_report_text(registry, stack):
+    from flograph.core.graph import Page
+    from flograph.flo import receipt
+    graph, box = _paged(registry, stack)
+    graph.add_page(Page(id="r", title="Notes", kind="report", body="hello"))
+    out = box.execute(ToolCall("a", "get_page", {"page": "Notes"}))
+    entry = {"messages": [{"role": "system", "content": "s"},
+                          {"role": "tool", "name": "get_page", "content": out}]}
+    made = receipt.build([entry], [], box.disclosure, destination="x", local=False)
+    assert made.reports == 1 and "Text of 1 report page" in made.details()
+
+
+def test_a_report_takes_a_style_by_name(registry, stack, monkeypatch, tmp_path):
+    from flograph.ui.report import css_snippets
+    from flograph.ui.report.html import CSS_TEMPLATES
+    (tmp_path / "Brand.css").write_text("body { color: teal; }")
+    monkeypatch.setattr(css_snippets, "snippets_dir", lambda: tmp_path)
+    graph, box = _paged(registry, stack)
+    spec = next(t for t in box.specs() if t.name == "set_report_style")
+    assert {"none", "Midnight", "Saved: Brand"} <= set(
+        spec.parameters["properties"]["style"]["enum"])
+    _call(box, "add_page", kind="report", title="R", nodes=["n2"])
+    page = next(iter(graph.pages.values()))
+    out = _call(box, "set_report_style", page="p1", style="midnight")
+    assert out["style"] == "Midnight"
+    assert page.custom_css.strip() == CSS_TEMPLATES["Midnight"].strip()
+    assert _call(box, "get_page", page="p1")["style"] == "Midnight"
+    _call(box, "set_report_style", page="p1", style="Brand",
+          extra_css="h1 { color: red; }")
+    assert page.custom_css == "body { color: teal; }\n\nh1 { color: red; }\n"
+    assert _call(box, "describe_flow")["pages"][0]["style"] \
+        == "Saved: Brand with changes"
+    assert "no style" in _call(box, "set_report_style", page="p1",
+                               style="Neon")["error"]
+
+
+def test_a_style_says_when_it_replaced_hand_written_css(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="report", title="R", nodes=["n2"])
+    page = next(iter(graph.pages.values()))
+    page.custom_css = "p { margin: 0 }"
+    box.begin_turn("style it")
+    out = _call(box, "set_report_style", page="p1", style="Swiss")
+    box.end_turn()
+    assert "replaced 15 characters" in out["note"]
+    stack.undo()
+    assert page.custom_css == "p { margin: 0 }"
+
+
+def test_a_report_css_reads_and_writes(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="report", title="R", nodes=["n2"])
+    page = next(iter(graph.pages.values()))
+    assert "css" not in _call(box, "get_page", page="p1")
+    out = _call(box, "write_report_css", page="p1", css="body { color: red }")
+    assert out["style"] == "custom CSS" and page.custom_css == "body { color: red }\n"
+    _call(box, "write_report_css", page="p1", css="h1 { x: y }", append=True)
+    assert _call(box, "get_page", page="p1", css=True)["css"] \
+        == "body { color: red }\n\nh1 { x: y }\n"
+
+
+def test_report_css_is_withheld_at_nothing(registry, stack):
+    from flograph.core.graph import Page
+    graph, box = _paged(registry, stack, level=disc.STRUCTURE)
+    graph.add_page(Page(id="r", title="R", kind="report", custom_css="p {}"))
+    assert _call(box, "get_page", page="R", css=True)["css"] == "<text, 4 characters>"
+
+
+def test_page_links_by_handle_become_links_by_id(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="report", title="Main", nodes=["n2"])
+    _call(box, "add_page", kind="report", title="Other", nodes=["n3"])
+    main, other = graph.pages.values()
+    out = _call(box, "write_report", page="p1", markdown=(
+        "[a](p2) [b](page:p2) [c](<page:p2>) [d](page:Nowhere) [e](p9) "
+        "[f](https://x.org)"))
+    link = f"(page:{other.id})"
+    assert main.body.count(link) == 3
+    assert "[f](https://x.org)" in main.body and "[e](p9)" in main.body
+    assert any("Nowhere" in w for w in out["warnings"])
+    assert any("(p9)" in w for w in out["warnings"])
+    read = _call(box, "get_page", page="p1")["markdown"]
+    assert read.count("(page:p2)") == 3 and other.id not in read
+
+
+def test_a_report_reads_one_section_at_a_time(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="report", title="R",
+          markdown="# General\n\n![[n2]]\n\n# Correlation\n\n![[n3]]")
+    page = next(iter(graph.pages.values()))
+    assert _call(box, "get_page", page="p1")["layout"] == {
+        "navigation": "none", "one_at_a_time": False, "pager": False}
+    out = _call(box, "set_report_layout", page="p1", one_at_a_time=True)
+    assert "top bar is on" in out["note"] and "warning" not in out
+    assert page.web.topbar and page.web.paged == "sections"
+    out = _call(box, "set_report_layout", page="p1", navigation="sidebar",
+                pager=True)
+    assert out["layout"] == {"navigation": "sidebar", "one_at_a_time": True,
+                             "pager": True}
+
+
+def test_one_section_at_a_time_warns_without_sections(registry, stack):
+    graph, box = _paged(registry, stack)
+    _call(box, "add_page", kind="report", title="R", markdown="Just text")
+    out = _call(box, "set_report_layout", page="p1", navigation="topbar",
+                one_at_a_time=True)
+    assert "0 '# ' sections" in out["warning"]
+
+
+def test_app_facts_are_not_missing_nodes(registry, stack):
+    graph, box = _paged(registry, stack)
+    out = _call(box, "add_page", kind="report", title="R",
+                markdown="![[flograph.date]] ![[flograph.version]] ![[flograph.nope]]")
+    problems = [e for e in out["embeds"] if "problem" in e]
+    assert len(problems) == 1 and "flograph.nope" in problems[0]["embed"]

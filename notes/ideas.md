@@ -421,10 +421,13 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
 - *The rule that matters:* the level is enforced by **which tools the
   model is given**, built in one Qt-free `core/ai_disclosure.py`, never by
   asking it nicely in the prompt.
-- *Next:* **pages** — list pages, add a dashboard with tiles, write or
-  edit a report page with `![[Label]]` embeds (pages already have undoable
-  commands). Then: Propose with ghost-node preview (if it earns its cost
-  over one undo per reply), `write_user_node` through the editor's review.
+- *Pages, shipped 2026-10-16:* dashboards with tiles, report markdown
+  (`![[n3]]` → label), starter themes / saved snippets / its own CSS, web
+  layout (one section at a time), page links by id, and the page on screen
+  sent with each message — "on its own page" inside a report is asked
+  about, not guessed.
+- *Next:* Propose with ghost-node preview (if it earns its cost over one
+  undo per reply), `write_user_node` through the editor's review.
   Not wanted: conversations saved in the flow — chats stay at the user
   level (Dan, 2026-10-15).
 - *Open:* an org-level cap file for work rollouts (not now); whether Propose earns

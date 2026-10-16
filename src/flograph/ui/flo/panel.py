@@ -79,7 +79,8 @@ LEVEL_SEES = {
 }
 AUTONOMY = ((ADVISE, "Advise", "Look at the flow and explain or suggest — "
              "it cannot change anything"),
-            (ACT, "Act", "Change the flow: add, wire, set and delete nodes. "
+            (ACT, "Act", "Change the flow: add, wire, set and delete nodes, "
+             "and make dashboard and report pages. "
              "Each reply is one undo step"))
 
 TOOL_WORDS = {
@@ -95,10 +96,22 @@ TOOL_WORDS = {
     "rename_node": "Renaming a node",
     "delete_nodes": "Deleting nodes",
     "run_nodes": "Running nodes",
+    "get_rows": "Reading rows",
+    "get_page": "Reading a page",
+    "add_page": "Making a page",
+    "add_tiles": "Adding tiles",
+    "remove_tiles": "Removing tiles",
+    "write_report": "Writing a report",
+    "rename_page": "Renaming a page",
+    "delete_page": "Deleting a page",
+    "set_report_style": "Styling a report",
+    "write_report_css": "Writing a report's CSS",
+    "set_report_layout": "Laying out a report",
 }
 RUN_TIMEOUT = 600.0    # seconds a run_nodes call waits before giving up
 ACTION_MARK = {"add_node": "+", "delete_nodes": "−", "connect": "→",
-               "disconnect": "×"}
+               "disconnect": "×", "add_page": "+", "add_tiles": "+",
+               "remove_tiles": "−", "delete_page": "−"}
 SUGGESTIONS = (
     "Add a bar chart from my data",
     "Explain what this flow does",
@@ -283,6 +296,9 @@ class FloPanel(QWidget):
         self._welcome: Optional[QWidget] = None
         self._user_bubbles: list[QFrame] = []
         self._about: list[str] = []           # node ids "this" means
+        # () -> the id of the page in front of the user, or "" for the
+        # canvas; the window sets it, so "this report" means something
+        self.on_screen = lambda: ""
         self._about_title = ""
         self._live: Optional[QLabel] = None   # the reply as it arrives
         self._live_raw = ""
@@ -890,6 +906,8 @@ class FloPanel(QWidget):
             return False
         about_title = self._about_title if self._about else ""
         context = self._about_context()
+        screen_title, screen = self._screen_context()
+        context = screen + context
         self.clear_about()
         self.input.clear()
         self._hide_welcome()
@@ -898,6 +916,8 @@ class FloPanel(QWidget):
         parts = [_label(text)]
         if about_title:
             parts.append(_label(f"About: {about_title}", muted=True))
+        elif screen_title:
+            parts.append(_label(f"Looking at: {screen_title}", muted=True))
         bubble = self._block(*parts, name="flo_user", margins=(12, 8, 12, 8))
         self._user_bubbles.append(bubble)
         self._fit_bubble(bubble)
@@ -1208,11 +1228,37 @@ class FloPanel(QWidget):
         ids = [n for n in self._about if n in self.graph.nodes][:30]
         if not ids or self.toolbox is None:
             return ""
+        scrub = self.toolbox.disclosure.scrub
         named = "; ".join(
-            f'{self.toolbox.handle(n)} "{self.graph.nodes[n].label}" '
+            f'{self.toolbox.handle(n)} "{scrub(self.graph.nodes[n].label)}" '
             f"({self.graph.nodes[n].type_id})" for n in ids)
         return (f"[I'm pointing at {self._about_title}: {named}. "
                 "Read them with get_node first.]\n")
+
+
+    def _screen_context(self) -> tuple:
+        """(the page's title for the bubble, the line telling the model
+        which page the user is looking at) — empty on the canvas."""
+        try:
+            page = self.graph.pages.get(self.on_screen() or "")
+        except Exception:
+            page = None
+        if page is None or page.kind not in ("dashboard", "report") \
+                or self.toolbox is None:
+            return "", ""
+        handle = self.toolbox.page_handle(page.id)
+        title = self.toolbox.disclosure.scrub(page.title)
+        if page.kind == "report":
+            view = "Web preview" if page.preview_mode == "web" else "Pages preview"
+            return page.title, (
+                f'[On screen: report page {handle} "{title}", {view}. '
+                '"This page", "the report" and "its look" mean this page: its '
+                "text is its markdown (write_report), its look is its CSS "
+                "(get_page with css, set_report_style, write_report_css) — "
+                "not the nodes on the canvas.]\n")
+        return page.title, (
+            f'[On screen: dashboard page {handle} "{title}". "This page" and '
+            '"the dashboard" mean this page and its tiles.]\n')
 
 
 def _host(profile) -> str:
