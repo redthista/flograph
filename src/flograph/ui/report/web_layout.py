@@ -541,8 +541,12 @@ LAYOUT_JS = r"""
   if (starts.length && (hasTop || hasSide)) {
     var current = null;
     Array.prototype.slice.call(body.childNodes).forEach(function (node) {
+      // a script or style stays where it is, and what follows it stays on
+      // the page it is on: a live chart leaves its figure in a
+      // <script id="fg-fig-N"> beside it, and ending the page there left
+      // the rest of that section on no page — so on every page at once
       if (node.nodeType === 1 && (node.tagName === "SCRIPT" || node.tagName === "STYLE")) {
-        current = null; return;
+        return;
       }
       if (node.nodeType === 1 && starts.indexOf(node) !== -1) {
         current = document.createElement("section");

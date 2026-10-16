@@ -360,3 +360,19 @@ class TestTextWidth:
         assert "html body { max-width: none !important; }" in _width_css(FULL_WIDTH)
         assert re.search(r"html body \{ max-width: var\(--fg-width\) !important;",
                          _width_css(1100))
+
+
+
+def test_a_live_chart_does_not_end_its_page():
+    """A live chart leaves its figure in a <script id="fg-fig-N"> at body
+    level. The pager used to end the page at any script, so everything
+    after a live chart in a section — a heading, a columns block — landed
+    on no page and showed on every page at once. A script is now stepped
+    over, and the page it is on carries on."""
+    from flograph.ui.report.web_layout import LAYOUT_JS
+    loop = LAYOUT_JS[LAYOUT_JS.index("var current = null;"):]
+    loop = loop[:loop.index("pages.forEach")]
+    branch = loop[loop.index('node.tagName === "SCRIPT"'):]
+    branch = branch[:branch.index("}")]
+    assert "current = null" not in branch
+    assert "return;" in branch
