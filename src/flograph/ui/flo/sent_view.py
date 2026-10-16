@@ -40,6 +40,17 @@ def format_messages(messages: list) -> str:
     return "\n\n".join(parts)
 
 
+def _tokens(entry: dict) -> str:
+    """The server's count for one request, once its reply is back."""
+    if "usage" not in entry:
+        return ""        # not answered yet (Confirm every send), or failed
+    usage = entry.get("usage")
+    if not isinstance(usage, dict):
+        return "Tokens: not reported by the server\n"
+    return (f"Tokens: {int(usage.get('input') or 0):,} in, "
+            f"{int(usage.get('output') or 0):,} out\n")
+
+
 def format_requests(entries: list, destination: str, *, before: list = ()) -> str:
     """The requests of one turn, each showing only what it added.
 
@@ -58,7 +69,8 @@ def format_requests(entries: list, destination: str, *, before: list = ()) -> st
             new = list(messages[len(previous):])
         tools = ", ".join(entry.get("tools") or []) or "none"
         out.append(f"REQUEST {index} → {destination}\n"
-                   f"Tools offered: {tools}\n\n" + format_messages(new))
+                   f"Tools offered: {tools}\n" + _tokens(entry) + "\n"
+                   + format_messages(new))
         previous = messages
     return "\n\n\n".join(out) if out else "Nothing was sent."
 

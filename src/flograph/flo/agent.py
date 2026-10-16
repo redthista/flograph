@@ -20,6 +20,7 @@ the turn's undo step — goes through `on_ui`, which the dock points at the
 GUI thread; undo commands must never be pushed from a worker.
 `before_send` sees each request as it is about to go (the send log, and
 "confirm every send"); returning False stops the turn without sending.
+Each outbox entry gains the reply's token count (`usage`) once it is back.
 """
 from __future__ import annotations
 
@@ -219,6 +220,7 @@ class Conversation:
                       "cancelled": cancelled} if self.stream else {})
         reply = toolcall.chat_with_tools(self.connection, self.messages,
                                          tools, self.tool_mode, **streaming)
+        entry["usage"] = reply.usage
         if reply.mode == "json" and self.tool_mode == "auto":
             self.tool_mode = "json"
         return reply

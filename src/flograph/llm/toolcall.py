@@ -71,6 +71,7 @@ class Reply:
     tool_calls: list = field(default_factory=list)
     mode: str = "native"     # which protocol produced this reply
     stop: str = ""           # finish/stop reason, for an empty reply
+    usage: Optional[dict] = None   # {"input", "output"} tokens, if reported
 
     @property
     def done(self) -> bool:
@@ -318,20 +319,26 @@ def chat_with_tools(conn: wire.Connection, messages: list[dict],
     if mode not in MODES:
         mode = "auto"
     stream = {"on_text": on_text, "cancelled": cancelled}
+
+    def counted(reply: Reply, data) -> Reply:
+        reply.usage = wire.usage_of(data, conn.provider)
+        return reply
+
     if not tools:
         converted = (_openai_messages(messages) if conn.provider != "anthropic"
                      else _anthropic_messages(messages))
         data = wire.exchange(conn, lambda tweaks: wire.chat_body(
             conn, converted, tweaks), **stream)
-        return Reply(wire.reply_text(data, conn.provider), [], "native")
+        return counted(Reply(wire.reply_text(data, conn.provider), [],
+                             "native"), data)
     if mode in ("auto", "native"):
         try:
             data = wire.exchange(conn, lambda tweaks: request_body(
                 conn, messages, tools, "native", tweaks), **stream)
-            return _parse_native(data, conn.provider)
+            return counted(_parse_native(data, conn.provider), data)
         except wire.LLMError as exc:
             if mode == "native" or not _refuses_tools(exc):
                 raise
     data = wire.exchange(conn, lambda tweaks: request_body(
         conn, messages, tools, "json", tweaks), **stream)
-    return parse_fallback(wire.reply_text(data, conn.provider))
+    return counted(parse_fallback(wire.reply_text(data, conn.provider)), data)

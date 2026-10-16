@@ -68,6 +68,22 @@ API keys are kept in your system keychain (Windows Credential Manager, the \
 macOS Keychain, or the Secret Service on Linux), never in a settings file."""
 
 
+def _price_text(value) -> str:
+    return "" if value is None else f"{value:g}"
+
+
+def _price_value(text: str):
+    """A typed price, or None — blank, or not a number ('$3' reads as 3)."""
+    text = (text or "").strip().lstrip("$£€¥ ")
+    if "," in text:   # 1,000.50 or 3,50 — a decimal comma when it is the only mark
+        text = text.replace(",", "" if "." in text else ".")
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
 def _settings() -> QSettings:
     return QSettings(_ORG, _APP)
 
@@ -246,6 +262,30 @@ class AiSettingsDialog(QDialog):
             "the reply when the server refuses it. Choose JSON for a small "
             "local model that has tools but uses them badly.")
 
+        # -- what it costs (only for the Flo Assistant's receipt) --------------
+        self._price_in = QLineEdit()
+        self._price_out = QLineEdit()
+        self._currency = QLineEdit()
+        for box, hint in ((self._price_in, "in"), (self._price_out, "out")):
+            box.setPlaceholderText(hint)
+            box.setMaximumWidth(90)
+        self._currency.setMaximumWidth(44)
+        self._price_in.setObjectName("price_in")
+        self._price_out.setObjectName("price_out")
+        self._currency.setObjectName("price_currency")
+        price_tip = (
+            "What this server charges per million tokens, from its price "
+            "page — input (what is sent) and output (what it writes). The "
+            "Flo Assistant's receipt then shows what each reply cost, "
+            "before any discount. Leave blank and it counts tokens only.")
+        price_row = QHBoxLayout()
+        price_row.addWidget(self._currency)
+        price_row.addWidget(self._price_in)
+        price_row.addWidget(self._price_out)
+        price_row.addWidget(QLabel("per million tokens"), 1)
+        for box in (self._price_in, self._price_out, self._currency):
+            box.setToolTip(price_tip)
+
         # -- where the data goes ------------------------------------------------
         self._location = QComboBox()
         self._location.addItem("Automatic", "auto")
@@ -282,6 +322,7 @@ class AiSettingsDialog(QDialog):
         form.addRow("Thinking", self._thinking)
         form.addRow("Extra request JSON", self._extra)
         form.addRow("Tool calling", self._tool_mode)
+        form.addRow("Price", price_row)
         form.addRow("Server is on", where_row)
         form.addRow("", self._where_warning)
         form.addRow("", self._test_btn)
@@ -398,6 +439,9 @@ class AiSettingsDialog(QDialog):
             max(self._tool_mode.findData(profile.tool_mode), 0))
         self._location.setCurrentIndex(
             max(self._location.findData(profile.location), 0))
+        self._price_in.setText(_price_text(profile.price_in))
+        self._price_out.setText(_price_text(profile.price_out))
+        self._currency.setText(profile.currency)
         self._loading = False
         self._refresh_where()
 
@@ -414,6 +458,9 @@ class AiSettingsDialog(QDialog):
         profile.extra_json = self._extra.toPlainText().strip()
         profile.tool_mode = self._tool_mode.currentData()
         profile.location = self._location.currentData()
+        profile.price_in = _price_value(self._price_in.text())
+        profile.price_out = _price_value(self._price_out.text())
+        profile.currency = self._currency.text().strip()[:8]
         self._keys[profile.id] = self._api_key.text().strip()
 
     def _form_profile(self) -> Profile:

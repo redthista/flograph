@@ -443,8 +443,11 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
   out); new abilities are things you ask it for.
   Not wanted: conversations saved in the flow — chats stay at the user
   level (Dan, 2026-10-15).
-- *Open:* an org-level cap file for work rollouts (not now); token counts
-  / cost per reply for online connections.
+- *Token counts, shipped 2026-10-16:* the server's own count per request
+  (`wire.usage_of`; `stream_options` on an OpenAI-format stream, asked
+  again without when refused), summed on the receipt with the chat's
+  running total; cost only at prices typed into the connection.
+- *Open:* an org-level cap file for work rollouts (not now).
 
 ---
 

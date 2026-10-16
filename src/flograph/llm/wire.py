@@ -29,6 +29,10 @@ What it copes with, each one learned from a real server:
   `reasoning_content`. An empty reply names its stop reason.
 - **Thinking** and **extra request JSON**, merged last so the escape hatch
   outranks everything.
+- **Token counts.** `usage_of` reads what a reply says it cost, in either
+  format's words. A streamed OpenAI-format request asks for them with
+  `stream_options`; a server that refuses that is asked again without it,
+  and its replies just carry no count.
 
 `httpx` is imported inside the functions that need it: this module is
 imported at load by node scripts, and a missing optional package should
@@ -315,6 +319,8 @@ def chat_body(conn: Connection, messages: list[dict],
 def _tweak_for(message: str) -> Optional[str]:
     """Which part of the request a 400 is complaining about, if any."""
     text = message.lower()
+    if "stream_options" in text or "include_usage" in text:
+        return "no_stream_options"
     if "stream" in text:
         return "no_stream"
     if "max_completion_tokens" in text:
@@ -378,6 +384,33 @@ def reply_text(data: dict, provider: str) -> str:
     return content
 
 
+def _count(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def usage_of(data, provider: str) -> Optional[dict]:
+    """`{"input": n, "output": n}` — the tokens a reply says it took — or
+    None when it doesn't say. Anthropic counts cached prompt tokens apart
+    from `input_tokens`; they were still sent, so they are added in."""
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    if "prompt_tokens" in usage or "completion_tokens" in usage:
+        spent = _count(usage.get("prompt_tokens"))
+        made = _count(usage.get("completion_tokens"))
+    elif "input_tokens" in usage or "output_tokens" in usage:
+        spent = (_count(usage.get("input_tokens"))
+                 + _count(usage.get("cache_creation_input_tokens"))
+                 + _count(usage.get("cache_read_input_tokens")))
+        made = _count(usage.get("output_tokens"))
+    else:
+        return None
+    return {"input": spent, "output": made}
+
+
 def exchange(conn: Connection, build_body, *, on_text=None,
              cancelled=None) -> dict:
     """POST to the chat endpoint and return the decoded reply.
@@ -389,20 +422,37 @@ def exchange(conn: Connection, build_body, *, on_text=None,
     With `on_text`, the reply is streamed: text goes to `on_text` as it
     arrives, and the result is still the whole reply (`llm.stream`). A
     server that refuses `stream` is asked again without it.
+
+    A streamed OpenAI-format request also asks for the token count
+    (`stream_options`), which the format leaves out of a stream otherwise.
+    It is newer than most of what speaks the format, so a 400 or 422 that
+    doesn't name something else is taken to be about it, once.
     """
     urls = candidate_urls(conn, _PATHS.get(conn.provider, _PATHS["openai"]))
     tweaks: set = set()
     while True:
         stream = on_text is not None and "no_stream" not in tweaks
+        ask_usage = (stream and conn.provider != "anthropic"
+                     and "no_stream_options" not in tweaks)
         body = build_body(frozenset(tweaks))
         if stream:
             body = {**body, "stream": True}
+        if ask_usage:
+            # first, so extra request JSON can still say otherwise
+            body = {"stream_options": {"include_usage": True}, **body}
         try:
             response = _send("POST", urls, conn, conn.timeout, body,
                              stream=stream)
             break
         except LLMError as exc:
-            tweak = _tweak_for(str(exc)) if "HTTP 400" in str(exc) else None
+            text = str(exc)
+            refused = "HTTP 400" in text or "HTTP 422" in text
+            tweak = _tweak_for(text) if "HTTP 400" in text else None
+            if tweak is None and ask_usage and refused \
+                    and "tool" not in text.lower():
+                tweak = "no_stream_options"
+            if tweak == "no_stream_options" and not ask_usage:
+                tweak = None
             if tweak == "no_stream" and not stream:
                 tweak = None
             if tweak is None or tweak in tweaks:

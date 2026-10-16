@@ -15,6 +15,11 @@ counts — a gateway on the office network is still another machine.
 
 Saved as JSON in the user folder (`ai_profiles.json`). API keys are never
 in that file; they live in the keychain under `key_name` (see `keys`).
+
+A profile may also carry what the server charges (`price_in`/`price_out`,
+per million tokens, in `currency`), typed in by the user — there is no
+price list to look up, and a wrong guess at someone's bill is worse than
+none. Unset, Flo's receipt counts tokens and names no cost.
 """
 from __future__ import annotations
 
@@ -48,6 +53,7 @@ LOCAL_DEFAULT_CEILING = 5
 ONLINE_DEFAULT_CEILING = 1
 
 LOCATIONS = ("auto", "local", "online")
+PRICE_FIELDS = ("price_in", "price_out", "currency")
 
 
 def level_label(index: int) -> str:
@@ -109,6 +115,17 @@ class Profile:
     # "auto" tries the native API and falls back if the server refuses it;
     # "json" is for a model that has tools but uses them badly.
     tool_mode: str = "auto"
+    # What the server charges per million tokens; None = not said.
+    price_in: Optional[float] = None
+    price_out: Optional[float] = None
+    currency: str = "$"
+
+    def prices(self) -> Optional[tuple]:
+        """(in, out, currency) per million tokens, or None when unset."""
+        if self.price_in is None and self.price_out is None:
+            return None
+        return (self.price_in or 0.0, self.price_out or 0.0,
+                self.currency if self.currency is not None else "$")
 
     # -- where the data goes ------------------------------------------------
 
@@ -183,6 +200,11 @@ class Profile:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def chat_dict(self) -> dict:
+        """What a chat depends on: everything but the prices, which only
+        change how its receipt reads — so editing them keeps the chat."""
+        return {k: v for k, v in asdict(self).items() if k not in PRICE_FIELDS}
+
     @classmethod
     def from_dict(cls, data: dict) -> "Profile":
         known = {f.name for f in fields(cls)}
@@ -193,6 +215,14 @@ class Profile:
             profile.location = "auto"
         if profile.tool_mode not in ("auto", "native", "json"):
             profile.tool_mode = "auto"
+        for name in ("price_in", "price_out"):
+            value = getattr(profile, name)
+            try:
+                value = None if value in (None, "") else float(value)
+            except (TypeError, ValueError):
+                value = None
+            setattr(profile, name, value if value is None or value >= 0 else None)
+        profile.currency = str(profile.currency or "")[:8]
         if profile.ceiling is not None:
             try:
                 profile.ceiling = max(0, min(int(profile.ceiling), len(LEVELS) - 1))

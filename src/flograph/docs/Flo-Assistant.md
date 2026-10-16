@@ -258,6 +258,25 @@ At **Column names and summaries**, the lowest and highest value of number
 and date columns are real values from your data; the receipt names those
 columns. Set a column to **Hidden** to keep it out altogether.
 
+### Tokens and cost
+
+The receipt ends with how many **tokens** the reply took, as the server
+counted them — *18.4k tokens in, 1.2k out*. Every request repeats the
+conversation so far, so a long build's input count grows with each step;
+**details** gives the exact numbers, and the running total for the whole
+chat. **What was sent** shows the count of each request.
+
+Some local servers and gateways don't report a count. The receipt then
+says so rather than guessing, and *At least* means only some requests
+reported one.
+
+To see what a reply cost, type the server's prices into the connection in
+**Tools ▸ AI Assistant Settings ▸ Price** — per million tokens, input and
+output, from the provider's price page — and the receipt adds *≈ $0.07*.
+It is worked out at those prices before any discount (cached prompts are
+often cheaper), so it is a guide, not your bill. Leave Price blank and it
+counts tokens only; changing it doesn't start a fresh chat.
+
 ## What was sent
 
 Under every reply, **What was sent** shows the requests behind it, in full:

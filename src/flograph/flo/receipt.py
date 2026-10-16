@@ -11,6 +11,12 @@ Column names are found by walking the tool results' JSON *values* (never
 keys, so a column called "name" isn't found in every result) for an exact
 column name or alias, and by a whole-word search of free text: the user's
 message and node settings.
+
+Tokens are the server's own count, from each request's reply (`usage` on
+the outbox entry). Every request repeats the conversation so far, so the
+input count of a long build grows with each step — which is the point of
+showing it. A server that reports nothing is said to, never estimated; a
+cost is shown only at prices the user typed into the connection.
 """
 from __future__ import annotations
 
@@ -41,6 +47,13 @@ class Receipt:
     reports: int = 0                     # report pages whose text was sent
     code_nodes: int = 0                  # nodes whose own (user) code was sent
     text_hidden: bool = False            # typed setting text was withheld
+    tokens_in: int = 0                   # as the server counted them
+    tokens_out: int = 0
+    counted: int = 0                     # requests whose reply had a count
+    chat_in: int = 0                     # the whole chat so far
+    chat_out: int = 0
+    chat_requests: int = 0
+    prices: Any = None                   # (in, out, currency) per million
 
     @property
     def sent_anything(self) -> bool:
@@ -71,7 +84,49 @@ class Receipt:
                          f"column{_s(len(self.values))}")
         parts.append(f"{self.rows} row{_s(self.rows)} of your data"
                      if self.rows else "no rows")
-        return f"{where}: " + ", ".join(parts) + "."
+        return f"{where}: " + ", ".join(parts) + "." + self._tokens_line()
+
+    def _tokens_line(self) -> str:
+        if not self.counted:
+            return ""
+        some = "At least " if self.counted < self.requests else ""
+        line = (f" {some}{_short(self.tokens_in)} tokens in, "
+                f"{_short(self.tokens_out)} out")
+        cost = self.cost(self.tokens_in, self.tokens_out)
+        return line + (f" ({cost})." if cost else ".")
+
+    def cost(self, spent: int, made: int) -> str:
+        """'≈ $0.04' at the connection's prices; '' when it has none."""
+        if not self.prices:
+            return ""
+        price_in, price_out, currency = self.prices
+        amount = (spent * price_in + made * price_out) / 1_000_000
+        if amount and amount < 0.01:
+            return f"under {currency}0.01"
+        return f"≈ {currency}{amount:,.2f}"
+
+    def token_details(self) -> list[str]:
+        if not self.requests:
+            return []
+        if not self.counted:
+            return ["Tokens: the server didn't say how many — some local "
+                    "servers and gateways don't."]
+        line = (f"Tokens: {self.tokens_in:,} in, {self.tokens_out:,} out, "
+                f"over {self.requests} request{_s(self.requests)}")
+        if self.counted < self.requests:
+            line += f" ({self.counted} of them gave a count)"
+        out = [line + "."]
+        if self.chat_requests > self.requests:
+            cost = self.cost(self.chat_in, self.chat_out)
+            out.append(f"This chat so far: {self.chat_in:,} tokens in, "
+                       f"{self.chat_out:,} out" + (f" ({cost})" if cost else "")
+                       + ".")
+        if self.prices:
+            price_in, price_out, currency = self.prices
+            out.append(f"Cost is worked out at the prices on this connection "
+                       f"({currency}{price_in:g} in, {currency}{price_out:g} out "
+                       "per million tokens), before any discount.")
+        return out
 
     def details(self) -> list[str]:
         out = []
@@ -104,11 +159,32 @@ class Receipt:
             out.append("Never sent: hidden columns, passwords, full file paths.")
         else:
             out.append("Never sent: rows of your data, passwords, full file paths.")
-        return out
+        return out + self.token_details()
 
 
 def _s(n: int) -> str:
     return "" if n == 1 else "s"
+
+
+def _short(n: int) -> str:
+    """812, 4,210, 18.4k, 1.2M — a count to read at a glance."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n / 1000:.1f}k"
+    return f"{n:,}"
+
+
+def tally(entries: Iterable) -> tuple[int, int, int]:
+    """(tokens in, tokens out, requests that gave a count)."""
+    spent = made = counted = 0
+    for entry in entries:
+        usage = entry.get("usage") if isinstance(entry, dict) else None
+        if isinstance(usage, dict):
+            spent += int(usage.get("input") or 0)
+            made += int(usage.get("output") or 0)
+            counted += 1
+    return spent, made, counted
 
 
 def _strings(value: Any, path: tuple = ()) -> Iterable[tuple[tuple, str]]:
@@ -151,10 +227,18 @@ def _count_rows(value) -> int:
 
 
 def build(entries: list, before: list, disclosure: disc.Disclosure, *,
-          destination: str, local: bool) -> Receipt:
+          destination: str, local: bool, chat: Iterable = (),
+          prices=None) -> Receipt:
+    """`chat` is every request of the conversation so far, this reply's
+    included, for the running token total."""
     receipt = Receipt(destination=destination, local=local,
                       requests=len(entries),
-                      text_hidden=not disclosure.allows(disc.SCHEMA))
+                      text_hidden=not disclosure.allows(disc.SCHEMA),
+                      prices=prices)
+    receipt.tokens_in, receipt.tokens_out, receipt.counted = tally(entries)
+    chat = list(chat)
+    receipt.chat_in, receipt.chat_out, _ = tally(chat)
+    receipt.chat_requests = len(chat)
     if not entries:
         return receipt
     last = entries[-1].get("messages") or []

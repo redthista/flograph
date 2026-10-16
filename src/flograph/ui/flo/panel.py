@@ -590,12 +590,12 @@ class FloPanel(QWidget):
         if self._chat_profile is not None and self._has_history():
             if self._chat_profile.get("id") != active.id:
                 self.new_chat(note=self._switched_note(active))
-            elif self._chat_profile != active.to_dict():
+            elif self._chat_profile != active.chat_dict():
                 # same connection, but its address or ceiling may have moved
                 self.new_chat(note="The connection's settings changed — "
                               "started a fresh chat.")
         elif self._chat_profile is not None and \
-                self._chat_profile != active.to_dict():
+                self._chat_profile != active.chat_dict():
             self._reset_chat()   # nothing said yet: just pick the new one up
         self.refresh_header()
 
@@ -897,7 +897,7 @@ class FloPanel(QWidget):
                                  on_ui=self.bridge.on_ui,
                                  before_send=self._before_send,
                                  stream=True)
-        self._chat_profile = profile.to_dict()
+        self._chat_profile = profile.chat_dict()
         return True
 
     def _run_nodes(self, node_ids: list, cancelled) -> str:
@@ -1038,6 +1038,7 @@ class FloPanel(QWidget):
                        if self.chat.outbox else []),
             "to": "this PC" if profile.is_local() else _host(profile),
             "local": profile.is_local(),
+            "prices": profile.prices(),
             "meta": {"connection": profile.name,
                      "to": profile.where_label(),
                      "model": self.chat.connection.model,
@@ -1204,7 +1205,8 @@ class FloPanel(QWidget):
                   "undone": False}
         record["receipt"] = receipts.build(
             entries, turn["before"], self.toolbox.disclosure,
-            destination=turn["to"], local=turn["local"])
+            destination=turn["to"], local=turn["local"],
+            chat=self.chat.outbox, prices=turn.get("prices"))
         self._turns.append(record)
 
         parts: list[QWidget] = []

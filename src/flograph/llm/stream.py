@@ -11,6 +11,11 @@ and a tool call is acted on only once it is complete.
 A server that ignores `stream` and answers with plain JSON is fine: the
 JSON is the reply. `cancelled` is checked between chunks, so Stop ends a
 reply mid-sentence instead of waiting for the server to finish it.
+
+The token count rides along as the reply's `usage`: OpenAI's comes in a
+last chunk with no choices (only when the request asked for it),
+Anthropic's in `message_start` and then `message_delta`, whose output
+count is the running total, not an increment.
 """
 from __future__ import annotations
 
@@ -29,9 +34,12 @@ class _OpenAI:
         self.reasoning: list[str] = []
         self.calls: dict[int, dict] = {}
         self.finish: Optional[str] = None
+        self.usage: Optional[dict] = None
         self.seen = False
 
     def feed(self, event: dict) -> None:
+        if isinstance(event.get("usage"), dict):
+            self.usage = event["usage"]
         for choice in (event.get("choices") or [])[:1]:
             self.seen = True
             delta = choice.get("delta") or choice.get("message") or {}
@@ -70,7 +78,11 @@ class _OpenAI:
             message["reasoning_content"] = "".join(self.reasoning)
         if self.calls:
             message["tool_calls"] = [self.calls[k] for k in sorted(self.calls)]
-        return {"choices": [{"message": message, "finish_reason": self.finish}]}
+        data: dict = {"choices": [{"message": message,
+                                   "finish_reason": self.finish}]}
+        if self.usage is not None:
+            data["usage"] = self.usage
+        return data
 
 
 class _Anthropic:
@@ -78,6 +90,7 @@ class _Anthropic:
         self.on_text = on_text
         self.blocks: dict[int, dict] = {}
         self.stop: Optional[str] = None
+        self.usage: dict = {}
         self.seen = False
 
     def feed(self, event: dict) -> None:
@@ -88,6 +101,9 @@ class _Anthropic:
                            f"{error.get('message') or error}")
         if kind == "message_start":
             self.seen = True
+            usage = (event.get("message") or {}).get("usage")
+            if isinstance(usage, dict):
+                self.usage.update(usage)
         elif kind == "content_block_start":
             self.seen = True
             block = dict(event.get("content_block") or {})
@@ -109,6 +125,8 @@ class _Anthropic:
                 block["thinking"] = block.get("thinking", "") + delta.get("thinking", "")
         elif kind == "message_delta":
             self.stop = (event.get("delta") or {}).get("stop_reason") or self.stop
+            if isinstance(event.get("usage"), dict):
+                self.usage.update(event["usage"])
 
     def result(self) -> dict:
         if not self.seen:
@@ -127,7 +145,10 @@ class _Anthropic:
                 else:
                     block.setdefault("input", {})
             content.append(block)
-        return {"content": content, "stop_reason": self.stop}
+        data: dict = {"content": content, "stop_reason": self.stop}
+        if self.usage:
+            data["usage"] = dict(self.usage)
+        return data
 
 
 def read(response, provider: str, on_text: TextSink,
