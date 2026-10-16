@@ -108,6 +108,11 @@ _VISIBILITY = {
                   "looks like — but never the rows themselves. A column that "
                   "lists 'values' is one whose distinct values the user chose "
                   "to share." + _NO_GUESSING,
+    disc.FULL: "The user chose to share their data with you: get_output "
+               "brings a table's first rows and its category columns' values, "
+               "and get_rows reads more. Use the real values — spellings, "
+               "ranges, gaps — rather than guessing. Some columns may be "
+               "hidden from you; that is the user's choice.",
 }
 
 

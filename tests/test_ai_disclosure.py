@@ -55,9 +55,9 @@ class TestLevels:
         for value in SECRET_NAMES + ["North", "South", "a@x.com"]:
             assert value not in dumped
 
-    def test_levels_above_profile_are_not_served_yet(self):
-        assert Disclosure(d.ANALYSE).level == d.PROFILE
-        assert d.effective_level(5) == d.PROFILE
+    def test_nothing_above_all_my_data(self):
+        assert Disclosure(9).level == d.FULL
+        assert d.effective_level(9) == d.FULL
 
     def test_effective_level_is_the_lowest(self):
         assert d.effective_level(2, None, None) == 2
@@ -226,3 +226,46 @@ class TestCharts:
         import plotly.graph_objects as go
         out = Disclosure(d.SCHEMA).describe(go.Figure())
         assert out["traces"] == [] and "draws nothing" in out["note"]
+
+
+
+class TestAllMyData:
+    def test_tables_come_with_their_first_rows(self, table):
+        out = Disclosure(d.FULL).describe(table)
+        assert len(out["sample_rows"]) == d.SAMPLE_ROWS
+        assert out["sample_rows"][0]["customer"] == SECRET_NAMES[0]
+        assert "10 more" in out["more_rows"]
+
+    def test_category_columns_bring_their_values(self, table):
+        cols = {c["name"]: c for c in Disclosure(d.FULL).describe(table)["columns"]}
+        assert sorted(cols["region"]["values"]) == ["North", "South"]
+
+    def test_hidden_stays_hidden_rows_included(self, table):
+        disclosure = Disclosure(d.FULL, Privacy(columns={"salary": ColumnRule(d.HIDDEN)}))
+        out = disclosure.describe(table)
+        assert "salary" not in _dump(out) and "51234" not in _dump(out)
+        page = disclosure.rows(table, 0, 5)
+        assert "salary" not in page["rows"][0] and page["total_rows"] == 30
+
+    def test_rows_page_and_cap(self, table):
+        disclosure = Disclosure(d.FULL)
+        page = disclosure.rows(table, start=28, count=999)
+        assert len(page["rows"]) == 2 and page["start"] == 28
+        big = pd.DataFrame({"n": range(500)})
+        assert len(disclosure.rows(big, 0, 999)["rows"]) == d.MAX_ROWS
+
+    def test_no_rows_below_all_my_data(self, table):
+        for level in (d.STRUCTURE, d.SCHEMA, d.PROFILE):
+            disclosure = Disclosure(level)
+            assert "sample_rows" not in disclosure.describe(table)
+            assert "error" in disclosure.rows(table)
+
+    def test_errors_as_they_are(self):
+        text = "could not convert string to float: 'Jane Smith'"
+        assert Disclosure(d.FULL).error_text(text) == text
+        assert "Jane" not in Disclosure(d.PROFILE).error_text(text)
+
+    def test_missing_cells_and_odd_cells(self):
+        frame = pd.DataFrame({"a": [1.0, None], "b": [[1, 2], "x"]})
+        rows = Disclosure(d.FULL).rows(frame)["rows"]
+        assert rows[1]["a"] is None and rows[1]["b"] == "x"

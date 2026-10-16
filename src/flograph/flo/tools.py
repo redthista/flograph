@@ -70,10 +70,21 @@ _READ_TOOLS = [
 _OUTPUT_TOOL = ToolSpec(
     "get_output",
     "What a node last produced: for a table its row count and columns with "
-    "their types{profile}. Never any rows. Empty if the node has not run.",
+    "their types{profile}. {rows} Empty if the node has not run.",
     _schema({"node": _NODE,
              "port": {"type": "string", "description": "output name; "
                       "optional — the first table output is used"}}, ("node",)))
+
+_ROWS_TOOL = ToolSpec(
+    "get_rows",
+    "Rows of a table a node produced — the user chose to share their data. "
+    "Up to 200 at a time; page with start.",
+    _schema({"node": _NODE,
+             "port": {"type": "string", "description": "output name; "
+                      "optional — the first table output is used"},
+             "start": {"type": "integer", "description": "first row, from 0"},
+             "count": {"type": "integer", "description": "how many, up to 200"}},
+            ("node",)))
 
 _RUN_TOOL = ToolSpec(
     "run_nodes",
@@ -196,9 +207,14 @@ class Toolbox:
             profile = (", and per column its empty share, distinct count, "
                        "range and what it looks like"
                        if self.disclosure.allows(disc.PROFILE) else "")
+            rows = ("It also brings its first 20 rows." if
+                    self.disclosure.allows(disc.FULL) else "Never any rows.")
             tools.append(ToolSpec(_OUTPUT_TOOL.name,
-                                  _OUTPUT_TOOL.description.format(profile=profile),
+                                  _OUTPUT_TOOL.description.format(
+                                      profile=profile, rows=rows),
                                   _OUTPUT_TOOL.parameters))
+            if self.disclosure.allows(disc.FULL):
+                tools.append(_ROWS_TOOL)
         if self.autonomy == ACT:
             tools.extend(_WRITE_TOOLS)
             if self.runner is not None:
@@ -548,6 +564,20 @@ class Toolbox:
         return {"node": self.handle(inst.id), "port": port,
                 **self.disclosure.describe(outputs[port])}
 
+    def _tool_get_rows(self, node, port=None, start=0, count=50) -> dict:
+        inst = self._node(node)
+        outputs = self._outputs(inst.id, load=True)
+        names = [p.name for p in inst.spec.outputs]
+        if port in (None, ""):
+            tables = [p.name for p in inst.spec.outputs
+                      if getattr(p.type, "value", "") == "dataframe"]
+            port = (tables or names or [""])[0]
+        if port not in outputs:
+            return {"node": self.handle(inst.id), "port": port,
+                    "note": "nothing yet — the node has not run"}
+        return {"node": self.handle(inst.id), "port": port,
+                **self.disclosure.rows(outputs[port], start, count)}
+
     # -- changing ----------------------------------------------------------------
 
     def _type(self, type_id):
@@ -767,7 +797,7 @@ def _run_result(box: "Toolbox", node_ids: list, outcome: str) -> dict:
 
 # reads that return the same thing until something changes
 _REPEAT_FREE = {"describe_flow", "get_node", "get_output", "get_node_type",
-                "find_node_types"}
+                "find_node_types", "get_rows"}
 _WRITES = {"add_node", "connect", "disconnect", "set_params", "rename_node",
            "delete_nodes"}
 

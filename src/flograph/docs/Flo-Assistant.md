@@ -30,8 +30,13 @@ send someone carries its rules with it.
 - **Column names and summaries** — also, per column: how much is empty, how
   many different values, the lowest and highest value, and what it looks
   like (emails, IDs…).
+- **All my data** — the data itself: the first rows of each table, more
+  rows when it asks (up to 200 at a time), the values of every category
+  column, and error messages as they are. The most useful for analysing
+  your data, and the one to think about before choosing it for an online
+  server.
 
-Rows are never sent, at any level. Changing the level is an edit to the
+Only **All my data** sends rows. Changing the level is an edit to the
 flow like any other — Ctrl+Z puts it back. Lowering it starts a fresh
 chat, because every request repeats the conversation so far.
 
@@ -47,8 +52,9 @@ chat, because every request repeats the conversation so far.
 The level is enforced by what Flo is *able* to ask for, not by asking it
 nicely: at Nothing it is not given the tool that reads columns at all.
 
-Whatever the settings, passwords never go, a file path goes as its file
-name only, and quoted values in an error message go as `'<value>'`.
+Whatever the settings, a **Hidden** column stays hidden (rows included),
+passwords never go, and a file path goes as its file name only. Below All
+my data, quoted values in an error message go as `'<value>'`.
 
 ## Where it goes
 
@@ -124,8 +130,9 @@ and nothing the AI asked for in that unfinished answer is done.
 
 Every reply ends with a line saying what it sent and where — for example
 *Sent to ai.example.com: your message, the flow (3 nodes), 6 column
-names, no rows.* **details** lists the column names, which had their
-values or ranges sent, and whether typed setting text was included. The receipt is read back from the requests that actually went,
+names, no rows.* — or, at All my data, how many rows went. **details**
+lists the column names, which had their values or ranges sent, and whether
+typed setting text was included. The receipt is read back from the requests that actually went,
 not worked out from the dials, so it reports what left rather than what
 should have.
 
@@ -147,6 +154,6 @@ and every tool result. From the **⋯** menu:
 
 ## Not yet
 
-It does not see real rows or run nodes yet, and it cannot write new node
-code — those come later, behind the same setting. Chats are not saved in the
+It cannot write new node code yet — that comes later, behind the same
+setting. Chats are not saved in the
 flow: a flow you send someone never carries your conversation.

@@ -588,7 +588,7 @@ def test_the_receipt_names_shared_values(registry, stack):
                           {"role": "tool", "name": "get_output", "content": result}]}
     made = receipt.build([entry], [], box.disclosure, destination="x", local=False)
     assert made.values == ["Test_Name"]
-    assert "the values of 1 column you share" in made.summary()
+    assert "the values of 1 column" in made.summary()
 
 
 def test_the_prompt_says_how_to_get_values(registry, stack):
@@ -606,3 +606,34 @@ def test_a_refused_duplicate_says_what_is_unset(registry, stack):
         "type_id": PLOTLY, "input_from": "n1"})))
     assert "n2 is already that node" in out["error"]
     assert "x" in out["error"] and "set_params on n2" in out["error"]
+
+
+
+def test_get_rows_only_at_all_my_data(registry, stack):
+    graph = Graph()
+    node = registry.instantiate(CSV, (0, 0))
+    graph.add_node(node)
+    cache = _Cache({node.id: {"table": pd.DataFrame({"a": range(60)})}})
+    low = _toolbox(registry, stack, graph=graph, cache=cache, level=disc.PROFILE)
+    assert "get_rows" not in {t.name for t in low.specs()}
+    full = _toolbox(registry, stack, graph=graph, cache=cache, level=disc.FULL)
+    assert "get_rows" in {t.name for t in full.specs()}
+    full.handle(node.id)
+    page = json.loads(full.execute(ToolCall("a", "get_rows", {
+        "node": "n1", "start": 50, "count": 20})))
+    assert [r["a"] for r in page["rows"]] == list(range(50, 60))
+
+
+def test_the_receipt_counts_rows(registry, stack):
+    from flograph.flo import receipt
+    graph = Graph()
+    node = registry.instantiate(CSV, (0, 0))
+    graph.add_node(node)
+    cache = _Cache({node.id: {"table": pd.DataFrame({"a": range(60)})}})
+    box = _toolbox(registry, stack, graph=graph, cache=cache, level=disc.FULL)
+    box.handle(node.id)
+    out = box.execute(ToolCall("a", "get_output", {"node": "n1"}))
+    entry = {"messages": [{"role": "system", "content": "s"},
+                          {"role": "tool", "name": "get_output", "content": out}]}
+    made = receipt.build([entry], [], box.disclosure, destination="x", local=False)
+    assert made.rows == 20 and "20 rows of your data" in made.summary()

@@ -36,6 +36,7 @@ class Receipt:
     profiled: list = field(default_factory=list)    # shown names with stats
     ranges: list = field(default_factory=list)      # shown names with min/max
     values: list = field(default_factory=list)      # shown names, values shared
+    rows: int = 0                        # rows of data that went (FULL only)
     settings_nodes: int = 0              # nodes whose settings were sent
     text_hidden: bool = False            # typed setting text was withheld
 
@@ -65,8 +66,9 @@ class Receipt:
                          f"column{_s(len(self.profiled))}")
         if self.values:
             parts.append(f"the values of {len(self.values)} "
-                         f"column{_s(len(self.values))} you share")
-        parts.append("no rows")
+                         f"column{_s(len(self.values))}")
+        parts.append(f"{self.rows} row{_s(self.rows)} of your data"
+                     if self.rows else "no rows")
         return f"{where}: " + ", ".join(parts) + "."
 
     def details(self) -> list[str]:
@@ -82,7 +84,7 @@ class Receipt:
         if self.ranges:
             out.append("Smallest and largest value: " + ", ".join(self.ranges))
         if self.values:
-            out.append("Distinct values (you chose to share): "
+            out.append("Values: "
                        + ", ".join(self.values))
         if self.settings_nodes:
             out.append(f"Settings of {self.settings_nodes} node"
@@ -90,7 +92,11 @@ class Receipt:
                        + ("with text you typed hidden"
                           if self.text_hidden else
                           "including text you typed into them"))
-        out.append("Never sent: rows of your data, passwords, full file paths.")
+        if self.rows:
+            out.append(f"Rows of your data: {self.rows} (you chose All my data)")
+            out.append("Never sent: hidden columns, passwords, full file paths.")
+        else:
+            out.append("Never sent: rows of your data, passwords, full file paths.")
         return out
 
 
@@ -121,6 +127,20 @@ def _columns_in(value: Any) -> Iterable[dict]:
     elif isinstance(value, list):
         for item in value:
             yield from _columns_in(item)
+
+
+def _count_rows(value) -> int:
+    """Rows in a tool result: a table's sample, or a get_rows page."""
+    if isinstance(value, dict):
+        total = 0
+        for key in ("sample_rows", "rows"):
+            if isinstance(value.get(key), list):
+                total += len(value[key])
+        return total + sum(_count_rows(v) for k, v in value.items()
+                           if k not in ("sample_rows", "rows"))
+    if isinstance(value, list):
+        return sum(_count_rows(v) for v in value)
+    return 0
 
 
 def build(entries: list, before: list, disclosure: disc.Disclosure, *,
@@ -178,6 +198,7 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
                     described.add(str(node["node"]))
                 if node.get("settings"):
                     with_settings.add(str(node["node"]))
+        receipt.rows += _count_rows(data)
         for column in _columns_in(data):
             shown = str(column.get("name"))
             if "empty_percent" in column or "distinct" in column:

@@ -34,12 +34,19 @@ def will_see(level: int, privacy: disc.Privacy) -> list[str]:
     if level >= disc.PROFILE:
         out.append("Per column: how much is empty, how many different values, "
                    "and the lowest and highest value")
+    if level >= disc.FULL:
+        out.append("Rows of your data — a sample with each table, and more "
+                   "when it asks (up to 200 at a time) — and error messages "
+                   "as they are")
     return out
 
 
 def never_sees(level: int) -> list[str]:
-    out = ["Any row of your data", "Passwords",
-           "Full file paths — only file names"]
+    out = ["Passwords", "Full file paths — only file names"]
+    if level < disc.FULL:
+        out.insert(0, "Any row of your data")
+    else:
+        out.insert(0, "Columns you set to Hidden")
     if level < disc.SCHEMA:
         out.insert(1, "Column names — they go as <column>, even in what you type")
     return out

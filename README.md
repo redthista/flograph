@@ -509,8 +509,9 @@ local.
 a chat that builds and changes the flow itself: "add a bar chart of sales by
 region from my Excel reader". What it sees is two settings saved in the
 `.flograph`: **Flo can see** — nothing from your data, column names (the
-default), or column names and summaries — and, per column, Hidden, Name
-only or Name and values. It never sees rows. **Can** is Advise (look and
+default), column names and summaries, or all your data (real rows) — and,
+per column, Hidden, Name only or Name and values. Below *All my data* it
+never sees a row. **Can** is Advise (look and
 explain) or Act (each reply is one undo step). Every
 request can be inspected under its reply, confirmed before it goes, and is
 logged on this PC.

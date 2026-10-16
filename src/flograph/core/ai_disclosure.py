@@ -19,8 +19,9 @@ someone carries its rules:
   - *Column names and summaries* (PROFILE): also, per column, how much is
     empty, how many distinct values, the lowest and highest value, and what
     it looks like.
-  Rows are never sent, at any level. (Levels 3-5 — made-up rows, real
-  samples, running and reading — are not built and clamp to PROFILE.)
+  - *All my data* (FULL): the data itself — sample rows with every table,
+    `rows()` to read more, the values of every category column, and error
+    messages as they are. Only this level sends rows.
 - **One rule per column**, on top of the level:
   - *Hidden* — the AI never learns the column exists: it is left out of
     every table description and its name goes as `<column>` everywhere.
@@ -28,8 +29,9 @@ someone carries its rules:
   - *Name and values* — also its distinct values (the 100 most common), so
     it can filter on a category by its exact spelling. Not at Nothing.
 
-Whatever the level, password settings never go out, a file path goes as its
-file name only, and quoted pieces of error messages go as `<value>`.
+Whatever the level, password settings never go out and a file path goes as
+its file name only. Below All my data, quoted pieces of error messages go as
+`<value>`. A Hidden column stays hidden at every level, rows included.
 
 No pandas at module level (the core is imported headless and must stay
 light); values are inspected by duck typing on what they offer.
@@ -40,8 +42,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
-STRUCTURE, SCHEMA, PROFILE, LOOKALIKE, SAMPLE, ANALYSE = range(6)
-BUILT_MAX = PROFILE           # the highest level this module can serve
+STRUCTURE, SCHEMA, PROFILE, FULL = range(4)
+BUILT_MAX = FULL              # the highest level this module can serve
+SAMPLE_ROWS = 20              # rows that come with a table at FULL
+MAX_ROWS = 200                # rows one rows() call may hand over
+_MAX_CELL = 200               # characters of one cell
 DEFAULT_LEVEL = SCHEMA
 HIDDEN_COLUMN = "<column>"
 HIDDEN_SECRET = "<hidden>"
@@ -51,7 +56,11 @@ LEVEL_NAMES = {
     STRUCTURE: "Nothing from my data",
     SCHEMA: "Column names",
     PROFILE: "Column names and summaries",
+    FULL: "All my data",
 }
+# short keys, for the send log
+LEVEL_KEYS = {STRUCTURE: "structure", SCHEMA: "schema", PROFILE: "profile",
+              FULL: "all"}
 
 # the rule per column
 HIDDEN, NAME, VALUES = "hidden", "name", "values"
@@ -361,6 +370,8 @@ class Disclosure:
         """A node's error, safe to send. Errors quote the data they choked
         on ("could not convert string to float: 'Jane Smith'"), so every
         quoted piece that is not a column name goes as '<value>'."""
+        if self.level >= FULL:
+            return self.scrub(message or "")
         def quoted(match: "re.Match") -> str:
             if match.group(2).strip() in self._known:
                 return match.group(0)        # scrub() deals with the name
@@ -377,7 +388,8 @@ class Disclosure:
 
     def describe(self, value: Any) -> dict:
         """A cached output as the level allows: its kind; then its shape and
-        the columns it may see; then a summary of each. Never a row."""
+        the columns it may see; then a summary of each; at FULL, its first
+        rows too."""
         if _is_table(value):
             self.learn(column_names(value))
             out: dict = {"kind": "table"}
@@ -388,6 +400,11 @@ class Disclosure:
                 out["columns_count"] = len(shown)
                 out["columns"] = [self._column(str(name), value[name])
                                   for name in shown]
+                if self.level >= FULL and shown:
+                    out["sample_rows"] = self._rows(value[shown], 0, SAMPLE_ROWS)
+                    if value.shape[0] > SAMPLE_ROWS:
+                        out["more_rows"] = (f"{value.shape[0] - SAMPLE_ROWS} "
+                                            "more — get_rows reads them")
             return out
         if _is_series(value):
             self.learn(column_names(value))
@@ -429,6 +446,35 @@ class Disclosure:
             return out
         return {"kind": type(value).__name__}
 
+    def rows(self, value, start: int = 0, count: int = 50) -> dict:
+        """Rows of a table, at FULL only — the hidden columns left out."""
+        if self.level < FULL or not _is_table(value):
+            return {"error": "rows are only shared at 'All my data'"}
+        shown = [name for name in value.columns
+                 if not self.rule(str(name)).hidden]
+        start = max(0, int(start or 0))
+        count = max(1, min(int(count or 50), MAX_ROWS))
+        total = int(value.shape[0])
+        return {"start": start, "total_rows": total,
+                "rows": self._rows(value[shown], start, count) if shown else []}
+
+    @staticmethod
+    def _rows(table, start: int, count: int) -> list[dict]:
+        out = []
+        for _index, row in table.iloc[start:start + count].iterrows():
+            record = {}
+            for name, cell in row.items():
+                try:
+                    missing = bool(cell != cell)        # NaN / NaT
+                except (TypeError, ValueError):
+                    missing = False                     # a list in a cell
+                cell = None if missing else _plain(cell)
+                if isinstance(cell, str) and len(cell) > _MAX_CELL:
+                    cell = cell[:_MAX_CELL - 3] + "..."
+                record[str(name)] = cell
+            out.append(record)
+        return out
+
     def _column(self, name: str, series) -> dict:
         rule = self.rule(name)
         column = series
@@ -436,8 +482,14 @@ class Disclosure:
             column = column.iloc[:, 0]
         out: dict = {"name": name,
                      "type": _kind_of(getattr(column, "dtype", ""))}
-        if rule.shares_values:
-            out.update(_shared_values(column))
+        if rule.shares_values or (self.level >= FULL and out["type"] in (
+                "text", "category", "bool")):
+            shared = _shared_values(column)
+            # at FULL every category column comes with its values; a column
+            # of mostly different values is not a category, and its rows say
+            # what it holds
+            if rule.shares_values or "values_not_shown" not in shared:
+                out.update(shared)
         if self.level < PROFILE:
             return out
         try:

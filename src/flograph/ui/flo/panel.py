@@ -52,7 +52,7 @@ from ...flo.agent import (
 from ...flo.sendlog import SendLog, log_dir
 from ...flo.tools import ACT, ADVISE, Toolbox
 from ...llm import wire
-from ...llm.profiles import LEVELS, ProfileSet, save as save_profiles
+from ...llm.profiles import ProfileSet, save as save_profiles
 from .bridge import TurnBridge
 from .sent_view import SentDialog, format_requests
 
@@ -66,12 +66,16 @@ LEVEL_TIPS = {
     2: "Also, per column: how much is empty, how many different values, "
        "the lowest and highest value, and what it looks like (emails, "
        "IDs…). Never rows.",
+    3: "Everything: real rows (a sample with each table, and more when it "
+       "asks), every category's values, and error messages as they are. "
+       "Hidden columns stay hidden.",
 }
 # what the card says it sees, by level — short, plain, no jargon
 LEVEL_SEES = {
     0: "Only the flow's layout — nothing from your data.",
     1: "The flow and your column names — never rows.",
     2: "The flow, column names and summaries — never rows.",
+    3: "All your data, rows included — except hidden columns.",
 }
 AUTONOMY = ((ADVISE, "Advise", "Look at the flow and explain or suggest — "
              "it cannot change anything"),
@@ -920,7 +924,7 @@ class FloPanel(QWidget):
             "meta": {"connection": profile.name,
                      "to": profile.where_label(),
                      "model": self.chat.connection.model,
-                     "sees": LEVELS[level][0], "can": autonomy},
+                     "sees": disc.LEVEL_KEYS[level], "can": autonomy},
             "confirm": self.action_confirm.isChecked(),
         }
         self._cancel = False
