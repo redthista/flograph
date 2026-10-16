@@ -203,7 +203,8 @@ class TestTheNavTreeAndSearch:
                                   "Snapping", "Custom colour strength"]
         assert rows["General"] == ["Appearance", "Window", "Properties",
                                    "Writing",
-                                   "Execution", "Saving", "Updates", "Reset"]
+                                   "Execution", "Saving", "Updates",
+                                   "Flo Assistant", "Reset"]
         assert rows["About"] == []          # prose, no settings
 
     def test_clicking_a_group_switches_to_its_page(self, window):

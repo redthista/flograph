@@ -293,7 +293,8 @@ class TestWindow:
     def window(self, qtbot, registry, user_dir):
         from flograph.ui.mainwindow import MainWindow
         s = QSettings("flograph", "flograph")
-        saved = {k: s.value(k) for k in ("dock_state", "window_geometry")}
+        saved = {k: s.value(k) for k in ("dock_state", "window_geometry",
+                                         "flo/enabled")}
         s.remove("dock_state")
         s.remove("window_geometry")
         try:
@@ -303,6 +304,7 @@ class TestWindow:
             qtbot.addWidget(win)
             win.show()
             qtbot.waitExposed(win)
+            win.set_flo_enabled(True)      # an optional extra: off by default
             yield win
         finally:
             for k, v in saved.items():
@@ -554,9 +556,11 @@ class TestAskAbout:
         win.confirm_close = False
         win._save_window_state = lambda: None
         qtbot.addWidget(win)
+        win.set_flo_enabled(True)
         from PySide6.QtWidgets import QMenu
         menu = QMenu()
         win._add_flo_menu(menu, ["x"], "the node")
+        win.settings.remove("flo/enabled")
         sub = menu.findChildren(QMenu)[0]
         labels = [a.text() for a in sub.actions() if a.text()]
         assert labels[0] == "Ask About This…" and "Explain This" in labels
@@ -628,3 +632,74 @@ def test_run_nodes_runs_the_real_engine(qtbot, monkeypatch, registry, settings,
     assert "outputs" in result["nodes"][0]
     assert not engine.active
 
+
+
+class TestFloIsAnOptionalExtra:
+    """Settings ▸ General ▸ Flo Assistant (Dan, 2026-10-16): off by default,
+    and off means no way in at all — not just no button."""
+
+    @pytest.fixture
+    def window(self, qtbot, registry, user_dir):
+        from flograph.ui.mainwindow import MainWindow
+        s = QSettings("flograph", "flograph")
+        saved = s.value("flo/enabled")
+        s.remove("flo/enabled")            # as on a fresh install
+        try:
+            win = MainWindow(registry)
+            win.confirm_close = False
+            win._save_window_state = lambda: None
+            qtbot.addWidget(win)
+            win.show()
+            qtbot.waitExposed(win)
+            yield win
+        finally:
+            s.setValue("flo/enabled", saved) if saved is not None \
+                else s.remove("flo/enabled")
+
+    def _ask_flo_menu(self, window) -> bool:
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu()
+        window._add_flo_menu(menu, ["x"], "a node")
+        return any(a.text() == "Ask Flo" for a in menu.actions())
+
+    def test_off_by_default_with_no_way_in(self, window):
+        assert not window.flo_enabled()
+        assert not window._title_bar._flo_btn.isVisibleTo(window)
+        assert not window.action_flo.isVisible()
+        assert not window.action_flo.isEnabled()      # so no Ctrl+Shift+A
+        assert not window.flo_dock.toggleViewAction().isVisible()
+        assert not self._ask_flo_menu(window)
+        window.toggle_flo()
+        window.ask_flo(["x"], "a node")
+        assert window.flo_dock.isHidden()
+
+    def test_turned_on_every_way_in_comes_back(self, window):
+        window.set_flo_enabled(True)
+        assert window.settings.value("flo/enabled", type=bool)
+        assert window._title_bar._flo_btn.isVisibleTo(window)
+        assert window.action_flo.isVisible() and window.action_flo.isEnabled()
+        assert self._ask_flo_menu(window)
+        window.toggle_flo()
+        assert not window.flo_dock.isHidden()
+
+    def test_turned_off_closes_the_panel(self, window):
+        window.set_flo_enabled(True)
+        window.toggle_flo()
+        window.set_flo_enabled(False)
+        assert window.flo_dock.isHidden()
+        assert window.flo_dock not in window._docks_open_on_model_page
+
+    def test_the_settings_checkbox_drives_it(self, window):
+        from PySide6.QtWidgets import QCheckBox
+        from flograph.ui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(window)
+        check = dialog.findChild(QCheckBox, "flo_enabled_checkbox")
+        assert check is not None and not check.isChecked()
+        check.setChecked(True)
+        assert window.flo_enabled()
+        dialog.deleteLater()
+
+    def test_reset_settings_turns_it_off(self, window):
+        window.set_flo_enabled(True)
+        window.reset_settings()
+        assert not window.flo_enabled() and not window.action_flo.isVisible()

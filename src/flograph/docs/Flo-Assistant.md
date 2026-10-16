@@ -9,8 +9,13 @@ Privacy comes first: the panel always shows where your words go, every
 reply ends with a receipt of what left, and nothing is sent until you
 press Enter.
 
-Open it with **Tools ▸ Flo Assistant**, **Ctrl+Shift+A**, or the **Flo**
-button on the title bar. It needs a connection first: see **Tools ▸ AI
+Flo is an optional extra and starts **turned off**: tick **Settings ▸
+General ▸ Flo Assistant ▸ Show the Flo Assistant** to turn it on. Until
+you do, there is no Flo button, menu entry, shortcut or *Ask Flo* menu,
+and Flo sends nothing; turning it off again closes the panel.
+
+Once it is on, open it with **Tools ▸ Flo Assistant**, **Ctrl+Shift+A**,
+or the **Flo** button on the title bar. It needs a connection first: see **Tools ▸ AI
 Assistant Settings**, which works with a local server (Ollama, LM Studio,
 llama.cpp) or an online one (a work gateway, Anthropic, OpenAI,
 OpenRouter), in either the OpenAI or the Anthropic API format.

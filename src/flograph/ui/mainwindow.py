@@ -459,6 +459,9 @@ class MainWindow(QMainWindow):
         # layout" has a real default to go back to rather than a guess
         self._default_dock_state = self._dock_host.saveState()
         self._restore_window_state()
+        # before the open docks are noted below: a Flo dock the last session
+        # left open stays shut while the Flo Assistant is turned off
+        self.set_flo_enabled(self.flo_enabled())
         # restoreState() carries dock visibility, so a dock closed last
         # session comes back closed -- and its reveal arrow with it
         self._docks_open_on_model_page = [
@@ -3866,7 +3869,7 @@ class MainWindow(QMainWindow):
         """Ask Flo ▸ on a node, a selection or a frame: the chat opens
         already pointed at them — instead of dragging onto the dock, which
         would scroll the canvas under the drag."""
-        if not ids:
+        if not ids or not self.flo_enabled():
             return
         from .window_frame import frame_icon
         sub = menu.addMenu(frame_icon("sparkle", theme.BUTTON_ACCENT), "Ask Flo")
@@ -3890,7 +3893,38 @@ class MainWindow(QMainWindow):
             action.triggered.connect(
                 lambda _=False, p=prompt: self.ask_flo(ids, title, p))
 
+    def flo_enabled(self) -> bool:
+        """Settings ▸ General ▸ Flo Assistant. Off by default: Flo is an
+        optional extra, not part of what flograph is without it."""
+        return self.settings.value("flo/enabled", False, type=bool)
+
+    def set_flo_enabled(self, enabled: bool) -> None:
+        """Turn the Flo Assistant's ways in on or off together: the title
+        bar's Flo button, Tools ▸ Flo Assistant and its shortcut, the
+        View menu's entry for its panel, and Ask Flo on the canvas menus.
+        Turning it off closes the panel and stops a reply in progress."""
+        enabled = bool(enabled)
+        self.settings.setValue("flo/enabled", enabled)
+        for action in (self.action_flo, self.flo_dock.toggleViewAction()):
+            action.setVisible(enabled)
+            action.setEnabled(enabled)
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_flo_shown(enabled)
+        if not enabled:
+            if self.flo_panel._busy:
+                self.flo_panel.stop()
+            self.flo_dock.hide()
+            opened = getattr(self, "_docks_open_on_model_page", None)
+            if opened is not None and self.flo_dock in opened:
+                opened.remove(self.flo_dock)
+        dialog = getattr(self, "_settings_dialog", None)
+        if dialog is not None and dialog.isVisible():
+            QTimer.singleShot(0, lambda: dialog.refresh_from(self))
+
     def ask_flo(self, ids: list, title: str, prompt: str = "") -> None:
+        if not self.flo_enabled():
+            return
         dock = self.flo_dock
         dock.show()
         dock.raise_()
@@ -3899,6 +3933,8 @@ class MainWindow(QMainWindow):
     def toggle_flo(self) -> None:
         """Open the Flo Assistant with the cursor in its box, or put it
         away when it is already the panel in front."""
+        if not self.flo_enabled():
+            return
         dock = self.flo_dock
         if dock.isVisible() and not dock.visibleRegion().isEmpty():
             dock.hide()
@@ -5837,6 +5873,7 @@ class MainWindow(QMainWindow):
         self.set_wheel_action(base_view.DEFAULT_WHEEL_ACTION)
         self.set_double_click_action("properties")
         self.set_compact_nodes(True)
+        self.set_flo_enabled(False)
         self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)
         self.action_gpu_viewport.setChecked(False)
         from .data_table import set_table_text_size

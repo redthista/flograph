@@ -254,6 +254,7 @@ class SettingsDialog(QDialog):
                 "window/titlebar_compact", False, type=bool),
             "update_notify_checkbox": window.settings.value(
                 "updates/notify", False, type=bool),
+            "flo_enabled_checkbox": window.flo_enabled(),
             "gpu_viewport_checkbox": window.action_gpu_viewport.isChecked(),
             "lod_enabled_checkbox": window.lod_enabled,
             "snap_enabled_checkbox": window.snap_enabled,
@@ -695,6 +696,20 @@ class SettingsDialog(QDialog):
                  "behind a private mirror and stays silent when there is no "
                  "connection. You can also check on demand from the About "
                  "page.")
+
+        rows.add_group("Flo Assistant")
+
+        flo_check = QCheckBox("Show the Flo Assistant")
+        flo_check.setObjectName("flo_enabled_checkbox")
+        flo_check.setChecked(window.flo_enabled())
+        flo_check.toggled.connect(window.set_flo_enabled)
+        rows.add("AI assistant", flo_check,
+                 "An optional chat that builds and changes your flow with an "
+                 "AI you connect it to (Tools ▸ AI Assistant Settings). On, "
+                 "it gets a Flo button on the title bar, Tools ▸ Flo "
+                 "Assistant (Ctrl+Shift+A) and Ask Flo on the canvas's "
+                 "right-click menus. Off, none of those show and Flo sends "
+                 "nothing.")
 
         rows.add_group("Reset")
 

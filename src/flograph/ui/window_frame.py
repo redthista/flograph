@@ -1017,6 +1017,9 @@ class TitleBar(QWidget):
         self._flo_btn.setToolTip("Flo Assistant — ask the AI to build, change "
                                  "or explain this flow  (Ctrl+Shift+A)")
         self._flo_btn.clicked.connect(lambda: window.toggle_flo())
+        # Settings ▸ General ▸ Flo Assistant: an optional extra, off unless
+        # turned on (MainWindow.set_flo_enabled)
+        self._flo_wanted = False
         flo_dock = getattr(window, "flo_dock", None)
         if flo_dock is not None:
             flo_dock.visibilityChanged.connect(self._flo_btn.setChecked)
@@ -1135,9 +1138,16 @@ class TitleBar(QWidget):
         """None of the run or cache buttons while there is no flow on
         screen to run — the start screen (O1)."""
         self._run_shown = bool(shown)
-        for btn in (self._run_btn, self._reset_btn, self._flo_btn):
+        for btn in (self._run_btn, self._reset_btn):
             btn.setVisible(self._run_shown)
+        self._flo_btn.setVisible(self._run_shown and self._flo_wanted)
         self.on_selection(self._selection_count)
+
+    def set_flo_shown(self, shown: bool) -> None:
+        """The Flo button, when the Flo Assistant is turned on in Settings
+        (and a flow is on screen)."""
+        self._flo_wanted = bool(shown)
+        self._flo_btn.setVisible(self._run_shown and self._flo_wanted)
 
     # -- compact ---------------------------------------------------
 
