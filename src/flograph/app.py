@@ -101,6 +101,15 @@ def _tear_down(window) -> None:
     close that hits it, after the user's work is saved but loud all the same
     (notes/issues.md). So the web views go first, then the window, and both
     before Python starts finalizing.
+
+    Deleting them early is not enough on its own. To free a texture, Qt
+    WebEngine saves whichever GL context is current, switches to its own,
+    and afterwards makes the saved one current again on its saved surface.
+    By now the window is closed and that surface is gone, so the switch back
+    fails and *that* is the qFatal. With no context current there is nothing
+    to switch back to and the step is skipped, so the current context is
+    released before every deletion: deleting one view can leave its own
+    context current for the next.
     """
     import shiboken6
     from PySide6.QtCore import QCoreApplication, QEvent
@@ -118,10 +127,21 @@ def _tear_down(window) -> None:
         for view in views:
             # deleting one can take another with it (a parent view's page)
             if shiboken6.isValid(view):
+                _release_gl_context()
                 shiboken6.delete(view)
     if shiboken6.isValid(window):
+        _release_gl_context()
         shiboken6.delete(window)
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def _release_gl_context() -> None:
+    """Leave no GL context current (see `_tear_down`)."""
+    from PySide6.QtGui import QOpenGLContext
+
+    context = QOpenGLContext.currentContext()
+    if context is not None:
+        context.doneCurrent()
 
 
 if __name__ == "__main__":

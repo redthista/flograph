@@ -51,3 +51,33 @@ def test_a_window_already_gone_is_left_alone(qapp):
     window = QWidget()
     shiboken6.delete(window)
     _tear_down(window)    # must not raise
+
+
+def test_no_gl_context_is_current_when_a_web_view_is_deleted(qapp, monkeypatch):
+    """WebEngine switches back to whatever context was current after it frees
+    a texture; on close that context's surface is gone, the switch fails,
+    and Qt aborts. With none current there is nothing to switch back to."""
+    from PySide6 import QtGui
+
+    events = []
+
+    class Context:
+        def doneCurrent(self):
+            events.append("released")
+
+    class FakeOpenGLContext:
+        @staticmethod
+        def currentContext():
+            return Context()
+
+    monkeypatch.setattr(QtGui, "QOpenGLContext", FakeOpenGLContext)
+    real_delete = shiboken6.delete
+    monkeypatch.setattr(
+        shiboken6, "delete",
+        lambda obj: (events.append(type(obj).__name__), real_delete(obj)))
+    window, view = _window_with_card(qapp)
+    _tear_down(window)
+    deleted = [i for i, e in enumerate(events) if e != "released"]
+    assert deleted, events
+    for i in deleted:
+        assert i > 0 and events[i - 1] == "released", events
