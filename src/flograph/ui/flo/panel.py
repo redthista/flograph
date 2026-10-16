@@ -80,7 +80,7 @@ LEVEL_SEES = {
 AUTONOMY = ((ADVISE, "Advise", "Look at the flow and explain or suggest — "
              "it cannot change anything"),
             (ACT, "Act", "Change the flow: add, wire, set and delete nodes, "
-             "and make dashboard and report pages. "
+             "make dashboard and report pages, and write node code. "
              "Each reply is one undo step"))
 
 TOOL_WORDS = {
@@ -107,11 +107,14 @@ TOOL_WORDS = {
     "set_report_style": "Styling a report",
     "write_report_css": "Writing a report's CSS",
     "set_report_layout": "Laying out a report",
+    "get_node_code": "Reading a node's code",
+    "write_node_code": "Writing code",
 }
 RUN_TIMEOUT = 600.0    # seconds a run_nodes call waits before giving up
 ACTION_MARK = {"add_node": "+", "delete_nodes": "−", "connect": "→",
                "disconnect": "×", "add_page": "+", "add_tiles": "+",
-               "remove_tiles": "−", "delete_page": "−"}
+               "remove_tiles": "−", "delete_page": "−",
+               "write_node_code": "✎"}
 SUGGESTIONS = (
     "Add a bar chart from my data",
     "Explain what this flow does",
@@ -268,6 +271,7 @@ class _Input(QPlainTextEdit):
 class FloPanel(QWidget):
     navigate_requested = Signal(str, str)
     settings_requested = Signal()
+    review_code_requested = Signal(str)     # node id: open its code editor
 
     def __init__(self, graph, registry, undo_stack, cache=None, *,
                  settings: Optional[QSettings] = None, engine=None,
@@ -299,6 +303,11 @@ class FloPanel(QWidget):
         # () -> the id of the page in front of the user, or "" for the
         # canvas; the window sets it, so "this report" means something
         self.on_screen = lambda: ""
+        # (node_id, code) -> put code in that node's code editor, unapplied;
+        # and take it back again. The window sets both; with no editor,
+        # Flo is not offered write_node_code at all
+        self.suggest_code = None
+        self.discard_code = lambda node_id, code: None
         self._about_title = ""
         self._live: Optional[QLabel] = None   # the reply as it arrives
         self._live_raw = ""
@@ -421,6 +430,19 @@ class FloPanel(QWidget):
             self.autonomy_actions[key] = action
         if not any(a.isChecked() for a in self.autonomy_actions.values()):
             self.autonomy_actions[ACT].setChecked(True)
+        self.autonomy_menu.addSeparator()
+        self.action_apply_code = self.autonomy_menu.addAction(
+            "Apply Code It Writes")
+        self.action_apply_code.setCheckable(True)
+        self.action_apply_code.setToolTip(
+            "Under Act, code Flo writes for a node is applied at once, as part "
+            "of the reply's undo step. Off: it waits in the code editor until "
+            "you have read it and pressed Apply — the safer choice when Flo "
+            "can see your data, since text in a cell reaches the AI too")
+        self.action_apply_code.setChecked(
+            self.settings.value("flo/apply_code", True, type=bool))
+        self.action_apply_code.toggled.connect(
+            lambda on: self.settings.setValue("flo/apply_code", bool(on)))
         self.can_btn.setMenu(self.autonomy_menu)
         dials.addWidget(self.can_btn)
         dials.addStretch(1)
@@ -800,7 +822,9 @@ class FloPanel(QWidget):
                                disclosure=disc.Disclosure(level, self._privacy()),
                                autonomy=self.autonomy(), cache=self.cache,
                                runner=(self._run_nodes if self.engine is not None
-                                       else None))
+                                       else None),
+                               suggest_code=self.suggest_code,
+                               apply_code=self.action_apply_code.isChecked())
         self.bridge = TurnBridge(self)
         self.bridge.event.connect(self._on_event)
         self.bridge.finished.connect(self._on_finished)
@@ -889,6 +913,7 @@ class FloPanel(QWidget):
         if not self._consent(profile, level):
             return False
         self.toolbox.set_view(disc.Disclosure(level, self._privacy()), autonomy)
+        self.toolbox.apply_code = self.action_apply_code.isChecked()
         self._chat_level = max(self._chat_level, level)
         self._launch(None, None, profile, level, autonomy)
         return True
@@ -912,6 +937,7 @@ class FloPanel(QWidget):
         self.input.clear()
         self._hide_welcome()
         self.toolbox.set_view(disc.Disclosure(level, self._privacy()), autonomy)
+        self.toolbox.apply_code = self.action_apply_code.isChecked()
         self._chat_level = max(self._chat_level, level)
         parts = [_label(text)]
         if about_title:
@@ -1099,7 +1125,11 @@ class FloPanel(QWidget):
         record = {"start": turn["start"], "end": len(self.chat.outbox),
                   "before": turn["before"], "to": turn["to"],
                   "undo_index": (self.undo_stack.index()
-                                 if result.actions else None),
+                                 if self.toolbox.pushed else None),
+                  # code put in an editor, unapplied: undone by taking it back
+                  "code": [(a.node_ids[0], a.code) for a in result.actions
+                           if a.tool == "write_node_code" and a.node_ids
+                           and a.code],
                   "undone": False}
         record["receipt"] = receipts.build(
             entries, turn["before"], self.toolbox.disclosure,
@@ -1118,7 +1148,10 @@ class FloPanel(QWidget):
                 mark = ACTION_MARK.get(action.tool, "•")
                 line = f"{mark}&nbsp;&nbsp;{_escape(action.summary)}"
                 live = [n for n in action.node_ids if n in self.graph.nodes]
-                if live:
+                if live and action.tool == "write_node_code":
+                    line += (f' &nbsp;<a href="code:{live[-1]}">'
+                             f'Review code</a>')
+                elif live:
                     line += f' &nbsp;<a href="node:{live[-1]}">show</a>'
                 lines.append(line)
             changes = _label("<br>".join(lines), rich=True)
@@ -1151,6 +1184,11 @@ class FloPanel(QWidget):
                 self.navigate_requested.emit("node", ident)
             else:
                 self.notice("That node is no longer in the flow.")
+        elif kind == "code":
+            if ident in self.graph.nodes:
+                self.review_code_requested.emit(ident)
+            else:
+                self.notice("That node is no longer in the flow.")
         elif kind == "undo":
             self._undo_turn(int(ident))
         elif kind == "sent":
@@ -1168,18 +1206,23 @@ class FloPanel(QWidget):
         record = self._turns[index]
         if record["undone"]:
             return
-        if self._busy or self.undo_stack.index() != record["undo_index"]:
+        pushed = record["undo_index"] is not None
+        if self._busy or (pushed and self.undo_stack.index() != record["undo_index"]):
             self.notice("Other changes came after that reply, so it can't be "
                         "undone on its own — use Edit ▸ Undo to step back "
                         "through them.")
             return
-        self.undo_stack.undo()
+        if pushed:
+            self.undo_stack.undo()
+        for node_id, code in record.get("code", ()):
+            self.discard_code(node_id, code)
         record["undone"] = True
         footer = record.get("footer")
         if footer is not None:
             footer.setText(re.sub(
                 rf'<a [^>]*href="undo:{index}">Undo these changes</a>',
-                "Undone (Edit ▸ Redo brings it back)", footer.text()))
+                "Undone (Edit ▸ Redo brings it back)" if pushed else "Undone",
+                footer.text()))
 
     def _show_sent(self, index: int) -> None:
         if self.chat is None:

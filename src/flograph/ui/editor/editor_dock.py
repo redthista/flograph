@@ -65,6 +65,9 @@ class EditorPanel(QWidget):
         self._loading = False
         # Cache unsaved edits keyed by node_id so switching away and back restores them.
         self._temp_edits: dict[str, str] = {}
+        # node id -> who wrote the code waiting in _temp_edits ("Flo"), so
+        # coming back to the node still says it is someone else's to review
+        self._suggested: dict[str, str] = {}
 
         self._full_title = "No node selected"
         self._title = QLabel(self._full_title)
@@ -287,6 +290,8 @@ class EditorPanel(QWidget):
             if self._graph.node(node_id)._temp_edit:
                 self._graph.node(node_id)._temp_edit = False
                 self._graph.events.temp_edit_changed.emit(node_id, False)
+        if node_id in self._suggested and source_to_load != self._graph.node(node_id).source:
+            self._show_message(self._review_note(node_id))
         self._refresh_header(node_id)
 
     def _refresh_header(self, node_id: str) -> None:
@@ -423,6 +428,54 @@ class EditorPanel(QWidget):
             return
         self._show_message(message, error=True)
 
+    # ------------------------------------------------------ others' code
+
+    def suggest_code(self, node_id: str, code: str, by: str = "Flo") -> None:
+        """Put code someone else wrote (the Flo Assistant) in a node's editor
+        as an unapplied edit — exactly where Ask AI's suggestion goes. It is
+        not applied and so never runs: the user reads it and presses Apply,
+        and until then the node keeps the code it had."""
+        node = self._graph.nodes.get(node_id)
+        if node is None:
+            return
+        self._suggested[node_id] = by
+        self._temp_edits[node_id] = code
+        if node_id == self._node_id:
+            self._loading = True
+            self.editor.setPlainText(code)
+            self._loading = False
+            self._unsaved_indicator.show()
+            self._show_message(self._review_note(node_id))
+        node._temp_edit = True
+        self._graph.events.temp_edit_changed.emit(node_id, True)
+
+    def discard_suggestion(self, node_id: str, code: str) -> None:
+        """Take back code `suggest_code` put there (its chat turn was
+        undone) — unless the user has changed it since, which makes it
+        theirs."""
+        node = self._graph.nodes.get(node_id)
+        if node is None:
+            return
+        if node_id == self._node_id:
+            if self.editor.toPlainText() != code:
+                return
+            self._loading = True
+            self.editor.setPlainText(node.source or "")
+            self._loading = False
+            self._unsaved_indicator.hide()
+            self._show_message("")
+        elif self._temp_edits.get(node_id) != code:
+            return
+        self._temp_edits.pop(node_id, None)
+        self._suggested.pop(node_id, None)
+        if node._temp_edit:
+            node._temp_edit = False
+            self._graph.events.temp_edit_changed.emit(node_id, False)
+
+    def _review_note(self, node_id: str) -> str:
+        return (f"{self._suggested.get(node_id, 'Flo')} wrote this code — "
+                "it is not applied yet. Read it, then Apply.")
+
     # -------------------------------------------------------------- events
 
     def _on_code_changed(self, node_id: str) -> None:
@@ -431,6 +484,7 @@ class EditorPanel(QWidget):
             return
         # Clear cached temp edit since the graph now owns this version.
         self._temp_edits.pop(node_id, None)
+        self._suggested.pop(node_id, None)
         self._graph.node(node_id)._temp_edit = False
         self._unsaved_indicator.hide()
         node = self._graph.node(node_id)

@@ -26,7 +26,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .core import NodeScriptError, parse_spec
+from .core import NodeScriptError
+from .core.script import UnreadableSpec, read_spec
 from .llm import wire
 from .llm.wire import LLMError, PROVIDERS  # noqa: F401  (re-exported)
 
@@ -128,7 +129,8 @@ def suggest_node_update(
     """Ask the configured AI server to rewrite `source` per `instruction`.
 
     Returns the full updated node script, already checked against the
-    NODE/PARAMS/run contract via parse_spec — but still just text. The
+    NODE/PARAMS/run contract by read_spec — which reads the script without
+    running it — but still just text. The
     caller is responsible for putting it in front of the user for review
     rather than applying it directly.
     """
@@ -148,7 +150,10 @@ def suggest_node_update(
     code = _strip_code_fence(reply)
 
     try:
-        parse_spec(code, type_id)
+        # read, never run: nobody has looked at this code yet
+        read_spec(code, type_id)
+    except UnreadableSpec:
+        pass    # settings built by code: Apply checks them, by running it
     except NodeScriptError as exc:
         raise LLMError(
             f"the LLM's suggested code doesn't satisfy the node contract: {exc}"

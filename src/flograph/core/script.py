@@ -238,7 +238,73 @@ def _parse_ports(
 def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
     """Parse a node script into a NodeSpec, with precise error messages."""
     namespace = _execute(source, spec_filename(type_id))
+    return _spec_from(namespace, source, type_id, builtin)
 
+
+def read_spec(source: str, type_id: str) -> NodeSpec:
+    """`parse_spec` without running a line of the script.
+
+    For code nobody has reviewed yet — what an AI wrote. `parse_spec`
+    executes the whole script to reach NODE and PARAMS, so checking such
+    code with it would run that code before the person it is for has read
+    it. Here NODE and PARAMS are read from the syntax tree, which asks of
+    them that they be written out as plain values, and `run` only has to be
+    defined; then the same checks as `parse_spec` apply. Nothing is imported
+    and nothing is called. Values built by code raise `UnreadableSpec`,
+    after the syntax and `run` have been checked.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(source, spec_filename(type_id))
+    except SyntaxError as exc:
+        raise NodeScriptError(
+            f"syntax error on line {exc.lineno}: {exc.msg}") from exc
+    namespace: dict[str, Any] = {"__doc__": ast.get_docstring(tree)}
+    computed: list[str] = []
+    for statement in tree.body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and statement.name == "run":
+            namespace["run"] = _unrun
+            continue
+        if isinstance(statement, ast.Assign):
+            targets, value = statement.targets, statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets, value = [statement.target], statement.value
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in ("NODE", "PARAMS"):
+                try:
+                    namespace[target.id] = ast.literal_eval(value)
+                except (ValueError, TypeError, SyntaxError, MemoryError,
+                        RecursionError):
+                    namespace.pop(target.id, None)
+                    computed.append(f"{target.id} (line {statement.lineno})")
+    if "run" not in namespace:
+        raise NodeScriptError("node script must define a run(ctx, ...) function")
+    if computed:
+        raise UnreadableSpec(
+            f"{' and '.join(computed)} built by code, so it can only be "
+            f"checked by running the script")
+    return _spec_from(namespace, source, type_id, False)
+
+
+class UnreadableSpec(NodeScriptError):
+    """`read_spec` found NODE or PARAMS built by code (a helper call, a
+    comprehension, a name from elsewhere in the file) — as 16 library nodes
+    do. Reading those means running the script, so the rest of the check
+    waits for whoever runs it on purpose: the editor's Apply."""
+
+
+def _unrun(*args, **kwargs):
+    """Stands for a `run` that `read_spec` found but did not define."""
+    raise NodeScriptError("this script was read, not loaded")
+
+
+def _spec_from(namespace: dict, source: str, type_id: str,
+               builtin: bool) -> NodeSpec:
+    """The NodeSpec a script's top-level names declare, checked."""
     node_decl = namespace.get("NODE")
     if not isinstance(node_decl, dict):
         raise NodeScriptError("node script must define a NODE dict")

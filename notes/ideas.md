@@ -426,8 +426,14 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
   layout (one section at a time), page links by id, and the page on screen
   sent with each message — "on its own page" inside a report is asked
   about, not guessed.
+- *Code, shipped 2026-10-16:* `get_node_code` / `write_node_code` — a
+  Python Script node of its own or a change to one of yours, applied in
+  the reply's undo step by default (Dan's call); **Can ▸ Apply Code It
+  Writes** off makes it wait in the code editor for Apply, checked by
+  `core.script.read_spec` without running it. Your own code is withheld at
+  Nothing from my data and counted on the receipt.
 - *Next:* Propose with ghost-node preview (if it earns its cost over one
-  undo per reply), `write_user_node` through the editor's review.
+  undo per reply).
   Not wanted: conversations saved in the flow — chats stay at the user
   level (Dan, 2026-10-15).
 - *Open:* an org-level cap file for work rollouts (not now); whether Propose earns

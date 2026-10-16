@@ -682,6 +682,10 @@ class MainWindow(QMainWindow):
         self.flo_panel.navigate_requested.connect(self._navigate_to)
         self.flo_panel.settings_requested.connect(self._show_ai_settings)
         self.flo_panel.on_screen = lambda: self.page_bar.current_page_id() or ""
+        # Flo's code goes where Ask AI's does: the editor, unapplied
+        self.flo_panel.suggest_code = self.editor_panel.suggest_code
+        self.flo_panel.discard_code = self.editor_panel.discard_suggestion
+        self.flo_panel.review_code_requested.connect(self._review_code)
         self.flo_dock = QDockWidget("Flo Assistant", host)
         self.flo_dock.setObjectName("dock_flo")
         self.flo_dock.setWidget(self.flo_panel)
@@ -3538,6 +3542,14 @@ class MainWindow(QMainWindow):
             return
         self.params_panel.set_node(node_id)
         self._reveal_dock(self.properties_dock)
+
+    def _review_code(self, node_id: str) -> None:
+        """Flo's Review code link: the node, and its code editor open on it."""
+        if node_id not in self.graph.nodes:
+            return
+        self._navigate_to("node", node_id)
+        self.editor_panel.set_node(node_id)
+        self._reveal_dock(self.editor_dock)
 
     def open_node_window(self, node_id: str, tab: str = "properties") -> None:
         """Ctrl+double-click: this node's Properties and Code in a window of

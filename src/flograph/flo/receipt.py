@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from ..core import ai_disclosure as disc
 
-_FREE_TEXT_KEYS = {"settings", "value", "label", "markdown", "title"}
+_FREE_TEXT_KEYS = {"settings", "value", "label", "markdown", "title", "code"}
 
 
 @dataclass
@@ -39,6 +39,7 @@ class Receipt:
     rows: int = 0                        # rows of data that went (FULL only)
     settings_nodes: int = 0              # nodes whose settings were sent
     reports: int = 0                     # report pages whose text was sent
+    code_nodes: int = 0                  # nodes whose own (user) code was sent
     text_hidden: bool = False            # typed setting text was withheld
 
     @property
@@ -95,6 +96,9 @@ class Receipt:
                           "including text you typed into them"))
         if self.reports:
             out.append(f"Text of {self.reports} report page{_s(self.reports)}")
+        if self.code_nodes:
+            out.append(f"Code you wrote or changed, of {self.code_nodes} "
+                       f"node{_s(self.code_nodes)}")
         if self.rows:
             out.append(f"Rows of your data: {self.rows} (you chose All my data)")
             out.append("Never sent: hidden columns, passwords, full file paths.")
@@ -165,6 +169,7 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
     described: set[str] = set()
     with_settings: set[str] = set()
     reports: set[str] = set()
+    code: set[str] = set()
 
     def words(text: str) -> None:
         for name in real:
@@ -205,6 +210,11 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
         if isinstance(data, dict) and isinstance(data.get("markdown"), str) \
                 and not data["markdown"].startswith("<text,"):
             reports.add(str(data.get("page")))
+        if isinstance(data, dict) and isinstance(data.get("code"), str) \
+                and not data["code"].startswith("<code of") \
+                and not data.get("library_code"):
+            # the library's own code is no one's data; the user's may be
+            code.add(str(data.get("node")))
         receipt.rows += _count_rows(data)
         for column in _columns_in(data):
             shown = str(column.get("name"))
@@ -218,6 +228,7 @@ def build(entries: list, before: list, disclosure: disc.Disclosure, *,
     receipt.nodes = len(described)
     receipt.settings_nodes = len(with_settings)
     receipt.reports = len(reports)
+    receipt.code_nodes = len(code)
     receipt.aliased = sorted((aliases[a], a) for a in found_alias)
     receipt.columns = sorted(found_real - {real_name for real_name, _ in receipt.aliased})
     receipt.profiled = sorted(set(receipt.profiled))

@@ -32,7 +32,9 @@ from ..core import ai_disclosure as disc
 from ..core.ai_disclosure import Disclosure
 from ..core.datatypes import can_connect
 from ..core.graph import Graph, GraphError
-from ..core.ports import is_flow
+from ..core.params import PARAM_TYPES
+from ..core.ports import PortType, is_flow
+from ..core.script import NodeScriptError, UnreadableSpec, parse_spec, read_spec
 from ..llm.toolcall import ToolCall, ToolSpec
 
 ADVISE, ACT = "advise", "act"
@@ -66,6 +68,10 @@ _READ_TOOLS = [
              "A node type's inputs, outputs, settings (with defaults and "
              "choices) and documentation — read it before add_node.",
              _schema({"type_id": {"type": "string"}}, ("type_id",))),
+    ToolSpec("get_node_code",
+             "A node's Python code, as its code editor shows it. Read it "
+             "before write_node_code changes it.",
+             _schema({"node": _NODE}, ("node",))),
 ]
 
 _PAGE = {"type": "string", "description": "a page handle, e.g. p2, or its title"}
@@ -179,6 +185,41 @@ _RUN_TOOL = ToolSpec(
     "the node does — a writer writes its file — so run only what you need.",
     _schema({"nodes": {"type": "array", "items": _NODE}}, ("nodes",)))
 
+# The script rules a model gets wrong without being told (Haiku took four
+# tries to learn them from errors, resending the whole script each time) —
+# built from the same tables the check uses, so they cannot drift from it.
+_SCRIPT_RULES = (
+    "The script: NODE = {\"label\": ..., \"category\": ..., \"version\": "
+    "\"1.0\", \"inputs\": [(\"name\", type) or (\"name\", type, "
+    "{\"optional\": True})], \"outputs\": [(\"name\", type)]} with type one "
+    "of " + ", ".join(t.value for t in PortType if t is not PortType.FLOW)
+    + ". PARAMS = [dicts: {\"name\": ..., \"type\": ..., \"default\": ..., "
+    "\"label\": ...}] with type one of " + ", ".join(sorted(PARAM_TYPES))
+    + "; a choice needs \"options\": [...]; int/float take \"min\"/\"max\"; "
+    "{\"visible_when\": {\"other_param\": [\"value\"]}} shows a param only "
+    "for those values of another. NODE and PARAMS are plain values, not built "
+    "by code. def run(ctx, <one keyword per input>): read ctx.params[\"name\"], "
+    "import inside run(), never change an input in place, and return "
+    "{\"output_name\": value}.")
+
+_CODE_TOOL = ToolSpec(
+    "write_node_code",
+    "Write a node's Python code: the whole script, NODE, PARAMS and "
+    "run(ctx, **inputs), as get_node_code shows it. {applied} For a "
+    "node of your own, add_node flograph.scripting.python_script first and "
+    "write its code. Use it only when no library node does the job. "
+    + _SCRIPT_RULES,
+    _schema({"node": _NODE,
+             "code": {"type": "string",
+                      "description": "the complete script, no markdown fences"}},
+            ("node", "code")))
+
+_APPLIED = ("It is applied at once, as part of this reply's undo step: the "
+            "node runs your code from now on, so run_nodes it to check it.")
+_HELD = ("It is NOT applied: it goes to the user's code editor, they read it "
+         "and press Apply, and until then the node keeps its old code "
+         "(run_nodes runs the old code).")
+
 _WRITE_TOOLS = [
     ToolSpec("add_node",
              "Add a node of a library type, wired to the node that feeds it. "
@@ -224,12 +265,14 @@ class Action:
     tool: str
     summary: str
     node_ids: list = field(default_factory=list)
+    code: str = ""          # write_node_code: what was put in the editor
 
 
 class Toolbox:
     def __init__(self, graph: Graph, registry, undo_stack, *,
                  disclosure: Disclosure, autonomy: str = ACT,
-                 cache=None, runner=None) -> None:
+                 cache=None, runner=None, suggest_code=None,
+                 apply_code: bool = False) -> None:
         self.graph = graph
         self.registry = registry
         self.stack = undo_stack
@@ -239,6 +282,13 @@ class Toolbox:
         # runner(node_ids, cancelled) -> "done" | "cancelled" | "timed out":
         # runs nodes and waits, from the worker thread (the dock gives one)
         self.runner = runner
+        # suggest_code(node_id, code): put code in the node's editor for the
+        # user to read and Apply — never applied here (the dock gives one)
+        self.suggest_code = suggest_code
+        # the user's choice (Can ▸ Apply Code It Writes): code goes straight
+        # onto the node, in the turn's undo step, instead of waiting in the
+        # editor — and so runs without anyone having read it
+        self.apply_code = apply_code
         self.added: list[str] = []              # node ids added this turn
         # (tool, arguments) -> the number of changes made when it was last
         # called, so a repeat with nothing changed since can be called out
@@ -250,6 +300,9 @@ class Toolbox:
         self._page_by_id: dict[str, str] = {}
         self._macro_open = False
         self._macro_text = "Flo Assistant"
+        # whether this turn put anything on the undo stack: a turn that only
+        # wrote code has changes to show but no step to undo
+        self.pushed = False
         self.actions: list[Action] = []
         self._learn_cached_columns()
 
@@ -269,6 +322,7 @@ class Toolbox:
         so a turn that only reads leaves no empty step on the stack."""
         self.actions = []
         self.added = []
+        self.pushed = False
         self._seen = {}
         self._last_run = {}
         summary = " ".join((text or "").split())
@@ -283,6 +337,7 @@ class Toolbox:
         if not self._macro_open:
             self.stack.beginMacro(self._macro_text)
             self._macro_open = True
+        self.pushed = True
         self.stack.push(command)
 
     # -- what is offered ----------------------------------------------------------
@@ -311,6 +366,12 @@ class Toolbox:
                                   params))
             if self.runner is not None:
                 tools.append(_RUN_TOOL)
+            if self.suggest_code is not None or self.apply_code:
+                tools.append(ToolSpec(
+                    _CODE_TOOL.name,
+                    _CODE_TOOL.description.replace(
+                        "{applied}", _APPLIED if self.apply_code else _HELD),
+                    _CODE_TOOL.parameters))
         return tools
 
     def execute(self, call: ToolCall) -> str:
@@ -611,6 +672,91 @@ class Toolbox:
         if missing:
             out["unwired_inputs"] = missing
         out.update(self._status(inst))
+        return out
+
+    def _own_code(self, inst) -> bool:
+        """Code the user wrote or changed, as opposed to the library's."""
+        return inst.forked or inst.type_id.startswith("user.")
+
+    def _tool_get_node_code(self, node) -> dict:
+        inst = self._node(node)
+        source = inst.source or ""
+        out = {"node": self.handle(inst.id), "type": inst.type_id}
+        if self._own_code(inst) and not self.disclosure.allows(disc.SCHEMA):
+            # what someone types into their own code is data too: a filter
+            # on "Jane Smith", a path, a figure
+            lines = source.count("\n") + 1
+            out["code"] = (f"<code of the user's own, {lines} lines — not "
+                           f"shared at Nothing from my data>")
+            return out
+        out["code"] = self.disclosure.scrub(source)
+        if not self._own_code(inst):
+            out["library_code"] = True       # unchanged; the receipt reads it
+        return out
+
+    def _tool_write_node_code(self, node, code) -> dict:
+        inst = self._node(node)
+        handle = self.handle(inst.id)
+        if inst.locked:
+            raise _ToolError(f"{handle} is locked — the user has to unlock it "
+                             "before its code can change")
+        code = _unfenced(str(code or ""))
+        if not code.strip():
+            raise _ToolError("send the whole script as code")
+        code = code.rstrip("\n") + "\n"
+        if code == inst.source:
+            raise _ToolError(f"that is {handle}'s code already")
+        out: dict = {"node": handle}
+        if self.apply_code:
+            return self._apply_code(inst, code, out)
+        try:
+            # read, never run: nobody has looked at this code yet
+            spec = read_spec(code, inst.type_id)
+        except UnreadableSpec:
+            spec = None
+            out["checked"] = ("syntax and run() only: NODE or PARAMS is built "
+                              "by code, so the rest is checked when the user "
+                              "presses Apply")
+        except NodeScriptError as exc:
+            raise _ToolError(f"the code does not load as a node: {exc} — fix "
+                             "it and send the whole script again") from None
+        if spec is not None:
+            ports = {p.name for p in spec.inputs}
+            lost = sorted({c.dst_port for c in self.graph.in_connections(inst.id)
+                           if not is_flow(c.dst_port) and c.dst_port not in ports})
+            if lost:
+                out["wires_lost_on_apply"] = lost
+        self.suggest_code(inst.id, code)
+        self.actions.append(Action(
+            "write_node_code",
+            f"Wrote code for {inst.label} — not applied: read it in the code "
+            f"editor and press Apply to use it", [inst.id], code=code))
+        out["status"] = ("waiting for the user: the code is in their code "
+                         "editor, NOT applied. It runs only after they read "
+                         "it and press Apply — tell them to review it; "
+                         "run_nodes would still run the old code")
+        return out
+
+    def _apply_code(self, inst, code: str, out: dict) -> dict:
+        """write_node_code when the user lets Flo apply its own code: the
+        full check (which loads the script, as the editor's Apply does),
+        then the same command Apply pushes, inside this turn's undo step."""
+        from ..ui.commands import SetCodeCommand
+        try:
+            spec = parse_spec(code, inst.type_id)
+        except NodeScriptError as exc:
+            raise _ToolError(f"the code does not load as a node: {exc} — fix "
+                             "it and send the whole script again") from None
+        ports = {p.name for p in spec.inputs}
+        lost = sorted({c.dst_port for c in self.graph.in_connections(inst.id)
+                       if not is_flow(c.dst_port) and c.dst_port not in ports})
+        self._push(SetCodeCommand(self.graph, inst.id, code))
+        self.actions.append(Action(
+            "write_node_code", f"Applied new code to {inst.label}", [inst.id]))
+        if lost:
+            out["wires_dropped"] = lost
+        out["status"] = ("applied: the node runs this code now — run_nodes "
+                         "it to check it works")
         return out
 
     def _tool_find_node_types(self, query) -> dict:
@@ -1312,15 +1458,24 @@ def style_of(css: str) -> str:
 
 
 _REPEAT_FREE = {"describe_flow", "get_node", "get_output", "get_node_type",
-                "find_node_types", "get_rows", "get_page"}
+                "find_node_types", "get_rows", "get_page", "get_node_code"}
 _WRITES = {"add_node", "connect", "disconnect", "set_params", "rename_node",
            "delete_nodes", "add_page", "add_tiles", "remove_tiles",
            "write_report", "rename_page", "delete_page", "set_report_style",
-           "write_report_css", "set_report_layout"}
+           "write_report_css", "set_report_layout", "write_node_code"}
 
 
 class _ToolError(Exception):
     """A mistake the model can fix; the message says how."""
+
+
+_FENCED = re.compile(r"^\s*```[\w+-]*[ \t]*\n(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _unfenced(code: str) -> str:
+    """A script the model wrapped in a markdown fence anyway, unwrapped."""
+    match = _FENCED.match(code)
+    return match.group(1) if match else code
 
 
 # The node most people mean by a word, where the label alone can't say it:

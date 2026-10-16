@@ -372,6 +372,41 @@ class TestWindow:
         assert window.graph.ai_privacy == loaded.ai_privacy
         assert window.flo_panel.level() == disc.STRUCTURE
 
+    def test_flo_applies_its_code_unless_told_not_to(self, window):
+        """Can ▸ Apply Code It Writes: on by default (Dan, 2026-10-16), and
+        what the toolbox is given with each message."""
+        panel = window.flo_panel
+        assert panel.action_apply_code.isChecked()
+        panel.action_apply_code.setChecked(False)
+        try:
+            from PySide6.QtCore import QSettings
+            assert QSettings("flograph", "flograph").value(
+                "flo/apply_code", True, type=bool) is False
+        finally:
+            panel.action_apply_code.setChecked(True)
+
+    def test_flos_code_waits_in_the_editor_for_review(self, window, registry):
+        """write_node_code reaches the window's own code editor, unapplied,
+        and Review code opens the editor on that node."""
+        import json
+        from flograph.flo.tools import Toolbox
+        from flograph.llm.toolcall import ToolCall
+        node = registry.instantiate("flograph.scripting.python_script", (0, 0))
+        window.graph.add_node(node)
+        before = node.source
+        box = Toolbox(window.graph, registry, window.undo_stack,
+                      disclosure=disc.Disclosure(disc.SCHEMA),
+                      suggest_code=window.flo_panel.suggest_code)
+        handle = box.handle(node.id)
+        code = before.replace('ctx.log(f"received: {in1!r}")', 'ctx.log("hi")')
+        out = json.loads(box.execute(ToolCall("a", "write_node_code",
+                                              {"node": handle, "code": code})))
+        assert "error" not in out and node.source == before
+        window.flo_panel.review_code_requested.emit(node.id)
+        assert window.editor_panel._node_id == node.id
+        assert window.editor_panel.editor.toPlainText() == code
+        assert window.editor_dock.isVisible()
+
 
 class TestReceipt:
     def test_it_says_what_went_and_where(self, qtbot, monkeypatch, registry,
@@ -592,3 +627,4 @@ def test_run_nodes_runs_the_real_engine(qtbot, monkeypatch, registry, settings,
     assert result["nodes"][0]["status"] == "up to date"
     assert "outputs" in result["nodes"][0]
     assert not engine.active
+

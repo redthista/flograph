@@ -155,6 +155,36 @@ message shows *Looking at: <page>* — so "make this report darker" changes
 the report's look, not the charts on the canvas behind it. On the canvas
 nothing is added. Like every other change, a new page is part of the reply's undo step.
 
+## Code
+
+When no library node does what you asked — or you ask for code — Flo can
+write a node's Python code: a node of its own (it adds a **Python
+Script** node and writes that), or a change to one you already have.
+
+**Flo applies its code itself**, as part of the reply's undo step: the
+reply lists *Applied new code to …* with a **Review code** link that
+opens the code editor on that node, and **Undo these changes** (or
+**Ctrl+Z**) puts the old code back. Flo can then run the node to check its
+work.
+
+To read the code before anything runs it, untick **Can ▸ Apply Code It
+Writes**. Flo's code then waits in the node's **code editor**, as Ask AI's
+suggestions do, under *Flo wrote this code — it is not applied yet*; the
+node keeps its old code until you press **Apply**, and nothing Flo wrote
+runs until then — not even when Flo runs that node. **Undo these changes**
+takes the waiting code back, unless you have edited it since. This is the
+safer setting when Flo can see your data: text in a cell reaches the AI
+too, and code it writes runs on this PC.
+
+Code that waits for you is checked against the node rules without
+running any of it; a node whose settings are built by code rather than
+written out is checked fully when you press Apply.
+
+What Flo reads: the library's code at any setting. **Code you wrote or
+changed yourself** counts as your own text — at **Nothing from my data**
+it is not sent; above that it is, with hidden column names replaced, and
+the receipt lists it (*Code you wrote or changed, of 1 node*).
+
 ## Changes and undo
 
 Each reply is **one undo step**, however many nodes it touched. The changes
@@ -199,6 +229,5 @@ and every tool result. From the **⋯** menu:
 
 ## Not yet
 
-It cannot write new node code yet — that comes later, behind the same
-setting. Chats are not saved in the
-flow: a flow you send someone never carries your conversation.
+Chats are not saved in the flow: a flow you send someone never carries
+your conversation.
