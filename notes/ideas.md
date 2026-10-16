@@ -410,22 +410,23 @@ look-alike rows → real sample → run and read), with per-column *Sensitive*
 and *Alias* overrides, and **what it can do** (Advise / Propose / Act, plus
 a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
 
-- *Today:* phases 0–2 shipped 2026-10-15 (CHANGELOG 0.1.30, *AI
-  connections* and *Flo Assistant*): the dock with Advise + Act, levels
-  0–2, privacy card, receipt, online consent, Privacy… (cap, Sensitive,
-  Alias, hide typed text), outbox and send log. Dan ran it against Codex
-  mini on OpenRouter: works.
-- *The rule that matters:* the disclosure level is enforced by **which
-  tools the model is given**, built in one Qt-free `core/ai_disclosure.py`,
-  never by asking it nicely in the prompt. Look-alike rows are generated,
-  not shuffled; shuffling leaks every real value.
-- *Built on the branch, waiting for Dan's test:* streaming
-  (`llm/stream.py`, Stop mid-reply) and **Ask Flo** on the node / frame /
-  selection menu (not drag — dropping onto the dock scrolls the canvas);
-  error messages lose their quoted values (`Disclosure.error_text`).
-- *Left:* 3 Propose with ghost-node preview; 4 levels 3–5 (+ `run_node`,
-  `write_user_node`). Not wanted: conversations saved in the flow — chats
-  stay at the user level (Dan, 2026-10-15).
+- *Today:* shipped 2026-10-16 (CHANGELOG 0.1.30, *AI connections* and
+  *Flo Assistant*): the dock with Advise + Act, streaming, Ask Flo on the
+  node / frame / selection menu, run_nodes, the receipt, online consent,
+  send log. What it sees is **two settings, both in the flow** — *Flo can
+  see* (Nothing from my data / Column names / Column names and summaries /
+  All my data) and per column Hidden / Name only / Name and values — after
+  Dan found the first eight-knob version confusing; keep it at two. Works
+  well on Claude Haiku 5.5 at All my data; small free models loop.
+- *The rule that matters:* the level is enforced by **which tools the
+  model is given**, built in one Qt-free `core/ai_disclosure.py`, never by
+  asking it nicely in the prompt.
+- *Next:* **pages** — list pages, add a dashboard with tiles, write or
+  edit a report page with `![[Label]]` embeds (pages already have undoable
+  commands). Then: Propose with ghost-node preview (if it earns its cost
+  over one undo per reply), `write_user_node` through the editor's review.
+  Not wanted: conversations saved in the flow — chats stay at the user
+  level (Dan, 2026-10-15).
 - *Open:* an org-level cap file for work rollouts (not now); whether Propose earns
   its cost over one-undo-per-turn; turn limit / mid-build check-ins.
 
