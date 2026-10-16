@@ -552,9 +552,23 @@ class FloPanel(QWidget):
                            else f"Online — sent to {_host(profile)}")
 
         allowed, level = self.allowed_level(), self.level()
+        # A level above the connection's limit can still be chosen — it asks
+        # first (choose_level). One above the flow's own limit cannot: that
+        # is the flow's say, changed in Privacy….
+        flow_max = disc.effective_level(disc.BUILT_MAX, self._privacy().level)
+        ceiling_name = LEVEL_NAMES.get(min(profile.effective_ceiling(),
+                                           disc.BUILT_MAX), "?")
         for index, action in self.level_actions.items():
-            action.setEnabled(index <= allowed)
+            over = allowed < index <= flow_max
+            action.setEnabled(index <= flow_max)
             action.setChecked(index == level)
+            action.setText(LEVEL_NAMES[index] + ("  (ask to allow…)" if over else ""))
+            action.setToolTip(
+                f"This flow allows up to {LEVEL_NAMES.get(flow_max, '?')} — "
+                "change that in Privacy…" if index > flow_max else
+                f"{_host(profile)} is allowed up to {ceiling_name}. Choosing "
+                "this asks you to allow more for this connection." if over
+                else LEVEL_TIPS[index])
         self.sees_btn.setText(f"Sees: {LEVEL_NAMES[level]}  ▾")
         self.can_btn.setText(f"Can: {dict((k, n) for k, n, _ in AUTONOMY)[self.autonomy()]}  ▾")
 
@@ -611,8 +625,46 @@ class FloPanel(QWidget):
         self.refresh_header()
 
     def choose_level(self, level: int) -> None:
+        """Pick what the AI sees. Above the connection's limit, only with
+        the user's say-so: they are asked, and Allow raises that
+        connection's limit — online stays at Schema until someone does."""
+        profile = self.profile()
+        if level > profile.effective_ceiling():
+            if not self._ask_raise(profile, level):
+                self.refresh_header()
+                return
+            profile.ceiling = int(level)
+            try:
+                save_profiles(self.profiles)
+            except OSError:
+                pass  # in force for this session
+            if self._chat_profile is not None \
+                    and self._chat_profile.get("id") == profile.id:
+                # raising is not a reason for a fresh chat; lowering is
+                self._chat_profile = profile.to_dict()
         self.settings.setValue("flo/level", int(level))
         self.refresh_header()
+
+    def _ask_raise(self, profile, level: int) -> bool:
+        """The question before a connection may see more — kept apart so
+        tests can answer it."""
+        from PySide6.QtWidgets import QMessageBox
+        where = "this PC" if profile.is_local() else _host(profile)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Allow More?")
+        box.setText(f"Allow {where} to see {LEVEL_NAMES[level]}?")
+        box.setInformativeText(
+            f"The connection “{profile.name}” is set to "
+            f"{LEVEL_NAMES.get(min(profile.effective_ceiling(), disc.BUILT_MAX))}. "
+            f"{LEVEL_TIPS[level]}\n\nIt never sees rows, passwords or full "
+            "file paths. You can lower it again from Sees, or in AI "
+            "Assistant Settings.")
+        allow = box.addButton("Allow for This Connection", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Cancel)
+        box.exec()
+        return box.clickedButton() is allow
 
     def choose_autonomy(self, key: str) -> None:
         self.autonomy_actions[key].setChecked(True)

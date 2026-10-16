@@ -42,9 +42,13 @@ The card carries the two dials:
 - **Privacy…** — this flow's own limit, a rule per column, and hiding
   text typed into settings (below).
 
-*Sees* can never go above the lowest of two limits: the connection's
-(set per connection in AI Assistant Settings — an online one starts at
-Schema) and the flow's own. Lowering it starts a fresh chat, because every
+*Sees* can never go above the lowest of two limits: the connection's and
+the flow's own. An online connection starts at Schema. To let it see more,
+pick a higher level in **Sees** — it is marked *(ask to allow…)* — and
+flograph asks you first; **Allow for This Connection** raises that
+connection's limit and saves it (AI Assistant Settings can lower it
+again). A level above the flow's own limit can only be unlocked in
+Privacy…. Lowering it starts a fresh chat, because every
 request repeats the conversation so far, and that holds what the higher
 level let through.
 

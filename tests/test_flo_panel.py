@@ -68,7 +68,9 @@ class TestDials:
         panel = _panel(qtbot, registry, settings, active=ONLINE)
         assert panel.where.text() == "Online — sent to ai.example.com"
         assert panel.level() == disc.SCHEMA
-        assert not panel.level_actions[disc.PROFILE].isEnabled()
+        # above the connection's limit: choosable, but it asks first
+        assert panel.level_actions[disc.PROFILE].isEnabled()
+        assert "ask to allow" in panel.level_actions[disc.PROFILE].text()
         assert "This connection allows up to Schema" in panel.sees_line.text()
 
     def test_the_flow_can_lower_it(self, qtbot, registry, settings, user_dir):
@@ -554,3 +556,57 @@ def test_run_nodes_runs_the_real_engine(qtbot, monkeypatch, registry, settings,
     assert result["nodes"][0]["status"] == "up to date"
     assert "outputs" in result["nodes"][0]
     assert not engine.active
+
+
+
+class TestAllowingMore:
+    """Online starts at Schema; more is the user's explicit choice."""
+
+    def test_choosing_more_asks_and_allow_raises_the_connection(
+            self, qtbot, monkeypatch, registry, settings, user_dir):
+        panel = _panel(qtbot, registry, settings, active=ONLINE)
+        asked = []
+        monkeypatch.setattr(panel, "_ask_raise",
+                            lambda profile, level: asked.append(level) or True)
+        panel.choose_level(disc.PROFILE)
+        assert asked == [disc.PROFILE]
+        assert panel.level() == disc.PROFILE
+        assert profiles.load().get("web").ceiling == disc.PROFILE   # saved
+
+    def test_cancel_changes_nothing(self, qtbot, monkeypatch, registry, settings,
+                                    user_dir):
+        panel = _panel(qtbot, registry, settings, active=ONLINE)
+        monkeypatch.setattr(panel, "_ask_raise", lambda profile, level: False)
+        panel.choose_level(disc.PROFILE)
+        assert panel.level() == disc.SCHEMA
+        assert profiles.load().get("web").ceiling is None
+
+    def test_within_the_limit_it_does_not_ask(self, qtbot, monkeypatch, registry,
+                                              settings, user_dir):
+        panel = _panel(qtbot, registry, settings)        # local: up to Profile
+        monkeypatch.setattr(panel, "_ask_raise",
+                            lambda *a: pytest.fail("asked within the limit"))
+        panel.choose_level(disc.SCHEMA)
+        panel.choose_level(disc.PROFILE)
+
+    def test_the_flows_own_limit_still_wins(self, qtbot, registry, settings,
+                                            user_dir):
+        graph = Graph()
+        graph.ai_privacy = {"level": disc.SCHEMA}
+        panel = _panel(qtbot, registry, settings, active=ONLINE, graph=graph)
+        assert not panel.level_actions[disc.PROFILE].isEnabled()
+        assert "Privacy" in panel.level_actions[disc.PROFILE].toolTip()
+
+    def test_raising_keeps_the_chat_and_consent_asks_again(
+            self, qtbot, monkeypatch, registry, settings, user_dir):
+        ScriptedModel(monkeypatch, ["hi", "again"])
+        panel = _panel(qtbot, registry, settings, active=ONLINE)
+        consents = []
+        monkeypatch.setattr(panel, "_ask_consent",
+                            lambda p, level: consents.append(level) or (True, False))
+        _turn(qtbot, panel, "hello")
+        monkeypatch.setattr(panel, "_ask_raise", lambda profile, level: True)
+        panel.choose_level(disc.PROFILE)
+        assert panel.chat is not None              # not a reason to start over
+        _turn(qtbot, panel, "more")
+        assert consents == [disc.SCHEMA, disc.PROFILE]
