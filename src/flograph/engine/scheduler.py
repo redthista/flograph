@@ -355,8 +355,11 @@ class RunFlags:
         self.held = held
 
     def active(self, node_id: str) -> bool:
+        """A node proposed by the Flo Assistant and not yet kept counts as
+        off, like a deactivated one: neither it nor what it feeds runs."""
         node = self._graph.nodes.get(node_id)
-        return bool(node and node.active) and node_id not in self.off
+        return (bool(node and node.active) and node_id not in self.off
+                and node_id not in getattr(self._graph, "proposed_new", ()))
 
     def manual(self, node_id: str) -> bool:
         node = self._graph.nodes.get(node_id)

@@ -69,8 +69,9 @@ connection* to stop it asking; it asks again if the flow later lets it see
 more.
 
 **Can** — **Advise** lets it look and explain but not change anything;
-**Act** lets it add, wire, set, rename and delete nodes, run them, and
-make dashboard and report pages.
+**Propose** lets it make changes you look at before they count (see
+*Proposals* below); **Act** lets it add, wire, set, rename and delete
+nodes, run them, and make dashboard and report pages.
 
 ## Ask Flo about a node or a frame
 
@@ -201,6 +202,34 @@ are listed under the reply, each with a **show** link that takes you to the
 node, and **Undo these changes** takes the whole reply back (or use
 **Ctrl+Z**). Anything you change on the canvas while a reply is still
 running joins that reply's undo step.
+
+### Proposals
+
+Under **Can ▸ Propose**, Flo makes the same changes it would under Act,
+but as a proposal for you to look at first:
+
+- **Nodes it adds** are faded inside a dashed purple outline, and so are
+  the wires to them. They **don't run** — nor does anything they feed —
+  until you keep them, and Flo can't run them either.
+- **Nodes it changes** — a setting, a name, a new wire in — keep running
+  as normal, inside a dashed amber outline.
+- Under the reply: ***Proposed**: adds 2 nodes, 1 wire, changes 1
+  setting — **Keep** · **Discard***.
+
+**Keep** takes the outlines off, and the nodes are the flow's like any
+other. **Discard** takes the whole proposal back. Ask for more before
+deciding — "use a line chart instead" — and the next reply adds to the
+same proposal, so one Discard still takes all of it back.
+
+Discard works while the proposal is the last thing you did. Change
+something yourself after it, or switch to **Act** and ask for more, and
+the proposal counts as kept; **Ctrl+Z** back past it counts as
+discarded. Code Flo writes in a proposal always waits in the code editor
+for you to Apply, whatever **Apply Code It Writes** says. Nodes it
+deletes go at once — the proposal lists them, and Discard brings them
+back. The outlines aren't saved: a file saved while a proposal is
+showing holds the flow as it stands, proposed nodes included, as
+ordinary nodes.
 
 A big build takes many steps — each look-up and change is a request to the
 AI. A reply pauses after 40 (**⋯ ▸ Steps per Reply** sets 20 to 150) so

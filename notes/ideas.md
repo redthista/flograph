@@ -432,12 +432,19 @@ a tick box for running nodes). Full write-up: `ideas/flo-assistant.md`.
   Writes** off makes it wait in the code editor for Apply, checked by
   `core.script.read_spec` without running it. Your own code is withheld at
   Nothing from my data and counted on the receipt.
-- *Next:* Propose with ghost-node preview (if it earns its cost over one
-  undo per reply).
+- *Report nodes and Propose, shipped 2026-10-16:* a Report node's text
+  embeds by wired input, `|live` is described to it; **Can ▸ Propose**
+  marks a reply's changes (runtime `Graph.proposed_*`, held from running
+  by `RunFlags.active`) with Keep / Discard — Discard is the replies' own
+  undo, so no scratch graph. The turn limit was already there (40 steps,
+  Continue).
+- *Rule (Dan, 2026-10-16):* Flo is an optional extra, not a core feature —
+  no Flo entries in core menus (the page bar's New ▸ was tried and taken
+  out); new abilities are things you ask it for.
   Not wanted: conversations saved in the flow — chats stay at the user
   level (Dan, 2026-10-15).
-- *Open:* an org-level cap file for work rollouts (not now); whether Propose earns
-  its cost over one-undo-per-turn; turn limit / mid-build check-ins.
+- *Open:* an org-level cap file for work rollouts (not now); token counts
+  / cost per reply for online connections.
 
 ---
 

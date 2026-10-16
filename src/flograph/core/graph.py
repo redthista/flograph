@@ -369,6 +369,13 @@ class Graph:
         # Filled by `graph_from_dict` only; runtime-only, never serialized,
         # and a save simply does not write the wires that were left off.
         self.dropped_connections: list[str] = []
+        # What the Flo Assistant has proposed and the user has not yet kept
+        # or discarded: nodes it added, which don't run until kept
+        # (engine.scheduler.RunFlags), and existing nodes it changed. Shown
+        # on the canvas, never saved — a proposal saved with the file has
+        # simply been kept.
+        self.proposed_new: set[str] = set()
+        self.proposed_changed: set[str] = set()
         self.events = GraphEvents()
         # Lookup tables over the edge set, rebuilt on demand rather than
         # patched at each mutation: there are only three places edges change
@@ -411,9 +418,36 @@ class Graph:
             # with its wires, and they must find the ports they left
             self.disconnect(conn.id, shrink=conn.dst_node != node_id)
         del self.nodes[node_id]
+        proposed = node_id in self.proposed_new or node_id in self.proposed_changed
+        self.proposed_new.discard(node_id)
+        self.proposed_changed.discard(node_id)
         self.events.node_removed.emit(node_id)
+        if proposed:
+            self.events.proposed_changed.emit()
         self._refresh_links()
         return node, removed
+
+    def propose(self, new=(), changed=()) -> None:
+        """Mark nodes as part of the Flo Assistant's pending proposal: `new`
+        ones it added (held from running), `changed` ones it altered. A
+        node it added and then changed stays new."""
+        new = {n for n in new if n in self.nodes} - self.proposed_new
+        changed = ({n for n in changed if n in self.nodes}
+                   - self.proposed_new - new - self.proposed_changed)
+        if not new and not changed:
+            return
+        self.proposed_new |= new
+        self.proposed_changed -= new
+        self.proposed_changed |= changed
+        self.events.proposed_changed.emit()
+
+    def clear_proposed(self) -> None:
+        """The proposal was kept or discarded: every node is ordinary again."""
+        if not self.proposed_new and not self.proposed_changed:
+            return
+        self.proposed_new = set()
+        self.proposed_changed = set()
+        self.events.proposed_changed.emit()
 
     def move_node(self, node_id: str, pos: tuple[float, float]) -> None:
         node = self.node(node_id)

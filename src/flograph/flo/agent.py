@@ -30,7 +30,7 @@ from typing import Any, Callable, Optional
 
 from ..core import ai_disclosure as disc
 from ..llm import toolcall, wire
-from .tools import ACT, Toolbox, catalogue
+from .tools import CHANGES, PROPOSE, Toolbox, catalogue
 
 DEFAULT_MAX_STEPS = 40
 STEP_CHOICES = (20, 40, 80, 150)
@@ -178,14 +178,23 @@ class Conversation:
 
     def system_prompt(self) -> str:
         level = self.toolbox.disclosure.level
+        autonomy = self.toolbox.autonomy
         abilities = ("You can change the flow with add_node, connect, "
                      "set_params, rename_node, disconnect and delete_nodes"
                      + (", and run nodes on this PC with run_nodes"
                         if self.toolbox.runner is not None else "")
                      + ". Each of your turns is one undo step for the user."
-                     if self.toolbox.autonomy == ACT else
+                     if autonomy in CHANGES else
                      "You can only look and advise: you cannot change the "
                      "flow. Say what the user should do instead.")
+        if autonomy == PROPOSE:
+            abilities += (
+                " You are proposing: what you add and change shows on the "
+                "canvas, faded, until the user keeps or discards it. Nodes "
+                "you add don't run until it is kept, so you can't run them "
+                "or read their output — build from what the existing nodes "
+                "show. When you are done, say what you propose, and that "
+                "they can Keep or Discard it below.")
         prompt = SYSTEM_PROMPT.format(abilities=abilities,
                                       level=disc.LEVEL_NAMES[level],
                                       visibility=_VISIBILITY[level])
@@ -249,7 +258,8 @@ class Conversation:
                     **({"tool_calls": [c.to_dict() for c in reply.tool_calls]}
                        if reply.tool_calls else {})})
                 if reply.done:
-                    missing = ([] if checked or self.toolbox.autonomy != ACT
+                    missing = ([] if checked
+                               or self.toolbox.autonomy not in CHANGES
                                else self._ui(self.toolbox.unwired_added))
                     if not missing:
                         result.text = reply.text

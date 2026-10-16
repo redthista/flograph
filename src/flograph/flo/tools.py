@@ -37,7 +37,10 @@ from ..core.ports import PortType, is_flow
 from ..core.script import NodeScriptError, UnreadableSpec, parse_spec, read_spec
 from ..llm.toolcall import ToolCall, ToolSpec
 
-ADVISE, ACT = "advise", "act"
+ADVISE, PROPOSE, ACT = "advise", "propose", "act"
+# the levels that change the flow: Propose makes the same changes as Act,
+# held as a proposal the user keeps or discards (Graph.proposed_*)
+CHANGES = (PROPOSE, ACT)
 MAX_DESCRIBED_NODES = 150
 _X_STEP, _Y_STEP = 280.0, 160.0
 
@@ -367,7 +370,7 @@ class Toolbox:
                                   _OUTPUT_TOOL.parameters))
             if self.disclosure.allows(disc.FULL):
                 tools.append(_ROWS_TOOL)
-        if self.autonomy == ACT:
+        if self.autonomy in CHANGES:
             tools.extend(_WRITE_TOOLS)
             tools.extend(_PAGE_WRITES)
             names = ["none"] + [self.disclosure.scrub(n) for n in report_styles()]
@@ -377,17 +380,37 @@ class Toolbox:
                                   params))
             if self.runner is not None:
                 tools.append(_RUN_TOOL)
-            if self.suggest_code is not None or self.apply_code:
+            if self.suggest_code is not None or self.applies_code:
                 tools.append(ToolSpec(
                     _CODE_TOOL.name,
                     _CODE_TOOL.description.replace(
-                        "{applied}", _APPLIED if self.apply_code else _HELD),
+                        "{applied}", _APPLIED if self.applies_code else _HELD),
                     _CODE_TOOL.parameters))
         return tools
+
+    @property
+    def applies_code(self) -> bool:
+        """Code goes straight onto the node only under Act: a proposal is
+        something to look at before it counts, so its code waits in the
+        editor whatever Apply Code It Writes says."""
+        return self.apply_code and self.autonomy == ACT
+
+    def _mark_proposed(self, since: int) -> None:
+        """Under Propose, what the changes since action `since` touched
+        joins the proposal on the canvas: the nodes added, and the existing
+        nodes whose settings, name or inputs changed."""
+        changed: list = []
+        for action in self.actions[since:]:
+            if action.tool == "connect":
+                changed += action.node_ids[-1:]      # the end it feeds
+            elif action.tool in _CHANGES_A_NODE:
+                changed += action.node_ids
+        self.graph.propose(new=self.added, changed=changed)
 
     def execute(self, call: ToolCall) -> str:
         """Run one tool call; the result as JSON text, ready to send."""
         offered = {spec.name for spec in self.specs()}
+        before = len(self.actions)
         if call.bad_arguments is not None:
             result: dict = {"error": "the arguments were not valid JSON: "
                             f"{call.bad_arguments[:200]!r} — send a JSON object"}
@@ -418,6 +441,8 @@ class Toolbox:
                 result = {"error": str(exc)}
             except GraphError as exc:
                 result = {"error": self.disclosure.scrub(str(exc))}
+        if self.autonomy == PROPOSE and len(self.actions) > before:
+            self._mark_proposed(before)
         if isinstance(result, dict) and self.actions and call.name in _WRITES:
             result["this_turn_so_far"] = self.progress()
         return json.dumps(result, default=str, ensure_ascii=False)
@@ -438,7 +463,7 @@ class Toolbox:
     def runs_off_ui(self, call: ToolCall) -> bool:
         """run_nodes waits for the engine, so it can't hold the GUI thread."""
         return call.name == "run_nodes" and self.runner is not None \
-            and call.bad_arguments is None and self.autonomy == ACT
+            and call.bad_arguments is None and self.autonomy in CHANGES
 
     def execute_run(self, call: ToolCall, on_ui, cancelled) -> str:
         """run_nodes, from the worker: resolve on the GUI thread, run and wait
@@ -447,7 +472,15 @@ class Toolbox:
             nodes = (call.arguments or {}).get("nodes") or []
             if isinstance(nodes, str):
                 nodes = [nodes]
-            return [self._node(n).id for n in nodes]
+            ids = [self._node(n).id for n in nodes]
+            held = [self.handle(i) for i in ids if i in self.graph.proposed_new]
+            if held:
+                raise _ToolError(
+                    f"{', '.join(held)} {'is' if len(held) == 1 else 'are'} "
+                    "proposed, and a proposed node runs only once the user "
+                    "keeps the proposal — run the existing nodes, and read "
+                    "their output, instead")
+            return ids
         try:
             ids = on_ui(resolve)
             if not ids:
@@ -718,7 +751,7 @@ class Toolbox:
         if code == inst.source:
             raise _ToolError(f"that is {handle}'s code already")
         out: dict = {"node": handle}
-        if self.apply_code:
+        if self.applies_code:
             return self._apply_code(inst, code, out)
         try:
             # read, never run: nobody has looked at this code yet
@@ -810,7 +843,10 @@ class Toolbox:
             note = ("nothing yet — the node has not run since it changed"
                     if inst.dirty or not self.cache or not self.cache.has(inst.id)
                     else "nothing on this output")
-            if self.runner is not None and self.autonomy == ACT:
+            if inst.id in self.graph.proposed_new:
+                note = ("nothing yet — it is proposed, and runs once the user "
+                        "keeps the proposal")
+            elif self.runner is not None and self.autonomy in CHANGES:
                 note += "; run_nodes runs it"
             return {"node": self.handle(inst.id), "port": port, "note": note}
         return {"node": self.handle(inst.id), "port": port,
@@ -1571,6 +1607,11 @@ def style_of(css: str) -> str:
             return f"{name} with changes"
     return "custom CSS"
 
+
+# tools whose Action's node_ids are nodes the change altered (connect is
+# special: only the node it feeds, not the one it reads from)
+_CHANGES_A_NODE = {"set_params", "rename_node", "disconnect",
+                   "write_node_code"}
 
 _REPEAT_FREE = {"describe_flow", "get_node", "get_output", "get_node_type",
                 "find_node_types", "get_rows", "get_page", "get_node_code"}

@@ -354,6 +354,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         events.label_changed.connect(self._on_label_changed)
         events.description_changed.connect(self._on_description_changed)
         events.active_changed.connect(self._on_active_changed)
+        events.proposed_changed.connect(self._on_proposed_changed)
         events.locked_changed.connect(self._on_locked_changed)
         events.frozen_changed.connect(self._on_frozen_changed)
         events.manual_changed.connect(self._on_manual_changed)
@@ -1513,6 +1514,22 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         item = self.node_items.get(node_id)
         if item is not None:
             item._refresh_tooltip()
+
+    def _on_proposed_changed(self) -> None:
+        """The Flo Assistant's pending proposal grew, or was kept or
+        discarded: each node shows whether it is part of it, and a wire
+        into a proposed new node is faded with it."""
+        from .node_item import PROPOSED_OPACITY
+        new = self.graph.proposed_new
+        changed = self.graph.proposed_changed
+        for node_id, item in self.node_items.items():
+            item.set_proposed("new" if node_id in new else
+                              "changed" if node_id in changed else None)
+        for conn_id, item in self.connection_items.items():
+            conn = self.graph.connections.get(conn_id)
+            ghost = conn is not None and (conn.src_node in new
+                                          or conn.dst_node in new)
+            item.setOpacity(PROPOSED_OPACITY if ghost else 1.0)
 
     def _on_active_changed(self, node_id: str, active: bool) -> None:
         item = self.node_items.get(node_id)

@@ -78,6 +78,9 @@ class GraphEvents:
         self.status_changed = Event()  # (node_id: str, status: NodeStatus, message: str)
         self.progress_changed = Event()  # (node_id: str, fraction: float)
         self.temp_edit_changed = Event()  # (node_id: str, has_temp_edit: bool)
+        # () — which nodes the Flo Assistant has proposed changed
+        # (Graph.proposed_new / proposed_changed)
+        self.proposed_changed = Event()
         # (kind: "node"|"frame"|"shape", item_id: str) — it moved to another
         # canvas (G12/G13), so which tab draws it changed. Position and
         # wires are untouched, which is why this is not node_moved.

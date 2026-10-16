@@ -10,8 +10,16 @@ Flo sees, and carries the controls:
   command;
 - **Columns…** — per column Hidden / Name only / Name and values, also
   saved in the flow (`privacy_dialog.py`);
-- **Can** — Advise (look and explain) or Act (change the flow; each reply
-  is one undo step).
+- **Can** — Advise (look and explain), Propose (change the flow as a
+  proposal you Keep or Discard) or Act (change the flow; each reply is one
+  undo step).
+
+A **proposal** is a reply's changes made for real but marked: new nodes
+faded inside a dashed outline and held from running, changed ones outlined
+(`Graph.proposed_new` / `proposed_changed`, drawn by the canvas). Replies
+in a row add to one proposal; **Discard** undoes back to where it began,
+**Keep** just clears the marks. Nothing new is needed underneath — the
+reply is already one undo step.
 
 Every reply ends with a **receipt** read back from the requests that went
 (`flo/receipt.py`): where they went, which column names, whether any
@@ -50,7 +58,7 @@ from ...flo.agent import (
     DEFAULT_MAX_STEPS, STEP_CHOICES, Conversation, Event, TurnResult,
 )
 from ...flo.sendlog import SendLog, log_dir
-from ...flo.tools import ACT, ADVISE, Toolbox
+from ...flo.tools import ACT, ADVISE, PROPOSE, Toolbox
 from ...llm import wire
 from ...llm.profiles import ProfileSet, save as save_profiles
 from .bridge import TurnBridge
@@ -79,6 +87,10 @@ LEVEL_SEES = {
 }
 AUTONOMY = ((ADVISE, "Advise", "Look at the flow and explain or suggest — "
              "it cannot change anything"),
+            (PROPOSE, "Propose", "Make changes as a proposal: what it adds "
+             "shows faded in a dashed outline and doesn't run, what it "
+             "changes is outlined, until you Keep or Discard it under the "
+             "reply"),
             (ACT, "Act", "Change the flow: add, wire, set and delete nodes, "
              "make dashboard and report pages, and write node code. "
              "Each reply is one undo step"))
@@ -111,6 +123,44 @@ TOOL_WORDS = {
     "write_node_code": "Writing code",
 }
 RUN_TIMEOUT = 600.0    # seconds a run_nodes call waits before giving up
+# where a proposing reply's footer offers its choice, and what replaces it
+PROPOSAL_LINKS = '<a href="keep:">Keep</a> · <a href="discard:">Discard</a>'
+# the same once the label has styled its links
+_PROPOSAL_LINKS_RE = re.compile(
+    r'<a [^>]*href="keep:">Keep</a> · <a [^>]*href="discard:">Discard</a>')
+
+
+def proposal_summary(actions) -> str:
+    """"adds 3 nodes, 2 wires, changes 1 setting" — what a proposing reply
+    did, counted from its changes."""
+    counts: dict = {}
+    for action in actions:
+        counts[action.tool] = counts.get(action.tool, 0) + 1
+
+    def n(count: int, one: str, many: str) -> str:
+        return f"{count} {one if count == 1 else many}"
+
+    adds = []
+    if counts.get("add_node"):
+        adds.append(n(counts["add_node"], "node", "nodes"))
+    if counts.get("connect"):
+        adds.append(n(counts["connect"], "wire", "wires"))
+    if counts.get("add_page"):
+        adds.append(n(counts["add_page"], "page", "pages"))
+    parts = ["adds " + ", ".join(adds)] if adds else []
+    changes = counts.get("set_params", 0) + counts.get("rename_node", 0)
+    if changes:
+        parts.append("changes " + n(changes, "setting", "settings"))
+    if counts.get("disconnect"):
+        parts.append("unwires " + n(counts["disconnect"], "input", "inputs"))
+    if counts.get("delete_nodes"):
+        parts.append("removes nodes")
+    others = sum(v for k, v in counts.items() if k not in (
+        "add_node", "connect", "add_page", "set_params", "rename_node",
+        "disconnect", "delete_nodes", "write_node_code"))
+    if others:
+        parts.append(n(others, "other change", "other changes"))
+    return ", ".join(parts) or "changes the flow"
 ACTION_MARK = {"add_node": "+", "delete_nodes": "−", "connect": "→",
                "disconnect": "×", "add_page": "+", "add_tiles": "+",
                "remove_tiles": "−", "delete_page": "−",
@@ -294,6 +344,11 @@ class FloPanel(QWidget):
         self._busy = False
         self._cancel = False
         self._turns: list[dict] = []
+        # the pending proposal under Can ▸ Propose: {"before": undo index
+        # it began at, "last": undo index after its latest reply, "turns":
+        # the replies in it} — None when there is nothing to Keep or Discard
+        self._proposal: Optional[dict] = None
+        self._discarding = False
         self._turn: dict = {}
         self._started = 0.0
         self._doing = ""
@@ -566,11 +621,16 @@ class FloPanel(QWidget):
         # disconnected, so a stack change while the window closes can land
         # here with the menus already gone
         from shiboken6 import isValid
-        parts = (self, self.level_menu, self.autonomy_menu, self.card,
+        parts = (self, self.undo_stack, self.level_menu, self.autonomy_menu,
+                 self.card,
                  self.sees_btn, *self.level_actions.values(),
                  *self.autonomy_actions.values())
         if not all(isValid(part) for part in parts):
             return
+        proposal = self._proposal
+        if proposal is not None and not self._busy and not self._discarding \
+                and self.undo_stack.index() <= proposal["before"]:
+            self._settle_proposal("Undone")
         try:
             self.refresh_header()
         except RuntimeError:   # torn down between the check and the call
@@ -775,6 +835,9 @@ class FloPanel(QWidget):
         if self.toolbox is not None:
             self.toolbox.end_turn()   # a stopped turn's undo step stays whole
         self.chat = self.toolbox = self.bridge = None
+        if self._proposal is not None:
+            self._proposal = None
+            self.graph.clear_proposed()   # what is there stays: it is kept
         self._drop_live()
         self._chat_profile = None
         self._chat_level = -1
@@ -959,6 +1022,14 @@ class FloPanel(QWidget):
     def _launch(self, message: Optional[str], bubble, profile, level: int,
                 autonomy: str) -> None:
         """Start a turn on the worker: `message`, or None to carry on."""
+        proposal = self._proposal
+        if proposal is not None and autonomy != ADVISE and (
+                autonomy == ACT or self.undo_stack.index() != proposal["last"]):
+            # settled before the turn rather than after it, which would
+            # clear the marks this turn is about to make: Act builds on
+            # it, and a change of the user's since means it can't be
+            # discarded on its own any more — both mean it is kept
+            self._settle_proposal("Kept")
         self.chat.max_steps = self.max_steps()
         self._turn = {
             "bubble": bubble, "text": message or "",
@@ -1161,7 +1232,13 @@ class FloPanel(QWidget):
         record["receipt_label"] = receipt_label
         parts.append(receipt_label._row)
         links = []
-        if result.actions:
+        proposing = (turn["meta"]["can"] == PROPOSE
+                     and record["undo_index"] is not None)
+        if proposing:
+            self._extend_proposal(index, record)
+            links.append(f"<b>Proposed</b>: {_escape(proposal_summary(result.actions))}"
+                         f" — {PROPOSAL_LINKS}")
+        elif result.actions:
             links.append(f'<a href="undo:{index}">Undo these changes</a>')
         if record["end"] - record["start"]:
             links.append(f'<a href="sent:{index}">What was sent</a>')
@@ -1191,6 +1268,10 @@ class FloPanel(QWidget):
                 self.notice("That node is no longer in the flow.")
         elif kind == "undo":
             self._undo_turn(int(ident))
+        elif kind == "keep":
+            self.keep_proposal()
+        elif kind == "discard":
+            self.discard_proposal()
         elif kind == "sent":
             self._show_sent(int(ident))
         elif kind == "settings":
@@ -1201,6 +1282,74 @@ class FloPanel(QWidget):
             else:
                 self.notice("That reply has been followed by others — ask "
                             "again to carry on from here.")
+
+    # -- a proposal: Keep or Discard ------------------------------------------------
+
+    def _extend_proposal(self, index: int, record: dict) -> None:
+        """A proposing reply joins the pending proposal — unless something
+        else went on the undo stack since, in which case that one is kept
+        as it stands and this starts a new one."""
+        before = record["undo_index"] - 1     # the reply is one undo step
+        proposal = self._proposal
+        if proposal is not None and proposal["last"] != before:
+            # _launch settles this before a turn; here only if the stack
+            # moved during it. This turn's own marks must stay.
+            self._settle_proposal("Kept", clear=False)
+            proposal = None
+        if proposal is None:
+            proposal = self._proposal = {"before": before, "turns": []}
+        proposal["last"] = record["undo_index"]
+        proposal["turns"].append(index)
+
+    def keep_proposal(self) -> bool:
+        if self._proposal is None:
+            return False
+        if self._busy:
+            self.notice("Flo is still working on it — Keep or Discard it "
+                        "when it's done.")
+            return False
+        self._settle_proposal("Kept")
+        return True
+
+    def discard_proposal(self) -> bool:
+        proposal = self._proposal
+        if proposal is None:
+            return False
+        if self._busy:
+            self.notice("Flo is still working on it — Keep or Discard it "
+                        "when it's done.")
+            return False
+        if self.undo_stack.index() != proposal["last"]:
+            self.notice("Other changes came after the proposal, so it can't "
+                        "be discarded on its own — Keep it, or use Edit ▸ "
+                        "Undo to step back through them.")
+            return False
+        self._discarding = True
+        try:
+            while self.undo_stack.index() > proposal["before"]:
+                self.undo_stack.undo()
+        finally:
+            self._discarding = False
+        self._settle_proposal("Discarded")
+        return True
+
+    def _settle_proposal(self, how: str, clear: bool = True) -> None:
+        """Kept, Discarded or Undone: the marks come off the canvas and
+        each of its replies says which."""
+        proposal, self._proposal = self._proposal, None
+        if clear:
+            self.graph.clear_proposed()
+        if proposal is None:
+            return
+        for index in proposal["turns"]:
+            record = self._turns[index]
+            if how != "Kept":
+                record["undone"] = True
+                for node_id, code in record.get("code", ()):
+                    self.discard_code(node_id, code)
+            footer = record.get("footer")
+            if footer is not None:
+                footer.setText(_PROPOSAL_LINKS_RE.sub(how, footer.text()))
 
     def _undo_turn(self, index: int) -> None:
         record = self._turns[index]

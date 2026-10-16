@@ -87,6 +87,10 @@ _HANDLED_ITEM_CHANGES = frozenset({
 DEACTIVATED_OPACITY = 0.35
 # Lighter than deactivated: the branch below a bypassed node still runs.
 BYPASSED_OPACITY = 0.6
+# A node the Flo Assistant proposed: there to look at, not yet the flow's
+PROPOSED_OPACITY = 0.55
+# what its dashed outline says: added (accent) or changed (amber)
+PROPOSED_COLOURS = {"new": QColor("#7c6cf6"), "changed": QColor("#f5a524")}
 LABEL_LOD = 0.5  # hide port names below this zoom
 # Below this zoom, nodes paint as a flat rect (no path/text/LED) and hide
 # their ports and embedded widgets — the per-item cost that makes a large
@@ -377,6 +381,48 @@ class HeavyBadge(NodeBadge):
         for i in (2, 1, 0):
             painter.drawEllipse(
                 QRectF(0.6, 0.8 + i * 3.3, self.W - 1.2, 3.6))
+
+
+class ProposedRing(QGraphicsItem):
+    """The dashed outline round a node the Flo Assistant has proposed and
+    the user has not yet kept or discarded — accent for one it added,
+    amber for one it changed.
+
+    Behind the node and outside it, so it frames every card kind without
+    touching paint(); and crisp while the node itself is faded, since the
+    outline is what says why it is faded.
+    """
+
+    PAD = 6.0
+
+    def __init__(self, parent: "NodeItem") -> None:
+        super().__init__(parent)
+        self.kind = "new"
+        self.setFlag(QGraphicsItem.ItemStacksBehindParent, True)
+        self.setFlag(QGraphicsItem.ItemIgnoresParentOpacity, True)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setVisible(False)
+
+    def _ring(self) -> QRectF:
+        node = self.parentItem()
+        return QRectF(-self.PAD, -self.PAD, node.width + 2 * self.PAD,
+                      node.body_height + 2 * self.PAD)
+
+    def sync(self) -> None:
+        """The node changed size: the outline follows."""
+        self.prepareGeometryChange()
+
+    def boundingRect(self) -> QRectF:
+        return self._ring().adjusted(-2, -2, 2, 2)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(PROPOSED_COLOURS.get(self.kind, PROPOSED_COLOURS["new"]),
+                   2.0, Qt.DashLine)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(self._ring(), 12, 12)
 
 
 class ManualBadge(NodeBadge):
@@ -1159,6 +1205,9 @@ class NodeItem(QGraphicsObject):
         self._drop_badge = DropBadge(self)
         self._manual_badge = ManualBadge(self)
         self._heavy_badge = HeavyBadge(self)
+        # proposed by the Flo Assistant: None, "new" or "changed"
+        self._proposed: Optional[str] = None
+        self._proposed_ring = ProposedRing(self)
         # The node's own two run flags, and the same two as the frames
         # around it are currently applying — kept apart so the node can be
         # drawn as the run will treat it without either overwriting the
@@ -3471,6 +3520,18 @@ class NodeItem(QGraphicsObject):
         self._own_active = bool(active)
         self._apply_run_flags()
 
+    def set_proposed(self, kind: Optional[str]) -> None:
+        """Part of the Flo Assistant's pending proposal: "new" (it added
+        this; faded, and it won't run until kept), "changed" (it altered
+        this), or None."""
+        if kind == self._proposed:
+            return
+        self._proposed = kind
+        self._proposed_ring.kind = kind or "new"
+        self._proposed_ring.setVisible(kind is not None)
+        self._proposed_ring.sync()
+        self._apply_run_flags()
+
     def set_manual(self, manual: bool) -> None:
         """Show the play triangle: this node sits out every run that did not
         name it."""
@@ -3504,6 +3565,8 @@ class NodeItem(QGraphicsObject):
         self._manual_badge.setVisible(self._own_manual or self._frame_manual)
         if not self._own_active or self._frame_inactive:
             self.setOpacity(DEACTIVATED_OPACITY)
+        elif self._proposed == "new":
+            self.setOpacity(PROPOSED_OPACITY)
         elif self.node.bypassed:
             self.setOpacity(BYPASSED_OPACITY)
         else:
@@ -3610,12 +3673,15 @@ class NodeItem(QGraphicsObject):
 
     def _layout_badges(self) -> None:
         """Pack the visible badges so a node showing one of them never leaves
-        the other's slot empty.
+        the other's slot empty. (And keep a proposal's outline round the
+        node: this is where a change of size lands.)
 
         Above the header on a wide node, left to right. A square node has no
         room up there — that is where its name goes — so they move into the
         status row instead, packing leftwards from the LED.
         """
+        if self._proposed is not None:
+            self._proposed_ring.sync()
         if self._square:
             status = self._status_rect()
             y = status.center().y() - NodeBadge.H / 2
@@ -4741,7 +4807,13 @@ class NodeItem(QGraphicsObject):
         notes (a padlock or a frozen badge still speaks first, since those
         stop the node from running at all); otherwise fall back to the node's
         own description (currently only surfaced for reroutes)."""
-        if self.node.locked:
+        if self._proposed is not None:
+            self.setToolTip(
+                ("Proposed by Flo — added, and it won't run until you keep "
+                 "it." if self._proposed == "new" else
+                 "Proposed by Flo — changed.")
+                + " Keep or Discard it under Flo's reply.")
+        elif self.node.locked:
             # The padlock says *that* it is locked; only a tooltip has room
             # to say what that means and how to undo it.
             self.setToolTip("Locked — params, code and position are "
