@@ -193,6 +193,9 @@ class RenderedReport:
     #: Only when rendered `live`: (marker, "90%") per table given a
     #: percentage width — see html.size_tables.
     table_widths: list = field(default_factory=list)
+    #: Only when rendered `live`: (marker, html, enabled) per input control
+    #: drawn as its widget — see live.py and core.report_controls.
+    live_controls: list = field(default_factory=list)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -418,6 +421,34 @@ TABLE_MARK_FILL = "\u200b"
 
 def table_marker(index: int) -> str:
     return TABLE_MARK + TABLE_MARK_FILL * (index + 1) + TABLE_MARK
+
+
+#: The same trick for an input control's words (core.report_controls): an
+#: invisible separator, not a word joiner, so no control's mark can be
+#: mistaken for a table's. The words sit between `control_marker(n)` and
+#: CONTROL_END, and the web page swaps that whole stretch for the widget.
+CONTROL_MARK = "\u2063"
+CONTROL_END = CONTROL_MARK * 2
+
+
+def control_marker(index: int) -> str:
+    return CONTROL_MARK + TABLE_MARK_FILL * (index + 1) + CONTROL_MARK
+
+
+def control_state(graph, cache, node, shown: bool = True):
+    """core.report_controls.widget_state for `node`, with what its input
+    ports supply read from the cache — the one place both the page's
+    widget and the write coming back from it get their answer, so the
+    write is vetted against exactly what was drawn."""
+    from flograph.core import report_controls as rc
+    from flograph.engine import introspect
+    upstream, options = {}, None
+    if cache is not None:
+        if rc.kind_of(node) == "slicer":
+            options = introspect.slicer_options(graph, cache, node.id)
+        else:
+            upstream = introspect.control_upstream(graph, cache, node.id)
+    return rc.widget_state(node, upstream, options, shown=shown)
 
 
 # On screen there is no paper to match, so charts are drawn at twice the
@@ -830,8 +861,15 @@ class _Resolver:
                  image_width: int = FIGURE_WIDTH, source=None,
                  nested=None, page_height: "float | None" = None,
                  cache=None, live: bool = False,
-                 in_app: bool = False, graph=None) -> None:
+                 in_app: bool = False, graph=None,
+                 controls: bool = False) -> None:
         self._lookup = lookup
+        # A report *page* draws an input control as its widget (see
+        # _control). A report card does not: its web view has no channel
+        # back to the flow, and a card is inside the flow besides.
+        self._controls = controls
+        #: (marker, html, enabled) per control drawn as a widget
+        self.live_controls: list = []
         # for `![[flograph.…]]` — what a report can say about the app
         # itself (core.app_facts); None answers from nothing but the clock
         self._graph = graph
@@ -954,7 +992,11 @@ class _Resolver:
         fact = fact_name(embed.ref)
         if fact is not None:
             return self._fact(fact)
-        button = self._button(self._node_for(embed.ref))
+        node = self._node_for(embed.ref)
+        control = self._control(node, embed)
+        if control is not None:
+            return control
+        button = self._button(node)
         if button is not None:
             return button
         value, failure, problem = self._lookup(embed.ref, embed.port)
@@ -1061,6 +1103,34 @@ class _Resolver:
             f'&nbsp;&nbsp;▶&nbsp;&nbsp;{escape(node.label)}&nbsp;&nbsp;'
             '</span></a>')
         return SPARK_TOKEN.format(len(self.inline) - 1)
+
+    def _control(self, node, embed) -> "str | None":
+        """An input control or a Slicer drawn as itself, or None when this
+        embed is not one (core.report_controls.wants_widget says when).
+
+        Paper gets "Caption: value" — the value the flow has, not a change
+        still waiting for Apply. The web page gets the widget in place of
+        those words: working in the app's own preview, the one page with a
+        flow behind it, and drawn disabled at its setting in a saved file.
+        The words go through Qt between two invisible marks, since nothing
+        else of an element survives the round trip (see live.py).
+        """
+        from flograph.core import report_controls as rc
+        alone = embed.alone and not embed.port
+        if (not self._controls or self._graph is None
+                or not rc.wants_widget(node, alone, embed.options)):
+            return None
+        applied = control_state(self._graph, self._cache, node, shown=False)
+        words = (f"**{escape_markdown(rc.heading(applied))}:** "
+                 f"{escape_markdown(rc.display_value(applied))}")
+        if not self._live:
+            return words
+        shown = control_state(self._graph, self._cache, node,
+                              shown=self._in_app)
+        marker = control_marker(len(self.live_controls))
+        self.live_controls.append(
+            (marker, rc.widget_html(shown, self._in_app), self._in_app))
+        return marker + words + CONTROL_END
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -1790,7 +1860,7 @@ def stage_report(body: str, graph, cache, image_scale: float = 1.0,
                       page_break_rule=page_break_rule,
                       page_height=page_height, cache=cache,
                       page_links=page_links, live=live, in_app=in_app,
-                      graph=graph)
+                      graph=graph, controls=True)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -1894,11 +1964,12 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                cache=None, page_links: bool = False,
                header_fill: str = PAPER_HEADER,
                live: bool = False, in_app: bool = False,
-               graph=None) -> StagedReport:
-    """Resolve every embed in `body` — the UI-thread half of render_body."""
+               graph=None, controls: bool = False) -> StagedReport:
+    """Resolve every embed in `body` — the UI-thread half of render_body.
+    `controls` draws input controls as widgets: report pages only."""
     resolver = _Resolver(lookup, image_scale, image_width, source, nested,
                          page_height, cache, live=live, in_app=in_app,
-                         graph=graph)
+                         graph=graph, controls=controls)
     # Folding sections and tabs before columns: a block may hold a columns
     # block, and a column a block. On the web each edge becomes a token that
     # web_layout.py turns into the element; on paper, the block written out
@@ -1988,7 +2059,8 @@ def finish_body(staged_report: StagedReport) -> RenderedReport:
         live_tables=list(resolver.live_tables),
         blocks=list(resolver.blocks),
         front_matter=dict(resolver.front_matter),
-        table_widths=list(resolver.table_widths))
+        table_widths=list(resolver.table_widths),
+        live_controls=list(resolver.live_controls))
 
 
 def show_in(view, document) -> None:

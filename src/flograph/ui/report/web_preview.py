@@ -87,6 +87,9 @@ class WebPreview(QWidget):
 
     #: a `page:` link or a button was clicked: its href, as written
     link_activated = Signal(str)
+    #: an input control on the page was moved: (node id, the JSON message
+    #: core.report_controls.accept vets) — see _ensure_browser
+    control_written = Signal(str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -118,6 +121,14 @@ class WebPreview(QWidget):
             self.browser.setPage(_link_page(
                 self.browser.page().profile(), self.browser,
                 self.link_activated.emit))
+            # The web-view bridge, addressed by node: the page's controls
+            # call flograph.set(<node id>, {"value": ...}), and the report
+            # page decides what that node may be told. Installed after
+            # setPage — the scripts and the channel belong to the page.
+            from ..web_bridge import BridgeReceiver, install
+            self._receiver = BridgeReceiver(self)
+            self._receiver.param_written.connect(self.control_written)
+            install(self.browser, self._receiver)
         except Exception:
             self._message.setText(
                 "Web preview needs the PySide6 WebEngine component.\n"

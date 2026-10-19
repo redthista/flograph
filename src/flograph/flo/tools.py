@@ -101,7 +101,9 @@ _EMBED_HELP = (
     "words: live — in the Web preview and the saved web page the real chart "
     "(hover, zoom, legend clicks) or a table that sorts and folds, instead "
     "of a picture; this is what 'interactive' or 'live' charts means — "
-    "search — a live table with a search box — and fit — shrink to the "
+    "search — a live table with a search box — control — an input "
+    "control or Slicer drawn as its working widget in the Web preview (a "
+    "control alone on its line already is) — and fit — shrink to the "
     "space left on a printed page. E.g. ![[n3|live|height=400]].")
 
 _PAGE_WRITES = [

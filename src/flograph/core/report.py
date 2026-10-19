@@ -63,7 +63,12 @@ EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows", "radius")
 #:            or printed table. Opt-in, so a report nobody touched saves
 #:            the same HTML it always did.
 #: `search` — a live table with a search box over it (implies `live`).
-EMBED_FLAGS = ("fit", "live", "search")
+#: `control` — an input control or a Slicer drawn as the widget itself in
+#:            the web page (core.report_controls). A control alone on its
+#:            line is one already; this asks for it inside a sentence, and
+#:            is the only way a Slicer becomes a picker rather than its
+#:            filtered table.
+EMBED_FLAGS = ("fit", "live", "search", "control")
 
 
 def parse_options(rest: str) -> "tuple[str, dict, list]":
@@ -218,13 +223,22 @@ class Embed:
     options: dict = field(default_factory=dict)
     #: segments that were neither a port nor a known option
     unknown: tuple = ()
+    #: nothing but spaces beside it on its line — a block of its own rather
+    #: than a word in a sentence (an input control draws as its widget)
+    alone: bool = False
 
 
 def _embed_at(match: re.Match) -> Embed:
     port, options, unknown = parse_options(match.group(2))
+    text = match.string
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    line_end = text.find("\n", match.end())
+    line_end = len(text) if line_end == -1 else line_end
+    alone = not (text[line_start:match.start()].strip()
+                 or text[match.end():line_end].strip())
     return Embed(ref=match.group(1), port=port, raw=match.group(0),
                  start=match.start(), end=match.end(), options=options,
-                 unknown=tuple(unknown))
+                 unknown=tuple(unknown), alone=alone)
 
 
 #: Where an embed is text about an embed rather than an embed: a fenced

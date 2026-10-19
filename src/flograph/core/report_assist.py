@@ -75,6 +75,7 @@ FLAG_HINTS = {
     "fit": "shrink a chart, or trim a table, to the room left on the page",
     "live": "in the web page, a live chart or a table that sorts and folds",
     "search": "in the web page, a live table with a search box",
+    "control": "in the web page, the slider, box or slicer itself",
 }
 #: A few values worth offering once `key=` is typed. Not a closed list —
 #: anything the option accepts can still be typed.

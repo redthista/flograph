@@ -23,6 +23,10 @@ The page stays one file with nothing to fetch. Plotly's script is the one
 that ships inside the plotly package, inlined once however many charts
 there are — never a CDN, the same rule the Web Libraries follow.
 
+Input controls are the third (core.report_controls): their words sit
+between two invisible marks (render.control_marker), and the widget takes
+their place — or their paragraph's, when they are all it holds.
+
 Opt-in, per embed: `![[Chart|live]]`, `![[Sales|live]]`, and
 `![[Sales|search]]` for a live table with a search box. An embed that asks
 for neither is exactly what the PDF has, so a report nobody has touched
@@ -48,8 +52,10 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
     """
     charts = getattr(rendered, "live_charts", None) or {}
     tables = getattr(rendered, "live_tables", None) or []
-    if not charts and not tables:
+    controls = getattr(rendered, "live_controls", None) or []
+    if not charts and not tables and not controls:
         return html
+    html = _put_controls(html, controls)
     drawn = 0
     images = getattr(rendered, "images", None) or []
     for index, chart in charts.items():
@@ -72,6 +78,9 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
         box = _table_box(table, search, rows, shares.get(marker, ""))
         html = html[:start] + box + html[end:]
     head = f"<style>{LIVE_CSS}</style>"
+    if controls:
+        from flograph.core.report_controls import CSS as CONTROL_CSS
+        head += f"<style>{CONTROL_CSS}</style>"
     script = _plotly_script(plotly_src) if drawn else ""
     if drawn:
         # a live map's outlines, once for every map on the page, so it
@@ -84,8 +93,45 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
                     outlines.append(name)
         script += preload_script(outlines)
     body = script + f"<script>{LIVE_JS}</script>"
+    if any(enabled for _m, _h, enabled in controls):
+        from flograph.core.report_controls import JS as CONTROL_JS
+        body += f"<script>{CONTROL_JS}</script>"
     html = _into(html, "</head>", head)
     return _into(html, "</body>", body)
+
+
+_P_OPEN_RE = re.compile(r"<p\b[^>]*>", re.IGNORECASE)
+
+
+def _put_controls(html: str, controls) -> str:
+    """Each control's words, marks and all, swapped for its widget. When
+    the words are the whole of their paragraph — the control was on a line
+    of its own — the paragraph goes too: a `<div>` cannot sit in a `<p>`,
+    and the paragraph's margins would stack on the widget's."""
+    from .render import CONTROL_END
+
+    for marker, widget, _enabled in controls:
+        start = html.find(marker)
+        if start == -1:
+            continue
+        end = html.find(CONTROL_END, start + len(marker))
+        if end == -1:
+            continue
+        end += len(CONTROL_END)
+        opened = html.rfind("<p", 0, start)
+        tag = _P_OPEN_RE.match(html, opened) if opened != -1 else None
+        closed = html.find("</p>", end)
+        if (tag is not None and closed != -1
+                and not _visible(html[tag.end():start])
+                and not _visible(html[end:closed])):
+            start, end = opened, closed + len("</p>")
+        html = html[:start] + widget + html[end:]
+    return html
+
+
+def _visible(fragment: str) -> bool:
+    """Whether a stretch of Qt's HTML holds any text, tags aside."""
+    return bool(re.sub(r"<[^>]*>", "", fragment).strip())
 
 
 def _shape_of(image) -> str:

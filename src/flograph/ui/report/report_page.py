@@ -87,6 +87,11 @@ class ReportPage(QWidget):
     page_link_clicked = Signal(str)   # the link, as written
     #: an Action Button embedded in the page was clicked: its node id
     button_clicked = Signal(str)
+    #: an input control in the Web preview changed the flow's value — the
+    #: window re-runs it and what it feeds, as for the canvas card
+    control_changed = Signal(str)
+    #: a Slicer in the Web preview changed its ticks: its node id
+    slicer_changed = Signal(str)
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -189,6 +194,7 @@ class ReportPage(QWidget):
         self.preview.link_activated.connect(self._follow_link)
         self.web_preview = WebPreview()
         self.web_preview.link_activated.connect(self._follow_link)
+        self.web_preview.control_written.connect(self._on_control_written)
         self._preview_stack = QStackedWidget()
         self._preview_stack.addWidget(self.preview)
         self._preview_stack.addWidget(self.web_preview)
@@ -891,6 +897,43 @@ class ReportPage(QWidget):
             return
         from ..web_links import open_web_link
         open_web_link(href)
+
+    def _on_control_written(self, node_id: str, payload: str) -> None:
+        """A control in the Web preview was moved (core.report_controls).
+
+        Vetted against the widget as it was drawn, then written exactly as
+        the canvas card writes it — through ui.control_binding, so a held
+        control holds the change until Apply and every move is one Ctrl+Z.
+        The window does the re-run, as it does for the card; the page is
+        drawn again when the run lands.
+        """
+        from flograph.core import report_controls as rc
+        from .. import control_binding as cb
+        from .render import control_state
+
+        node = self._graph.nodes.get(node_id)
+        if not rc.kind_of(node):
+            return
+        state = control_state(self._graph, self._engine.cache, node)
+        try:
+            what, value = rc.accept(state, payload)
+        except rc.ControlWriteError as exc:
+            # nowhere else for a page to complain to; gone on the next render
+            self.problems = [*self.problems, f"“{node.label}”: {exc}"]
+            self.run_lint()
+            return
+        if what == "selected":
+            if value != node.params.get("selected", ""):
+                from ..commands import SetParamCommand
+                self._undo_stack.push(SetParamCommand(
+                    self._graph, node_id, "selected", value, merge=False))
+            self.slicer_changed.emit(node_id)
+        elif what == "apply":
+            # the card's ✓ re-runs whether or not a change was waiting
+            cb.apply(self._graph, self._undo_stack, node_id)
+            self.control_changed.emit(node_id)
+        elif cb.commit_value(self._graph, self._undo_stack, node_id, value):
+            self.control_changed.emit(node_id)
 
     def preview_setup(self, setup) -> None:
         """Show the report on `setup`'s paper without committing it.
