@@ -1,4 +1,4 @@
-"""ideas.md items 5, 9, 10, 11 and 16: the Input node category and the
+"""The Input node category and the
 `card: "control"` foundation under it.
 
 A control node has no rendered output — it *is* the input. One widget
@@ -717,7 +717,7 @@ class TestChaining:
         return node
 
     def test_a_slicer_with_no_table_is_a_value_picker(self, qtbot, window):
-        """ideas.md 16: the table input is optional, so a slicer can stand
+        """The table input is optional, so a slicer can stand
         on its own typed-in list with no data behind it."""
         slicer = self._standalone_slicer(
             window, "alpha\nbeta\ngamma", '["beta"]')
@@ -751,7 +751,7 @@ class TestChaining:
 
     def test_a_slicer_selection_can_drive_a_choice_s_options(
             self, qtbot, window):
-        """ideas.md 5 + 16: one picker feeding the next is the whole point
+        """One picker feeding the next is the whole point
         of the selected output."""
         slicer = self._standalone_slicer(
             window, "alpha\nbeta\ngamma", '["beta", "gamma"]')

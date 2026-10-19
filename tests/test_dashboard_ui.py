@@ -1115,7 +1115,7 @@ class TestPersistence:
 
 
 class TestTileFullscreen:
-    """Maximizing one tile over the whole page (ideas.md #4): the tile is
+    """Maximizing one tile over the whole page: the tile is
     pinned to the viewport in scene coordinates, so it grows with the window
     and the embedded chart/table grows with it.
 

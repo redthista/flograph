@@ -19,7 +19,7 @@ by definition. A project saved by an older flograph keeps a legacy
 and removes it.
 
 Blobs written since CACHE_SCHEMA 3 are zlib-compressed (level 1, from
-measurement — see ideas_archived.md #16), and say so in a per-entry
+measurement — see flograph issue #26), and say so in a per-entry
 "codec" field. Reading never trusts the manifest on this point: the first
 byte of a pickle at protocol 2+ is always 0x80 and a zlib stream's never
 is, so `load_blob` sniffs and decompresses only when it must. That is what
@@ -78,7 +78,7 @@ SUPPORTED_SCHEMAS = (1, 2, 3)
 # frames — most of what caches hold — drop to ~40% of raw for a few percent
 # of the pickle time, float blocks barely shrink for any codec but cost
 # level 9 occasional seconds for nothing, and lzma's ratio edge is paid for
-# with a 4x slower read on every project open. See ideas_archived.md #16.
+# with a 4x slower read on every project open. See flograph issue #26.
 CACHE_COMPRESS_LEVEL = 1
 
 

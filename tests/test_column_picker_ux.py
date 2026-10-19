@@ -1,5 +1,5 @@
 """Column-picker ergonomics: the menu that stays open while you tick
-(ideas.md H1) and the insert-a-column-name button on free-text params
+(H1) and the insert-a-column-name button on free-text params
 (H2). The plumbing that feeds both is covered in
 test_column_suggestions.py; this is about what the picking feels like.
 """

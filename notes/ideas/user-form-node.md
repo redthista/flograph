@@ -129,7 +129,7 @@ Add `"form"` to `CARD_KINDS` so `NODE["card"] = "form"` parses.
 
 ### 7. Docs
 - `README.md` node catalog — Input section: User Form, Form from Table.
-- `ideas.md` — mark the "user forms" line as done.
+- `board.sh done` on card #5 (M2. User forms).
 
 ## Out of scope (decided)
 - No accumulation history (latest entry only); a follow-up node can turn entry

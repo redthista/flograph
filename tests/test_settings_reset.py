@@ -1,4 +1,4 @@
-"""ideas.md item 19: reset the window layout, and reset every stored
+"""Reset the window layout, and reset every stored
 preference back to defaults, from Settings > General.
 
 Settings are kept off the real store (avoid polluting the developer's actual

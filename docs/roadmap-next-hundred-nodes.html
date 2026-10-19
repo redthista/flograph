@@ -400,7 +400,7 @@ footer .wrap > p { max-width: var(--prose); }
       </div>
       <div class="card sev p1">
         <h4>Reusability &mdash; metanodes</h4>
-        <p>Right now a 12-node "clean a vendor file" subgraph is copied and re-wired for every vendor. A <strong>metanode</strong> — a subflow that presents as one node with its own ports and params — is the single biggest multiplier for how fast a real pipeline gets built. Parked in <code>ideas_archived.md #4</code>; it should be un-parked.</p>
+        <p>Right now a 12-node "clean a vendor file" subgraph is copied and re-wired for every vendor. A <strong>metanode</strong> — a subflow that presents as one node with its own ports and params — is the single biggest multiplier for how fast a real pipeline gets built. Parked in <code>flograph issue #19</code>; it should be un-parked.</p>
       </div>
       <div class="card sev p2">
         <h4>The last mile &mdash; deploy</h4>
@@ -415,7 +415,7 @@ footer .wrap > p { max-width: var(--prose); }
     <span class="eyebrow">04 &mdash; Node roadmap</span>
     <div class="wire-rule"></div>
     <h2>The library, by territory</h2>
-    <p class="prose">Priorities: <span class="tag p0">P0</span> blocks a core use case, build next &nbsp; <span class="tag p1">P1</span> high daily value &nbsp; <span class="tag p2">P2</span> rounds it out. <span class="tag ship">shipped</span> landed this session. <span class="tag council">council</span> is from the existing <code>node_ideas.md</code> 50.</p>
+    <p class="prose">Priorities: <span class="tag p0">P0</span> blocks a core use case, build next &nbsp; <span class="tag p1">P1</span> high daily value &nbsp; <span class="tag p2">P2</span> rounds it out. <span class="tag ship">shipped</span> landed this session. <span class="tag council">council</span> is from the existing Node Council's 50.</p>
 
     <h3>Connect &mdash; sources &amp; sinks</h3>
     <div class="tablewrap"><table>
@@ -507,7 +507,7 @@ footer .wrap > p { max-width: var(--prose); }
         <tr><td>Mermaid Diagram</td><td>Render Mermaid, or build a flowchart / Gantt from a table</td><td><span class="tag ship">shipped</span></td></tr>
         <tr><td>Goal Card / Sparkline Card / Status Light</td><td>Numbers with context: target, trend, green-amber-red</td><td><span class="tag p0">P0</span> <span class="tag council">council</span></td></tr>
         <tr><td>Alert List / Best &amp; Worst / Plain-English Summary</td><td>The dashboard writes its own "what needs attention" headline</td><td><span class="tag p1">P1</span> <span class="tag council">council</span></td></tr>
-        <tr><td>User Form</td><td>Fields + submit &rarr; a row appended to a table / DB (<code>ideas.md M2</code>)</td><td><span class="tag p0">P0</span> <span class="tag council">council</span></td></tr>
+        <tr><td>User Form</td><td>Fields + submit &rarr; a row appended to a table / DB (<code>flograph issue #5</code>)</td><td><span class="tag p0">P0</span> <span class="tag council">council</span></td></tr>
         <tr><td>Map</td><td>Points / choropleth on a real basemap (folium/deck)</td><td><span class="tag p1">P1</span></td></tr>
         <tr><td>Network Graph / Calendar Heatmap / Funnel</td><td>The chart shapes Plotly Express does not cover well</td><td><span class="tag p2">P2</span></td></tr>
         <tr><td>Multi-Select / Range Slider / Search Box / Remembered Choice</td><td>The control family the app builder keeps asking for</td><td><span class="tag p1">P1</span> <span class="tag council">council</span></td></tr>
@@ -571,7 +571,7 @@ footer .wrap > p { max-width: var(--prose); }
       </div>
       <div class="card">
         <h4>+ &middot; Collaboration</h4>
-        <p>Opt-in git per project (every save a commit — <code>ideas.md L1</code>), then comments on nodes and presence. Lower priority than the six above, but it is where "a tool I use" becomes "a tool my team uses".</p>
+        <p>Opt-in git per project (every save a commit — <code>flograph issue #4</code>), then comments on nodes and presence. Lower priority than the six above, but it is where "a tool I use" becomes "a tool my team uses".</p>
       </div>
     </div>
   </div>
@@ -664,7 +664,7 @@ footer .wrap > p { max-width: var(--prose); }
     <ul class="clean">
       <li><strong>Deps.</strong> New optional extras in <code>pyproject.toml</code>: <code>sql</code>, <code>duckdb</code>, <code>http</code>, <code>fuzzy</code>, <code>scrape</code>; <code>ai</code> is now <code>requests</code> + <code>httpx</code> (no vendor SDK). Core stays <code>PySide6 + pandas + jedi + psutil</code>.</li>
       <li><strong>LLM nodes</strong> take an <code>anthropic</code> / <code>openai</code> <em>API format</em> plus a base URL and a free-text model — the hosted APIs, Azure, a local Ollama / vLLM server, or a gateway all work. Key from the node field or <code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code> in <code>.env</code>; a local server needs none. Each has a <em>Preview (no API call)</em> mode.</li>
-      <li><strong>Not done</strong> (waiting on your test + sign-off): <code>node_ideas.md</code> / <code>ideas.md</code> entries left untouched; CHANGELOG rows added but adjust freely.</li>
+      <li><strong>Not done</strong> (waiting on your test + sign-off): board cards left untouched; CHANGELOG rows added but adjust freely.</li>
       <li><strong>Env caveat.</strong> The scratch venv setup briefly installed a few of these deps into the main checkout's <code>.venv</code> as well — harmless additions, no removals. A separate pre-existing test (<code>test_gantt_node</code>) breaks under Plotly 7 vs the locked 6.x; unrelated to this work.</li>
     </ul>
   </div>
@@ -673,7 +673,7 @@ footer .wrap > p { max-width: var(--prose); }
 <footer>
   <div class="wrap">
     <div class="wire-rule"></div>
-    <p>Working document, drafted in-session. The node roadmap builds on the existing <code>node_ideas.md</code> council of 50 and extends it toward connectors, automation, AI and the developer-toolbox pitch. Nothing here is committed as a decision — it is an argument for one.</p>
+    <p>Working document, drafted in-session. The node roadmap builds on the Node Council's 50 (<code>notes/ideas/node-council.md</code>) and extends it toward connectors, automation, AI and the developer-toolbox pitch. Nothing here is committed as a decision — it is an argument for one.</p>
   </div>
 </footer>
 

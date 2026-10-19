@@ -13,7 +13,7 @@ in the file would be a broken-image icon. So they are inlined as data URIs,
 which also makes the file one thing you can mail rather than a page plus a
 folder.
 
-This is not the Jinja/CSS export shelved as ideas_archived.md item 8. That
+This is not the Jinja/CSS export shelved as flograph issue #23. That
 one owns the *layout* — real page rules, running elements. This
 takes Qt's own HTML as it comes and only fixes the images, which is why it
 fits in a page and needs no template. The one piece of item 8 that did not
@@ -256,7 +256,7 @@ def _image_uri(image) -> "str | None":
 def page_style(setup) -> str:
     """CSS that puts the report on the paper it was set up for.
 
-    Not the Jinja/CSS export shelved as ideas_archived.md item 8 — that
+    Not the Jinja/CSS export shelved as flograph issue #23 — that
     one owns the layout and can do running headers and counters.
     This is the cheap half: the same page size and margins, so what the
     browser prints lands on the paper the PDF does, with a chart sized for

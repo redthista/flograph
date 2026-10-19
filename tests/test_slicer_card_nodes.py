@@ -395,7 +395,7 @@ class TestSlicerCard:
         assert panel.toolbar._select_all.isHidden()
 
     def test_single_mode_draws_radios_not_checkboxes(self, qtbot):
-        """ideas.md item 14: a checkbox promises you can tick several, which
+        """A checkbox promises you can tick several, which
         single mode then silently undoes. Painting only — the list still
         stores and reports check state."""
         panel = _panel(qtbot, [("north",), ("south",)],

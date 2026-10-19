@@ -1,4 +1,4 @@
-"""ideas.md item 20: an About page in Settings showing the installed
+"""An About page in Settings showing the installed
 flograph version (plus Python/Qt versions), so users can tell what build
 they're running without checking pyproject.toml. Also covers the Settings
 nav being sorted ascending (General/Canvas/About -> About/Canvas/General)

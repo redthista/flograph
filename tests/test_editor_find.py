@@ -1,4 +1,4 @@
-"""ideas.md items 4 and 17: Ctrl+F find/replace in the code editor, and
+"""Ctrl+F find/replace in the code editor, and
 lifting an error message out of the footer with one click.
 
 The find bar owns no document state, so these drive it the way a user does

@@ -451,7 +451,7 @@ class TestFrameSnap:
 class TestGroupDragSnap:
     """Dragging a multi-selection must snap *every* selected node and frame,
     not just the item under the cursor, and commit them as one move
-    (issues.md #5)."""
+    (flograph issue #39)."""
 
     def _selection(self, window):
         scene = window.scene

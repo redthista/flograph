@@ -446,7 +446,7 @@ class TestPreviewToggle:
 
 
 class TestFlushPendingEdits:
-    """issues.md #4: F5/Run Selected/Reset Caches/the run-node menu actions
+    """flograph issue #38: F5/Run Selected/Reset Caches/the run-node menu actions
     all read node.params synchronously, but Qt only commits a table cell's
     open editor on Tab/click-away/FocusOut — so a value just typed and not
     yet closed off was invisible to the very run meant to pick it up.

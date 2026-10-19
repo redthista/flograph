@@ -1,4 +1,4 @@
-"""ideas.md (NEW list): "have flograph check for updates? settings -> check
+"""Asked for as: "have flograph check for updates? settings -> check
 for updates?"
 
 A read-only version probe plus a once-a-day, opt-in, non-modal notice. The

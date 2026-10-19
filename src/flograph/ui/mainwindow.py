@@ -323,7 +323,7 @@ class MainWindow(QMainWindow):
             "canvas/wheel_action", base_view.DEFAULT_WHEEL_ACTION))
         self.view.set_wheel_action(self.wheel_action)
         # zlib on the cache side-car trades a little save-time CPU for a lot
-        # of disk (ideas_archived.md #16). Off writes raw pickles; both eras
+        # of disk (flograph issue #26). Off writes raw pickles; both eras
         # read forever either way — load_blob sniffs each blob.
         self.cache_compression_enabled = self.settings.value(
             "saving/compress_cache", True, type=bool)
@@ -1646,7 +1646,7 @@ class MainWindow(QMainWindow):
             parts.append(timing)
         quiet = time.monotonic() - self._run_last_output
         if quiet >= QUIET_NODE_AFTER_S:
-            # issues.md #4: a node that hangs looks exactly like a node that
+            # flograph issue #38: a node that hangs looks exactly like a node that
             # is merely slow. Saying it has gone silent, and that Cancel
             # exists, is the difference between the two.
             if not self._run_had_output:

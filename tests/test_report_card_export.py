@@ -106,7 +106,7 @@ class TestItLooksLikeTheReport:
     """The first complaint about Save HTML was that it didn't look like the
     PDF — it was Qt's own HTML at whatever width the window happened to be.
     A page style is the cheap half of fixing that; the shelved HTML/Jinja
-    export (ideas_archived.md item 8) owns the rest."""
+    export (flograph issue #23) owns the rest."""
 
     def plain(self):
         return render_body("# Title\n\nProse.\n",

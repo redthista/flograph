@@ -507,7 +507,7 @@ class TestGotoPicker:
             ["— none —", "Late"]
 
     def test_gotos_are_listed_alphabetically(self, env, qtbot, registry):
-        """ideas.md item 13: insertion order is unusable once a graph has a
+        """Insertion order is unusable once a graph has a
         dozen Gotos — you'd have to remember which you dropped first."""
         graph, stack, _ = env
         for name in ("Zulu", "alpha", "Mike"):

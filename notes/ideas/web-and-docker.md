@@ -14,8 +14,7 @@ lands in days; a live "always-on container you hand to a non-technical user"
 is weeks-to-months and shares its server with the multiplayer Option D.
 
 This is the same north star the multiplayer investigation named as its
-**Option D** (`ideas/multiplayer-collaboration.md` §4, `ideas_archived.md`
-#15) — a designated runner that owns the document *and* the engine — but seen
+**Option D** (`ideas/multiplayer-collaboration.md` §4) — a designated runner that owns the document *and* the engine — but seen
 from the *publishing* angle rather than the co-editing one. If both ever get
 built they are plausibly one server; design them together.
 
@@ -73,7 +72,7 @@ file and hands it to the desktop).
 `​```columns` blocks, page breaks) with no Qt and no pandas import.
 `ui/report/html.py` already renders a whole report as one self-contained HTML
 file with charts inlined. Report pages are 90% of the way to web-publishable
-today — this is `ideas_archived.md` #8 (Jinja HTML report export), and Target
+today — this is flograph issue #23 (Jinja HTML report export), and Target
 A generalizes it from report pages to dashboard pages.
 
 ### 2.3 Dashboard tile geometry lives in the graph model, not just the scene
@@ -183,7 +182,7 @@ Either way the ASGI layer owns: load a flow, hold one long-lived engine,
 `GET` the dashboard HTML, `WS` for control changes → re-run → push changed
 tiles, plus a `POST /run` webhook and a cron for scheduled base-data refresh
 (this is the "engine-level schedule / webhook triggers" already noted in
-`node_ideas.md` L118 — a companion feature, arguably a prerequisite for
+`ideas/node-council.md` (Schedule / Interval Trigger) — a companion feature, arguably a prerequisite for
 "always-on").
 
 ### 3.3 Input controls need a browser implementation
@@ -261,7 +260,7 @@ the same dashboard:
 
 A browser dashboard will *approximate* the Qt canvas, not match it
 pixel-for-pixel — fonts, tile chrome, spacing. This is the same trade the
-report "Web" preview target already accepted (`ideas_archived.md` #8, item
+report "Web" preview target already accepted (flograph issue #23, item
 B1: "the preview becomes an approximation and 'open in browser' becomes the
 real preview"). Acceptable; worth saying out loud.
 
@@ -279,7 +278,7 @@ anything.
 
 **Cost:** medium, all local, no server, no new runtime. Mostly §3.1.
 **Ceiling:** no interactivity — slicers frozen at saved values.
-**Fit:** high. Independently useful, finishes `ideas_archived.md` #8, and is
+**Fit:** high. Independently useful, finishes flograph issue #23, and is
 the groundwork every richer shape needs.
 
 ### Option B — `flograph serve`, one flow, live — the real ask
@@ -326,7 +325,7 @@ chosen with it in mind — but do not build toward it yet.
 1. **Build Option A now**, independent of the bigger ambition. A Qt-free
    "dashboard page + report → static HTML site" renderer is useful on its own,
    it's the fallback when a server isn't wanted, it finishes
-   `ideas_archived.md` #8, and every richer shape is built on it. Low risk, no
+   flograph issue #23, and every richer shape is built on it. Low risk, no
    new runtime.
 2. **Prototype Option B behind a flag.** `flograph serve` with one flow,
    engine on a background `QCoreApplication` thread, a WebSocket carrying

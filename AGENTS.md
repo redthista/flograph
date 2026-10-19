@@ -42,7 +42,7 @@ flograph
 - `conftest.py` has an **autouse fixture** that force-collects Qt deferred deletions after every test. Without it, dangling timers from previous tests segfault later tests. This is not a bad test — it's the fixture doing its job.
 - `test_no_qt_in_core.py` is a **poison test**: it runs `import flograph.core` in a subprocess and asserts PySide6 and pandas are NOT pulled in. If you add a top-level import to `core/`, this test breaks.
 - `test_registry.py` parses every built-in node script. If a new node has a malformed `NODE` dict or `run()` signature, this test catches it.
-- **Formerly flaky teardown crash** (`double free or corruption` / `QBasicTimer::stop` abort from jedi completion threads during GC): no longer reproduces since 2026-09-12. If it returns, see `notes/issues.md` #1 for the repro and how to capture a core dump.
+- **Formerly flaky teardown crash** (`double free or corruption` / `QBasicTimer::stop` abort from jedi completion threads during GC): no longer reproduces since 2026-09-12. If it returns, see flograph issue #35 (on the board) for the repro and how to capture a core dump.
 
 ## Architecture invariants
 
@@ -198,7 +198,7 @@ src/flograph/
 tests/         # pytest + pytest-qt (no display needed)
 scripts/       # benchmarks, build helpers, test runner
 docs/          # long-form guides (Node_Creation_Guide.md, roadmap)
-notes/         # long-form write-ups, fixed-bug history, testing to-do, node wishlist
+notes/         # long-form write-ups and demo flows (bugs/plans/tests are board cards)
 ├── ideas/     # long-form write-ups referenced from board cards
 └── flows/     # dev/demo .flograph files (not shipped templates)
 ```
@@ -209,12 +209,10 @@ notes/         # long-form write-ups, fixed-bug history, testing to-do, node wis
 - `src/flograph/docs/*.md` — the in-app handbook (Help ▸ Documentation / F1);
   GitHub-wiki-compatible Markdown, edited in the same commit as the feature
 - **The flograph project board** (https://github.com/users/redthista/projects/2)
-  — the only place for bugs, notes and plans; worked with
-  `.claude/skills/work-board/`. `notes/ideas.md`, `ideas_archived.md` and
-  `future_ideas.md` are now just id → card tables for old citations.
-- `notes/issues.md` — fixed-bug history (code comments cite its numbers)
-- `notes/node_ideas.md` — new-node wishlist; `notes/ideas/` — long write-ups
-- `notes/testing-todo.md` — manual test passes waiting to be run
+  — the only place for bugs, notes, plans, node ideas and manual test
+  passes (label `test`); worked with `.claude/skills/work-board/`. Fixed
+  bugs are closed cards, and code comments cite them as "flograph issue #N".
+- `notes/ideas/` — long write-ups that cards link to (incl. `node-council.md`)
 - `docs/Node_Creation_Guide.md` — node-writing rules, aimed at an LLM
 - `.opencode/skills/flograph/SKILL.md` — comprehensive workspace reference
 - `.opencode/skills/new-node/SKILL.md` — node scaffolding guide

@@ -1,5 +1,5 @@
-"""'password' param type: masked QLineEdit with a Show/Hide reveal toggle
-(ideas.md #6). Registration (params.py) and the properties-panel widget
+"""'password' param type: masked QLineEdit with a Show/Hide reveal toggle.
+Registration (params.py) and the properties-panel widget
 (params_panel.py) both need covering."""
 import pytest
 from PySide6.QtGui import QUndoStack

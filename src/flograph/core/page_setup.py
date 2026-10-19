@@ -4,7 +4,7 @@ Deliberately Qt-free, and deliberately *not* expressed in Qt's vocabulary.
 
 There are two renderers in this project's future and only one of them
 exists yet. Today a report is laid out by Qt and printed by QPdfWriter; the
-shelved plan (ideas_archived.md, item 8) is a second export target that
+shelved plan (flograph issue #23) is a second export target that
 renders the same report through a Jinja template and CSS, where this becomes
 `@page` rules and running elements. Anything expressed as a QPageSize or a
 QMarginsF would have to be invented a second time for that path — and the
@@ -244,7 +244,7 @@ def page_css(setup: PageSetup) -> str:
 
     Unused by the Qt export — it is here because it is the reason this
     module is shaped the way it is. If the HTML/Jinja export lands
-    (ideas_archived.md item 8) this is the whole of the geometry half, and
+    (flograph issue #23) this is the whole of the geometry half, and
     the fact
     that it can be written now, from this dataclass alone, is what says the
     settings surface was designed once rather than per backend.

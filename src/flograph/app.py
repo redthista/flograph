@@ -99,7 +99,7 @@ def _tear_down(window) -> None:
     GL state it leans on has gone, Qt WebEngine aborts the process with
     "Failed to restore OpenGL context after clean-up." — a crash on every
     close that hits it, after the user's work is saved but loud all the same
-    (notes/issues.md). So the web views go first, then the window, and both
+    (flograph issue #43). So the web views go first, then the window, and both
     before Python starts finalizing.
 
     Deleting them early is not enough on its own. To free a texture, Qt
