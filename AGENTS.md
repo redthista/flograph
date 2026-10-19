@@ -198,8 +198,8 @@ src/flograph/
 tests/         # pytest + pytest-qt (no display needed)
 scripts/       # benchmarks, build helpers, test runner
 docs/          # long-form guides (Node_Creation_Guide.md, roadmap)
-notes/         # planning: ideas, issues, testing to-do, node wishlist
-├── ideas/     # long-form write-ups referenced from ideas.md
+notes/         # long-form write-ups, fixed-bug history, testing to-do, node wishlist
+├── ideas/     # long-form write-ups referenced from board cards
 └── flows/     # dev/demo .flograph files (not shipped templates)
 ```
 
@@ -208,10 +208,12 @@ notes/         # planning: ideas, issues, testing to-do, node wishlist
 - `README.md` — full project docs, canvas bindings, node library catalog
 - `src/flograph/docs/*.md` — the in-app handbook (Help ▸ Documentation / F1);
   GitHub-wiki-compatible Markdown, edited in the same commit as the feature
-- `notes/issues.md` — tracked bugs
-- `notes/ideas.md` — the In-Tray (see `.claude/skills/in-tray`); its
-  neighbours `ideas_archived.md`, `future_ideas.md`, `node_ideas.md`,
-  `new_ideas.md` (raw inbox) and `ideas/` live beside it in `notes/`
+- **The flograph project board** (https://github.com/users/redthista/projects/2)
+  — the only place for bugs, notes and plans; worked with
+  `.claude/skills/work-board/`. `notes/ideas.md`, `ideas_archived.md` and
+  `future_ideas.md` are now just id → card tables for old citations.
+- `notes/issues.md` — fixed-bug history (code comments cite its numbers)
+- `notes/node_ideas.md` — new-node wishlist; `notes/ideas/` — long write-ups
 - `notes/testing-todo.md` — manual test passes waiting to be run
 - `docs/Node_Creation_Guide.md` — node-writing rules, aimed at an LLM
 - `.opencode/skills/flograph/SKILL.md` — comprehensive workspace reference
