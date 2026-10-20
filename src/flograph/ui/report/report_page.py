@@ -87,6 +87,9 @@ class ReportPage(QWidget):
     page_link_clicked = Signal(str)   # the link, as written
     #: an Action Button embedded in the page was clicked: its node id
     button_clicked = Signal(str)
+    #: the zoom on show moved: Pages or Web, by gesture, resize or mode
+    #: switch — for the status bar's % (flograph issue #12)
+    zoom_shown = Signal()
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -386,6 +389,8 @@ class ReportPage(QWidget):
         engine.run_finished.connect(self._on_run_state)
 
         self.preview.zoom_changed.connect(self._zoom_changed)
+        self.preview.scale_shown.connect(self.zoom_shown)
+        self.web_preview.zoom_changed.connect(self.zoom_shown)
 
         self._load_from_model()
         page = self._page()
@@ -829,6 +834,7 @@ class ReportPage(QWidget):
         self._editor_tabs.tabBar().setTabVisible(1, mode == "web")
         if mode == "pages" and self._editor_tabs.currentIndex() == 1:
             self._editor_tabs.setCurrentIndex(0)
+        self.zoom_shown.emit()
 
     def _apply_preview_view(self, page) -> None:
         """Show the paper the way this page was last set up to be read.
@@ -864,6 +870,29 @@ class ReportPage(QWidget):
         if page is not None and page.preview_zoom != zoom:
             self._undo_stack.push(SetPagePreviewViewCommand(
                 self._graph, self.page_id, zoom=zoom))
+
+    def shown_zoom(self) -> float:
+        """The zoom of the preview on show, 1.0 = 100%."""
+        if self.preview_mode() == "web":
+            return self.web_preview.zoom()
+        return self.preview.zoom()
+
+    def zoom_tip(self) -> str:
+        if self.preview_mode() == "web":
+            return "Web preview zoom — Ctrl+wheel to change, click to reset to 100%"
+        if self.preview.user_zoom() is None:
+            return "Page zoom, fitted to the width — Ctrl+wheel to change"
+        return "Page zoom — Ctrl+wheel to change, click to fit the width"
+
+    def reset_zoom(self) -> None:
+        """Web goes back to 100%; paper back to fitting the width, its own
+        default — saved like any other change to the page's zoom."""
+        if self.preview_mode() == "web":
+            self.web_preview.reset_zoom()
+            return
+        self.preview.set_zoom(None)
+        self._zoom_changed()
+        self.zoom_shown.emit()
 
     def _preview_mode_changed(self, _index: int) -> None:
         page = self._page()

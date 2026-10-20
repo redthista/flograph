@@ -782,6 +782,54 @@ class TestWindowWiring:
         assert window.undo_stack.count() == before
 
 
+class TestReportZoomIndicator:
+    """flograph issue #12: on a report page the status bar's % is the
+    report's zoom, not the hidden canvas's — and clicking it resets the
+    report, leaving the canvas where it was."""
+
+    def _report(self, window):
+        window.view.set_zoom(0.5)
+        page = add_page(window, "r1", kind="report")
+        window.page_bar.select_page("r1")
+        return page
+
+    def test_it_shows_the_paper_zoom_and_follows_ctrl_wheel(self, window):
+        page = self._report(window)
+        indicator = window._zoom_indicator
+        assert indicator.text() == f"{round(page.preview.zoom() * 100)}%"
+        assert "fitted" in indicator.toolTip()
+        send_wheel(page.preview, dy=120, modifiers=Qt.ControlModifier)
+        assert page.preview.user_zoom() is not None
+        assert indicator.text() == f"{round(page.preview.zoom() * 100)}%"
+        assert "fit the width" in indicator.toolTip()
+
+    def test_clicking_it_fits_the_paper_again_and_spares_the_canvas(
+            self, window):
+        page = self._report(window)
+        send_wheel(page.preview, dy=120, modifiers=Qt.ControlModifier)
+        window._zoom_indicator.click()
+        assert page.preview.user_zoom() is None
+        assert window.graph.page("r1").preview_zoom is None
+        assert window.view.zoom == pytest.approx(0.5)
+
+    def test_in_web_view_it_is_the_browser_zoom(self, window, monkeypatch):
+        page = self._report(window)
+        page._set_preview_mode("web")
+        reset: list = []
+        monkeypatch.setattr(page.web_preview, "zoom", lambda: 1.3)
+        monkeypatch.setattr(page.web_preview, "reset_zoom",
+                            lambda: reset.append(True))
+        page.web_preview.zoom_changed.emit(1.3)
+        assert window._zoom_indicator.text() == "130%"
+        window._zoom_indicator.click()
+        assert reset == [True]
+
+    def test_the_canvas_gets_it_back(self, window):
+        self._report(window)
+        window.page_bar.select_page(None)
+        assert window._zoom_indicator.text() == "50%"
+
+
 # --------------------------------------------------------- the tab's menu
 
 class TestPageTabMenu:

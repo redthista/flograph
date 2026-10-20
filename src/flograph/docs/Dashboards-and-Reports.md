@@ -731,6 +731,12 @@ a report that did not remember this could never be *set up* to open two-up,
 only left that way until it was closed. Spin the wheel as much as you like
 — the whole spin undoes in one step.
 
+The **%** at the bottom right of the window shows the report's zoom while a
+report page is open: how big the paper is drawn in **Pages** (the size
+that fits the width until you zoom), and the browser's zoom in **Web**,
+where Ctrl+wheel zooms too. Click it to go back — Pages to fitting the
+width, Web to 100%. The Web zoom is not saved with the page.
+
 ### Saving a report from the flow
 
 **Save HTML…** and **Export PDF…** save a report when you click them. To save

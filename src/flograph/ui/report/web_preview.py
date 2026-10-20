@@ -87,6 +87,9 @@ class WebPreview(QWidget):
 
     #: a `page:` link or a button was clicked: its href, as written
     link_activated = Signal(str)
+    #: Chromium's zoom moved — Ctrl+wheel is its own, and so is keeping the
+    #: zoom across the reloads the preview makes as you type
+    zoom_changed = Signal(float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -131,6 +134,7 @@ class WebPreview(QWidget):
             QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
             True)
         self.browser.loadFinished.connect(self._on_loaded)
+        self.browser.page().zoomFactorChanged.connect(self.zoom_changed)
         self._message.hide()
         self._layout.addWidget(self.browser)
         return True
@@ -168,6 +172,13 @@ class WebPreview(QWidget):
         x, y = self._scroll
         self._scroll = None
         self.browser.page().runJavaScript(f"window.scrollTo({x}, {y});")
+
+    def zoom(self) -> float:
+        return self.browser.zoomFactor() if self.browser is not None else 1.0
+
+    def reset_zoom(self) -> None:
+        if self.browser is not None:
+            self.browser.setZoomFactor(1.0)
 
     def clear(self) -> None:
         if self.browser is not None:

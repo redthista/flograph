@@ -403,8 +403,7 @@ class MainWindow(QMainWindow):
         self._zoom_indicator.setText("100%")
         self._zoom_indicator.setToolTip(
             "Canvas zoom — click to reset to 100%")
-        self._zoom_indicator.clicked.connect(
-            lambda: self._active_canvas_view().set_zoom(1.0))
+        self._zoom_indicator.clicked.connect(self._on_zoom_indicator_clicked)
         self.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         self.statusBar().addPermanentWidget(self._zoom_indicator)
         # Progress across the plan, shown only while a run is on. Narrow,
@@ -548,10 +547,33 @@ class MainWindow(QMainWindow):
 
     def _on_canvas_zoom_changed(self, zoom: float) -> None:
         # every page's view reports here; only the visible one drives the label
-        if self.sender() is self._active_canvas_view():
+        if (self.sender() is self._active_canvas_view()
+                and self._shown_report() is None):
             self._zoom_indicator.setText(f"{round(zoom * 100)}%")
 
+    def _shown_report(self):
+        """The report page on show, which has a zoom but no canvas view."""
+        widget = self._canvas_stack.currentWidget()
+        return widget if hasattr(widget, "shown_zoom") else None
+
+    def _on_report_zoom_shown(self) -> None:
+        if self.sender() is self._shown_report():
+            self._refresh_zoom_indicator()
+
+    def _on_zoom_indicator_clicked(self) -> None:
+        report = self._shown_report()
+        if report is not None:
+            report.reset_zoom()
+        else:
+            self._active_canvas_view().set_zoom(1.0)
+
     def _refresh_zoom_indicator(self) -> None:
+        report = self._shown_report()
+        if report is not None:
+            self._zoom_indicator.setText(f"{round(report.shown_zoom() * 100)}%")
+            self._zoom_indicator.setEnabled(True)
+            self._zoom_indicator.setToolTip(report.zoom_tip())
+            return
         view = self._active_canvas_view()
         self._zoom_indicator.setText(f"{round(view.zoom * 100)}%")
         # A locked page has no zoom to set, so the one control that would
@@ -2388,6 +2410,7 @@ class MainWindow(QMainWindow):
         widget.export_html_requested.connect(self._export_report_html)
         widget.page_link_clicked.connect(self._follow_page_link)
         widget.button_clicked.connect(self._on_button_fired)
+        widget.zoom_shown.connect(self._on_report_zoom_shown)
         # kept in the same dict as dashboards: everything the window does
         # with a page — switching, removing, disposing — is the same for
         # both, and only the two places that need the difference ask

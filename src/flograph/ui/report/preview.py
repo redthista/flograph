@@ -122,6 +122,10 @@ class PagedPreview(QAbstractScrollArea):
     #: the reader zoomed with Ctrl+wheel — as opposed to the page applying
     #: a saved zoom, which goes through set_zoom without announcing itself
     zoom_changed = Signal()
+    #: the scale the paper is drawn at moved, for any reason — a gesture,
+    #: a saved zoom applied, or the pane resized while fitting its width.
+    #: For saying what it is (the status bar), never for saving it.
+    scale_shown = Signal(float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -251,8 +255,9 @@ class PagedPreview(QAbstractScrollArea):
 
     def _relayout(self) -> None:
         """Size the scrollbars to the stack of sheets."""
-        self._scale = (self._fit_scale() if self._user_scale is None
-                       else self._user_scale)
+        scale = (self._fit_scale() if self._user_scale is None
+                 else self._user_scale)
+        moved, self._scale = scale != self._scale, scale
         sheet = self._sheet_size()
         height = int(sheet.height() * self._scale)
         rows = self._rows()
@@ -270,6 +275,8 @@ class PagedPreview(QAbstractScrollArea):
         side.setPageStep(max(1, self.viewport().width()))
         side.setSingleStep(max(1, self.viewport().width() // 12))
         side.setRange(0, max(0, width - self.viewport().width()))
+        if moved:
+            self.scale_shown.emit(scale)
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         """Repaint rather than blit. Sheet positions are computed from the
