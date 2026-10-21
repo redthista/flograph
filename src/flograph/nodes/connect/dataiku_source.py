@@ -21,7 +21,7 @@ lands in the saved graph; `${env:NAME}` works too.
 NODE = {
     "label": "Dataiku Source",
     "category": "Connect",
-    "version": "1.0",
+    "version": "1.1",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }
@@ -45,7 +45,7 @@ PARAMS = [
      "default": "",
      "visible_when": {"operation": ["import dataset"]}},
     {"name": "limit", "type": "int", "label": "Row limit (0 = all)",
-     "default": 10000, "min": 0, "max": 100_000_000,
+     "default": 0, "min": 0, "max": 100_000_000,
      "visible_when": {"operation": ["import dataset"]}},
 
     # SQL query

@@ -91,17 +91,18 @@ def connect(p, *, need_project=True):
 def frame_from_dataset(dataset, ctx, *, columns=None, limit=0):
     """Pull a DSS dataset into a DataFrame via `iter_rows()`.
 
-    `columns` (list or None) is passed to the server; `limit` (0 = all) is
-    applied client-side — the public `iter_rows()` has no row cap of its own.
+    Always reads every column — `iter_rows()` takes no column selection — so
+    `columns` (list or None) only trims the finished frame. `limit` (0 = all)
+    is applied client-side too: `iter_rows()` has no row cap of its own.
     """
     import pandas as pd
 
     schema = [c["name"] for c in dataset.get_schema()["columns"]]
     want = list(columns) if columns else None
-    ctx.log(f"{len(want or schema)} columns, reading rows...")
+    ctx.log(f"{len(schema)} columns, reading rows...")
 
     rows = []
-    for i, row in enumerate(dataset.iter_rows(columns=want)):
+    for i, row in enumerate(dataset.iter_rows()):
         rows.append(list(row))
         if limit and len(rows) >= limit:
             break
@@ -110,7 +111,13 @@ def frame_from_dataset(dataset, ctx, *, columns=None, limit=0):
             ctx.progress(min(0.95, i / (limit or 100_000)))
             ctx.log(f"  {i} rows...")
 
-    return pd.DataFrame(data=rows, columns=(want or schema))
+    df = pd.DataFrame(data=rows, columns=schema)
+    if want:
+        missing = [c for c in want if c not in schema]
+        if missing:
+            raise ValueError(f"columns not in dataset: {', '.join(missing)}")
+        df = df[want]
+    return df
 
 
 def serialise(df, fmt: str):
