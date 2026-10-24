@@ -854,6 +854,35 @@ class TestEtlNodes:
             run_node(registry, "flograph.transform.transpose",
                      {"header_column": "k"}, table=df)
 
+    def test_sanitise_columns_checklist(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"note": ["  Hello   WORLD \t", "see http://x.io now", "", None],
+                           "n": [1, 2, 3, 4]})
+        out = run_node(registry, "flograph.transform.sanitise_columns",
+                       {"case": "lower", "urls": True}, table=df)
+        assert out["note"].tolist()[:2] == ["hello world", "see now"]
+        assert out["note"].isna().tolist() == [False, False, True, True]
+        assert out["n"].tolist() == [1, 2, 3, 4]
+        assert df["note"][0] == "  Hello   WORLD \t"  # input untouched
+
+    def test_sanitise_columns_fill_and_emails(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"a": ["mail bob@x.com ok", " "]})
+        out = run_node(registry, "flograph.transform.sanitise_columns",
+                       {"columns": "a", "emails": True, "replace_na": "n/a"},
+                       table=df)
+        assert out["a"].tolist() == ["mail ok", "n/a"]
+
+    def test_sanitise_columns_errors(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"a": ["x"], "n": [1]})
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.sanitise_columns",
+                     {"columns": "zzz"}, table=df)
+        with pytest.raises(ValueError, match="not text"):
+            run_node(registry, "flograph.transform.sanitise_columns",
+                     {"columns": "n"}, table=df)
+
     def test_replace_values_whole_cell(self, registry):
         df = pd.DataFrame({"country": ["USA", "U.S.A.", "United States"]})
         out = run_node(registry, "flograph.transform.replace_values",

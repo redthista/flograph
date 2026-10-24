@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | **Sanitise Columns** | A Transform node that tidies the text in chosen columns in one pass, in place of a chain of String Manipulation or Expression nodes. Tick the fixes you want: trim the ends, collapse whitespace to one space, strip non-printable characters, remove URLs, remove email addresses, change case (lower / upper / title / capitalize), turn blank cells into real missing values, and fill missing ones with a value. Leave **Columns** empty to clean every text column; numbers and dates are left alone. |
 | UI | **The status bar's zoom on a report page** | On a report page the **%** at the bottom right showed the zoom of the canvas hidden behind it, and clicking it zoomed that canvas. It now shows the report's own zoom — the paper's in **Pages**, including the size it is fitted to the width at, and the browser's in **Web** — and clicking it fits the paper to the width again or puts the web page back to 100%. The canvas and dashboard pages work as before. |
 
 ## 0.1.30
