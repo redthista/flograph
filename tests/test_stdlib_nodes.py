@@ -883,6 +883,65 @@ class TestEtlNodes:
             run_node(registry, "flograph.transform.sanitise_columns",
                      {"columns": "n"}, table=df)
 
+    def test_date_arithmetic_difference(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"a": ["2026-01-30", "2026-03-06", None],
+                           "b": ["2026-03-02", "2026-03-13", "2026-03-13"]})
+        t = "flograph.transform.date_arithmetic"
+        d = run_node(registry, t, {"start_column": "a", "end_column": "b"}, table=df)
+        assert d.iloc[:, -1].tolist()[:2] == [31, 7] and pd.isna(d.iloc[2, -1])
+        bd = run_node(registry, t, {"start_column": "a", "end_column": "b",
+                                    "unit": "business days"}, table=df)
+        assert bd.iloc[:, -1].tolist()[:2] == [21, 5]
+        m = run_node(registry, t, {"start_column": "a", "end_column": "b",
+                                   "unit": "months"}, table=df)
+        assert m.iloc[:, -1].tolist()[:2] == [1, 0]
+        fixed = run_node(registry, t, {"start_column": "a", "end_date": "2026-02-01",
+                                       "output_column": "age"}, table=df)
+        assert fixed["age"].iloc[0] == 2 and fixed["age"].iloc[1] == -33
+
+    def test_date_arithmetic_shift_and_errors(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"a": ["2026-01-31", "2026-03-06"]})
+        t = "flograph.transform.date_arithmetic"
+        out = run_node(registry, t, {"mode": "shift", "start_column": "a",
+                                     "unit": "months", "amount": 1,
+                                     "output_column": "n"}, table=df)
+        assert out["n"].dt.strftime("%Y-%m-%d").tolist() == ["2026-02-28", "2026-04-06"]
+        bd = run_node(registry, t, {"mode": "shift", "start_column": "a",
+                                    "unit": "business days", "amount": 2,
+                                    "output_column": "n"}, table=df)
+        assert bd["n"].dt.strftime("%Y-%m-%d").tolist() == ["2026-02-04", "2026-03-10"]
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, t, {"start_column": "zzz"}, table=df)
+        with pytest.raises(ValueError, match="not a date"):
+            run_node(registry, t, {"start_column": "a", "end_date": "nope"}, table=df)
+
+    def test_complete_date_range(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"d": ["2026-01-01", "2026-01-04", "2026-01-02"],
+                           "g": ["x", "x", "y"], "n": [5, 7, 9]})
+        t = "flograph.transform.complete_date_range"
+        out = run_node(registry, t, {"date_column": "d", "group_by": "g"}, table=df)
+        assert out.groupby("g").size().to_dict() == {"x": 4, "y": 1}
+        assert out["n"].isna().sum() == 2
+        z = run_node(registry, t, {"date_column": "d", "group_by": "g",
+                                   "span": "whole table", "fill": "zero"}, table=df)
+        assert z.groupby("g").size().to_dict() == {"x": 4, "y": 4}
+        assert z["n"].tolist().count(0) == 5
+        f = run_node(registry, t, {"date_column": "d", "group_by": "g",
+                                   "fill": "forward fill"}, table=df)
+        assert f[f.g == "x"]["n"].tolist() == [5, 5, 5, 7]
+
+    def test_complete_date_range_errors(self, registry):
+        import pandas as pd
+        df = pd.DataFrame({"d": ["2026-01-01", "2026-01-01"], "n": [1, 2]})
+        t = "flograph.transform.complete_date_range"
+        with pytest.raises(ValueError, match="repeated dates"):
+            run_node(registry, t, {"date_column": "d"}, table=df)
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, t, {"date_column": "q"}, table=df)
+
     def test_replace_values_whole_cell(self, registry):
         df = pd.DataFrame({"country": ["USA", "U.S.A.", "United States"]})
         out = run_node(registry, "flograph.transform.replace_values",
