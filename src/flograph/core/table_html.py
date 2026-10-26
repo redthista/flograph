@@ -541,7 +541,8 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
             for row, style in enumerate(evaluated):
                 add(row, column, order[id(rule)], style)
     for rule in row_rules:
-        for row, style in enumerate(evaluate_rows(shown, [rule])):
+        for row, style in enumerate(evaluate_rows(shown, [rule],
+                                                  pool_frame=frame)):
             for column in columns:
                 add(row, column, order[id(rule)], style)
 

@@ -1,0 +1,479 @@
+{
+ "flograph_version": "0.1.31",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "t39_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     -300
+    ],
+    "params": {
+     "text": "# Status cards\nSix small cards for the top of a dashboard. Each one is a self-contained page,\nso it looks the same on the canvas, in a tile, in a report and in a browser.\nEdit the two tables and watch them follow — then open the **Overview** page.",
+     "width": 1000,
+     "height": 180
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_sales",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"month\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}], \"rows\": [[\"2026-01\", 18200], [\"2026-02\", 19100], [\"2026-03\", 18800], [\"2026-04\", 20400], [\"2026-05\", 21900], [\"2026-06\", 21300], [\"2026-07\", 23800], [\"2026-08\", 24600], [\"2026-09\", 26100]]}",
+     "width": 320,
+     "height": 300
+    },
+    "code": null,
+    "label": "Monthly sales"
+   },
+   {
+    "id": "t39_n_spark",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     400
+    ],
+    "params": {
+     "text": "**Sparkline Card** — the big number plus the line under it; *Order by* a\ndate so it reads left to right. **Card** (built in) picks January out so\nthe cards to the right can compare against it.",
+     "width": 320,
+     "height": 160
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_spark",
+    "type": "flograph.viz.sparkline_card",
+    "pos": [
+     560,
+     0
+    ],
+    "params": {
+     "column": "revenue",
+     "aggregation": "Last",
+     "order_by": "month",
+     "label": "Revenue this month",
+     "format": "$,.0f",
+     "width": 260,
+     "height": 160
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_first",
+    "type": "flograph.viz.card",
+    "pos": [
+     560,
+     240
+    ],
+    "params": {
+     "column": "revenue",
+     "aggregation": "First",
+     "label": "January",
+     "format": "$,.0f"
+    },
+    "code": null,
+    "label": "January revenue"
+   },
+   {
+    "id": "t39_goal",
+    "type": "flograph.viz.goal_card",
+    "pos": [
+     1000,
+     0
+    ],
+    "params": {
+     "label": "Revenue",
+     "comparison_label": "January",
+     "format": "$,.0f",
+     "width": 260,
+     "height": 140
+    },
+    "code": null,
+    "label": "Goal Card (change)"
+   },
+   {
+    "id": "t39_goal_prog",
+    "type": "flograph.viz.goal_card",
+    "pos": [
+     1000,
+     200
+    ],
+    "params": {
+     "label": "Target $30k",
+     "mode": "progress",
+     "target": 30000,
+     "comparison_label": "target",
+     "format": "$,.0f",
+     "width": 260,
+     "height": 140
+    },
+    "code": null,
+    "label": "Goal Card (progress)"
+   },
+   {
+    "id": "t39_summary",
+    "type": "flograph.viz.plain_english_summary",
+    "pos": [
+     1000,
+     420
+    ],
+    "params": {
+     "template": "Revenue {value}, {direction} {change} since January",
+     "value_format": "$,.0f",
+     "width": 400,
+     "height": 100
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_n_goal",
+    "type": "flograph.util.note",
+    "pos": [
+     1460,
+     0
+    ],
+    "params": {
+     "text": "**Goal Card** compares one number with another: as a change with an arrow,\nor as progress towards a target. Untick *Higher is better* for costs.\n\n**Plain-English Summary** writes the headline from the same two numbers.",
+     "width": 360,
+     "height": 200
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_invoices",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     800
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"invoice\", \"type\": \"text\"}, {\"name\": \"customer\", \"type\": \"text\"}, {\"name\": \"days_overdue\", \"type\": \"integer\"}, {\"name\": \"amount\", \"type\": \"number\"}], \"rows\": [[\"INV-104\", \"Acme\", 45, 1200], [\"INV-118\", \"Umbrella\", 12, 640], [\"INV-131\", \"Globex\", 38, 860], [\"INV-140\", \"Initech\", 31, 4300], [\"INV-152\", \"Hooli\", 3, 220]]}",
+     "width": 420,
+     "height": 220
+    },
+    "code": null,
+    "label": "Invoices"
+   },
+   {
+    "id": "t39_overdue",
+    "type": "flograph.transform.filter_rows",
+    "pos": [
+     560,
+     860
+    ],
+    "params": {
+     "query": "days_overdue > 30"
+    },
+    "code": null,
+    "label": "Over 30 days"
+   },
+   {
+    "id": "t39_alerts",
+    "type": "flograph.viz.alert_list",
+    "pos": [
+     800,
+     800
+    ],
+    "params": {
+     "title": "Overdue invoices",
+     "message": "{invoice} · {customer} · {days_overdue} days · {amount:$,.0f}",
+     "width": 360,
+     "height": 220
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_light",
+    "type": "flograph.viz.status_light",
+    "pos": [
+     1280,
+     800
+    ],
+    "params": {
+     "label": "Overdue invoices",
+     "amber": 1,
+     "red": 3,
+     "width": 240,
+     "height": 110
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_asof",
+    "type": "flograph.util.as_of_stamp",
+    "pos": [
+     1280,
+     1040
+    ],
+    "params": {
+     "stale_minutes": 60,
+     "width": 240,
+     "height": 60
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t39_n_alerts",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     1120
+    ],
+    "params": {
+     "text": "**Alert List** shows whatever reaches it — decide what counts as an alert\nwith a **Filter Rows** in front. Its **count** lights the **Status Light**\n(amber at 1, red at 3). **As-of Stamp** says when the invoices last ran,\nand turns amber after an hour.",
+     "width": 600,
+     "height": 160
+    },
+    "code": null,
+    "label": null
+   }
+  ],
+  "connections": [
+   {
+    "id": "t39_c01",
+    "src": [
+     "t39_sales",
+     "table"
+    ],
+    "dst": [
+     "t39_spark",
+     "table"
+    ]
+   },
+   {
+    "id": "t39_c02",
+    "src": [
+     "t39_sales",
+     "table"
+    ],
+    "dst": [
+     "t39_first",
+     "table"
+    ]
+   },
+   {
+    "id": "t39_c03",
+    "src": [
+     "t39_spark",
+     "value"
+    ],
+    "dst": [
+     "t39_goal",
+     "value"
+    ]
+   },
+   {
+    "id": "t39_c04",
+    "src": [
+     "t39_first",
+     "value"
+    ],
+    "dst": [
+     "t39_goal",
+     "comparison"
+    ]
+   },
+   {
+    "id": "t39_c05",
+    "src": [
+     "t39_spark",
+     "value"
+    ],
+    "dst": [
+     "t39_goal_prog",
+     "value"
+    ]
+   },
+   {
+    "id": "t39_c06",
+    "src": [
+     "t39_spark",
+     "value"
+    ],
+    "dst": [
+     "t39_summary",
+     "value"
+    ]
+   },
+   {
+    "id": "t39_c07",
+    "src": [
+     "t39_first",
+     "value"
+    ],
+    "dst": [
+     "t39_summary",
+     "previous"
+    ]
+   },
+   {
+    "id": "t39_c08",
+    "src": [
+     "t39_invoices",
+     "table"
+    ],
+    "dst": [
+     "t39_overdue",
+     "table"
+    ]
+   },
+   {
+    "id": "t39_c09",
+    "src": [
+     "t39_overdue",
+     "filtered"
+    ],
+    "dst": [
+     "t39_alerts",
+     "table"
+    ]
+   },
+   {
+    "id": "t39_c10",
+    "src": [
+     "t39_alerts",
+     "count"
+    ],
+    "dst": [
+     "t39_light",
+     "value"
+    ]
+   },
+   {
+    "id": "t39_c11",
+    "src": [
+     "t39_invoices",
+     "table"
+    ],
+    "dst": [
+     "t39_asof",
+     "trigger"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "t39_f_sales",
+    "title": "Numbers and how they're doing",
+    "rect": [
+     -40,
+     -70,
+     1900,
+     700
+    ],
+    "color": "#3b3355"
+   },
+   {
+    "id": "t39_f_alerts",
+    "title": "Alerts and freshness",
+    "rect": [
+     -40,
+     730,
+     1640,
+     640
+    ],
+    "color": "#4a3f2f"
+   }
+  ],
+  "pages": [
+   {
+    "id": "t39_page",
+    "title": "Overview",
+    "kind": "dashboard",
+    "tiles": [
+     {
+      "id": "t39_t1",
+      "node": "t39_spark",
+      "port": "html",
+      "rect": [
+       40,
+       40,
+       260,
+       160
+      ]
+     },
+     {
+      "id": "t39_t2",
+      "node": "t39_goal",
+      "port": "html",
+      "rect": [
+       340,
+       40,
+       260,
+       160
+      ]
+     },
+     {
+      "id": "t39_t3",
+      "node": "t39_goal_prog",
+      "port": "html",
+      "rect": [
+       640,
+       40,
+       260,
+       160
+      ]
+     },
+     {
+      "id": "t39_t4",
+      "node": "t39_light",
+      "port": "html",
+      "rect": [
+       940,
+       40,
+       260,
+       160
+      ]
+     },
+     {
+      "id": "t39_t5",
+      "node": "t39_summary",
+      "port": "html",
+      "rect": [
+       40,
+       240,
+       560,
+       100
+      ]
+     },
+     {
+      "id": "t39_t6",
+      "node": "t39_asof",
+      "port": "html",
+      "rect": [
+       640,
+       240,
+       260,
+       100
+      ]
+     },
+     {
+      "id": "t39_t7",
+      "node": "t39_alerts",
+      "port": "html",
+      "rect": [
+       40,
+       380,
+       560,
+       260
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

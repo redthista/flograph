@@ -17,6 +17,7 @@ comment — a whole line, or trailing after a rule)::
     margin               scale red-yellow-green
     units                bar blue                   # in-cell data bar
     score   >= 90        => bg green, bold          # highlight a cell
+    units   top 5        => row green               # the five best (or 10%)
     status  contains fail => bg red
     status  = closed     => row grey                # highlight the whole row
     health               icons traffic              # 3-tier icon set
@@ -346,7 +347,8 @@ def glyph_token(colour) -> str:
 
 
 _OPS = {">", ">=", "<", "<=", "=", "!=", "between",
-        "contains", "starts", "ends", "matches", "empty", "notempty"}
+        "contains", "starts", "ends", "matches", "empty", "notempty",
+        "top", "bottom"}
 
 
 # --------------------------------------------------------------- shapes
@@ -1135,6 +1137,25 @@ def quote_column(name: str) -> str:
     return name
 
 
+def _rank_count(text: str) -> Any:
+    """The N of `top N` / `bottom N`: a whole number of rows, or a share
+    written `10%`, kept as that text so the mask can work out the rows."""
+    raw = str(text or "").strip()
+    try:
+        if raw.endswith("%"):
+            share = float(raw[:-1])
+            if 0 < share <= 100:
+                return f"{share:g}%"
+        else:
+            n = int(raw)
+            if n > 0:
+                return n
+    except ValueError:
+        pass
+    raise ValueError(f"'top' / 'bottom' needs a count like 5 or a share "
+                     f"like 10%, got {raw!r}")
+
+
 def parse_op_value(text: str) -> tuple:
     """`"> 90"` / `"contains fail"` / `"between 10 20"` → (op, value).
 
@@ -1152,9 +1173,12 @@ def parse_op_value(text: str) -> tuple:
     for token, canon in (("contains", "contains"), ("starts with", "starts"),
                          ("ends with", "ends"), ("starts", "starts"),
                          ("ends", "ends"), ("matches", "matches"),
-                         ("between", "between")):
+                         ("between", "between"), ("top", "top"),
+                         ("bottom", "bottom")):
         if low.startswith(token + " "):
             rest = raw[len(token):].strip()
+            if canon in ("top", "bottom"):
+                return (canon, _rank_count(rest))
             if canon == "between":
                 parts = rest.replace("..", " ").split()
                 if len(parts) != 2:
@@ -2161,11 +2185,14 @@ def _split_condition(cond: str) -> tuple:
             return (canon, None, cond[:len(cond) - len(token)].strip())
     for token, canon in ((" contains ", "contains"), (" starts with ", "starts"),
                          (" ends with ", "ends"), (" matches ", "matches"),
-                         (" between ", "between")):
+                         (" between ", "between"), (" top ", "top"),
+                         (" bottom ", "bottom")):
         idx = low.find(token)
         if idx != -1:
             column = cond[:idx].strip()
             rest = cond[idx + len(token):].strip()
+            if canon in ("top", "bottom"):
+                return (canon, _rank_count(rest), column)
             if canon == "between":
                 parts = rest.replace("..", " ").split()
                 return ("between", [_coerce(parts[0]), _coerce(parts[1])]
@@ -2418,6 +2445,8 @@ def _op_phrase(op: str, value: Any) -> str:
         return "is not empty"
     if op == "between" and isinstance(value, (list, tuple)):
         return f"between {value[0]}–{value[1]}"
+    if op in ("top", "bottom"):
+        return f"in the {op} {value}"
     return words.get(op, f"{op} ") + str(value)
 
 
@@ -2923,7 +2952,9 @@ def _is_missing(value: Any) -> bool:
         return False
 
 
-def _condition_mask(series, op: str, value: Any):
+def _condition_mask(series, op: str, value: Any, whole=None):
+    """Which cells of `series` meet `op value`. `whole` is the entire
+    column when `series` is a slice of it — only `top` / `bottom` read it."""
     import pandas as pd
 
     if op == "empty":
@@ -2944,6 +2975,24 @@ def _condition_mask(series, op: str, value: Any):
         num = pd.to_numeric(series, errors="coerce")
         lo, hi = sorted(float(v) for v in value)
         return num.between(lo, hi)
+
+    if op in ("top", "bottom"):
+        # A cutoff, not a rank: measured over `whole` — the entire column
+        # when `series` is only the block of rows being painted — so the
+        # best five are the table's best five, and a block compares its own
+        # cells against it. A tie with the fifth is in too, as in Excel.
+        num = pd.to_numeric(series, errors="coerce")
+        ref = pd.to_numeric(series if whole is None else whole,
+                            errors="coerce").dropna()
+        if isinstance(value, str) and value.endswith("%"):
+            count = math.ceil(len(ref) * float(value[:-1]) / 100.0)
+        else:
+            count = int(value)
+        if count <= 0 or ref.empty:
+            return pd.Series(False, index=series.index)
+        if op == "top":
+            return (num >= ref.nlargest(count).iloc[-1]).fillna(False)
+        return (num <= ref.nsmallest(count).iloc[-1]).fillna(False)
 
     target = value
     if isinstance(target, (int, float)) and not isinstance(target, bool):
@@ -3181,7 +3230,9 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
         elif rule.mode == "highlight" and rule.scope == "cell":
             decide, _ = _decide(rule)
             try:
-                mask = _condition_mask(decide, rule.op, rule.value)
+                mask = _condition_mask(
+                    decide, rule.op, rule.value,
+                    _whole_of(whole, getattr(decide, "name", None)))
             except Exception:
                 mask = pd.Series(False, index=decide.index)
             style = _highlight_style(rule)
@@ -3584,8 +3635,20 @@ def spark_projection(frame, rules) -> tuple:
     return shown, out, _dedup(hidden)
 
 
-def evaluate_rows(df, row_rules) -> list:
-    """One ``CellStyle | None`` per row position of `df`."""
+def _whole_of(pool_frame, name):
+    """Column `name` of the whole table, when there is one to read."""
+    if pool_frame is None or name is None:
+        return None
+    if name not in getattr(pool_frame, "columns", []):
+        return None
+    column = pool_frame[name]
+    return column if getattr(column, "ndim", 1) == 1 else None
+
+
+def evaluate_rows(df, row_rules, pool_frame=None) -> list:
+    """One ``CellStyle | None`` per row position of `df`. `pool_frame` is
+    the whole table when `df` is only some of its rows, as for
+    `evaluate_column`."""
     import pandas as pd
 
     n = len(df)
@@ -3603,7 +3666,8 @@ def evaluate_rows(df, row_rules) -> list:
         if col is None:
             continue
         try:
-            mask = _condition_mask(df[col], rule.op, rule.value)
+            mask = _condition_mask(df[col], rule.op, rule.value,
+                                   _whole_of(pool_frame, col))
         except Exception:
             continue
         style = CellStyle(bg=rule.bg,

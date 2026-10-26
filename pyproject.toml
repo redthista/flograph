@@ -52,6 +52,7 @@ http = ["httpx>=0.27"]
 dataiku = ["dataiku-api-client>=12.0"]
 fuzzy = ["rapidfuzz>=3.0"]
 scrape = ["lxml", "beautifulsoup4", "html5lib"]
+ml = ["scikit-learn>=1.3"]
 
 [project.scripts]
 flograph = "flograph.cli:main"

@@ -76,13 +76,17 @@ class TestBundledExamples:
             "35_chart_rules.flograph",
             "36_table_totals.flograph",
             "37_input_panel.flograph",
+            "38_machine_learning.flograph",
             "38_run_flow_child.flograph",
             "39_run_flow_parent.flograph",
+            "39_status_cards.flograph",
+            "40_table_helpers.flograph",
+            "41_file_operations.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 39
+        assert len(window._examples_menu.actions()) == 43
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -128,8 +132,12 @@ class TestBundledExamples:
         "36_table_totals.flograph",
         # 37's two tables are its own; the panel and Apply Filters are pandas
         "37_input_panel.flograph",
+        # 38 fits real models: it needs scikit-learn (the `ml` extra)
+        "38_machine_learning.flograph",
         "38_run_flow_child.flograph",
-        # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
+        "39_status_cards.flograph",
+        "40_table_helpers.flograph",
+        # 13, 18, 19, 21 and 41 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
         # the user's store, and the only way to put one there is to download
@@ -504,6 +512,25 @@ class TestBundledExamples:
         assert len(graph.pages) == 1
         page = next(iter(graph.pages.values()))
         assert len(page.tiles) == 6
+
+
+class TestTheFilesExample:
+    """41_file_operations writes a workbook, copies and zips it, and dry-runs
+    a delete — in a folder of its own under the working directory."""
+
+    def test_it_writes_copies_zips_and_deletes_nothing(
+            self, qtbot, window, monkeypatch, tmp_path):
+        pytest.importorskip("openpyxl")
+        monkeypatch.chdir(tmp_path)
+        window._open_example(template_path("41_file_operations.flograph"))
+        assert wait_run(qtbot, window.engine)
+        out = tmp_path / "flograph_files_demo"
+        assert (out / "q3_pack.xlsx").exists()        # the dry run kept it
+        assert (out / "archive" / "q3_pack.xlsx").exists()
+        assert (out / "archive.zip").exists()
+        dry = window.engine.cache.outputs_for("t41_dry")
+        # what the delete *would* have removed: the workbook it left alone
+        assert [p.rsplit("/", 1)[-1] for p in dry["paths"]] == ["q3_pack.xlsx"]
 
 
 class TestTheOrderEdgeExample:

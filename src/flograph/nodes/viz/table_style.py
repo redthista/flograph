@@ -75,7 +75,7 @@ reported on the **Show Table** that applies it, where the data is.
 NODE = {
     "label": "Table Style",
     "category": "Viz",
-    "version": "1.2",
+    "version": "1.3",
     "inputs": [],
     "outputs": [("style", "object")],
 }
