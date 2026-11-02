@@ -379,6 +379,7 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
         "source": node.source,
         "params": node.params,
         "upstream": sorted(memo[p] for p in parents),
+        **_input_bindings(graph, node_id, memo),
         **_report_content(graph, node),
         # only when set, so no existing hash moves: a bypassed node's cached
         # value is its input, not its result, and must never be served for
@@ -386,6 +387,27 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
         **({"bypassed": True} if node.bypassed else {}),
     }, sort_keys=True, default=str)
     memo[node_id] = hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _input_bindings(graph: Graph, node_id: str,
+                    memo: dict[str, str]) -> dict:
+    """Distinguish wire slots where an upstream multiset is ambiguous.
+
+    flograph issue #97: swapping two inputs, or choosing another output of
+    one source, used to keep the same hash. Simple single-input chains keep
+    their existing fingerprints so this correction does not discard their
+    saved results on upgrade. Ambiguous legacy entries must re-run once.
+    """
+    node = graph.node(node_id)
+    bindings = []
+    ambiguous = len(node.spec.inputs) > 1
+    for port in node.spec.inputs:
+        conn = graph.input_connection(node_id, port.name)
+        if conn is None:
+            continue
+        ambiguous |= len(graph.node(conn.src_node).spec.outputs) > 1
+        bindings.append((port.name, conn.src_port, memo[conn.src_node]))
+    return {"input_bindings": sorted(bindings)} if ambiguous and bindings else {}
 
 
 def _report_content(graph: Graph, node) -> dict:
@@ -458,6 +480,7 @@ def freeze_fingerprint(graph: Graph, node_id: str) -> str:
         "source": node.source,
         "params": node.params,
         "upstream": sorted(upstream_fps),
+        **_input_bindings(graph, node_id, memo),
     }, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
 

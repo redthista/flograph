@@ -69,6 +69,10 @@ one of them at a time: picking one clears the other three.
 | **Run only when asked** | runs only when you run it | run on its last result |
 | **Bypass** (**Ctrl+B**) | doesn't run | run on its *inputs*, as if it weren't there |
 
+**Freeze** keeps its last result even if its inputs change. An affected pin
+is flagged as stale, including when you swap input wires or choose another
+output from the same source. Unfreeze and run the node to refresh it.
+
 **Bypass** keeps the node's wires and settings and hands each input straight
 on to an output: the one with the same name, or else the first of the same
 type. A pink line through the faded node shows which goes where. An output

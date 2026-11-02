@@ -5,6 +5,7 @@ import errno
 import json
 import pickle
 import zlib
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -320,3 +321,133 @@ class TestSaveFailureText:
         text = save_failure_text('"p.flograph"', exc)
         assert "Permission denied" in text
         assert "full" not in text
+
+
+class TestWireBindings:
+    """flograph issue #97: upstream hashes alone lose port identity."""
+
+    @staticmethod
+    def legacy_fingerprint(graph, node_id, memo=None):
+        """The pre-fix format: pins and source/params plus sorted parents."""
+        import hashlib
+        from flograph.engine.cache_persistence import _dependencies
+        memo = {} if memo is None else memo
+        if node_id not in memo:
+            node = graph.node(node_id)
+            payload = {
+                "type_id": node.type_id, "source": node.source,
+                "params": node.params,
+                "upstream": sorted(
+                    TestWireBindings.legacy_fingerprint(graph, parent, memo)
+                    for parent in _dependencies(graph, node_id)),
+            }
+            memo[node_id] = hashlib.sha256(json.dumps(
+                payload, sort_keys=True, default=str).encode()).hexdigest()
+        return memo[node_id]
+
+    @staticmethod
+    def graph_with_subtract(registry):
+        graph = Graph()
+        left = graph.add_node(registry.instantiate("flograph.util.constant"))
+        right = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_param(left.id, "value", "10")
+        graph.set_param(right.id, "value", "3")
+        subtract = graph.add_node(
+            registry.instantiate("flograph.scripting.python_script"))
+        graph.set_code(subtract.id, '''NODE = {
+    "label": "Subtract", "category": "Scripting", "version": "1.0",
+    "inputs": [("left", "any"), ("right", "any")],
+    "outputs": [("result", "any")],
+}
+def run(ctx, left, right):
+    return {"result": int(left) - int(right)}
+''')
+        graph.connect(left.id, "value", subtract.id, "left")
+        graph.connect(right.id, "value", subtract.id, "right")
+        return graph, left, right, subtract
+
+    @staticmethod
+    def swap(graph, left, right, subtract):
+        for name in ("left", "right"):
+            graph.disconnect(graph.input_connection(subtract.id, name).id)
+        graph.connect(left.id, "value", subtract.id, "right")
+        graph.connect(right.id, "value", subtract.id, "left")
+
+    def test_swapped_inputs_invalidate_the_node_and_its_readers(self, registry):
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        reader = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        graph.connect(subtract.id, "result", reader.id, "value")
+        before = [node_fingerprint(graph, n.id, {}) for n in (subtract, reader)]
+        self.swap(graph, left, right, subtract)
+        after = [node_fingerprint(graph, n.id, {}) for n in (subtract, reader)]
+        assert all(a != b for a, b in zip(before, after))
+
+    def test_moving_one_wire_to_another_input_invalidates(self, registry):
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        graph.disconnect(graph.input_connection(subtract.id, "right").id)
+        before = node_fingerprint(graph, subtract.id, {})
+        graph.disconnect(graph.input_connection(subtract.id, "left").id)
+        graph.connect(left.id, "value", subtract.id, "right")
+        assert node_fingerprint(graph, subtract.id, {}) != before
+
+    def test_switching_source_output_invalidates_a_single_input(self, registry):
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        graph.set_code(left.id, '''NODE = {
+    "label": "Pair", "category": "Scripting", "version": "1.0",
+    "inputs": [], "outputs": [("value", "any"), ("other", "any")],
+}
+def run(ctx):
+    return {"value": 10, "other": 3}
+''')
+        reader = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        graph.connect(left.id, "value", reader.id, "value")
+        before = node_fingerprint(graph, reader.id, {})
+        graph.disconnect(graph.input_connection(reader.id, "value").id)
+        graph.connect(left.id, "other", reader.id, "value")
+        assert node_fingerprint(graph, reader.id, {}) != before
+
+    def test_new_connection_ids_do_not_invalidate_unchanged_wiring(self, registry):
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        before = node_fingerprint(graph, subtract.id, {})
+        graph.disconnect(graph.input_connection(subtract.id, "left").id)
+        graph.connect(left.id, "value", subtract.id, "left")
+        assert node_fingerprint(graph, subtract.id, {}) == before
+
+    def test_simple_chains_keep_their_legacy_fingerprints(self, registry):
+        graph, const = make_graph(registry)
+        reader = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        graph.connect(const.id, "value", reader.id, "value")
+        assert node_fingerprint(graph, reader.id, {}) == self.legacy_fingerprint(
+            graph, reader.id)
+
+    def test_ambiguous_legacy_cache_is_not_restored(self, registry, tmp_path):
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        cache = OutputCache()
+        cache.set(subtract.id, {"result": 7}, wall_time=0.01)
+        path = tmp_path / "proj.flograph"
+        save_cache(graph, cache, path)
+        manifest_path = Path(str(path) + ".cache") / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["nodes"][subtract.id]["fingerprint"] = self.legacy_fingerprint(
+            graph, subtract.id)
+        manifest_path.write_text(json.dumps(manifest))
+        assert load_cache(graph, OutputCache(), path) == []
+
+    def test_current_cache_restores_until_inputs_are_swapped(self, registry,
+                                                             tmp_path):
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        cache = OutputCache()
+        cache.set(subtract.id, {"result": 7}, wall_time=0.01)
+        path = tmp_path / "proj.flograph"
+        save_cache(graph, cache, path)
+        assert load_cache(graph, OutputCache(), path) == [subtract.id]
+        self.swap(graph, left, right, subtract)
+        assert load_cache(graph, OutputCache(), path) == []
+
+    def test_frozen_result_is_flagged_when_inputs_are_swapped(self, registry):
+        from flograph.engine.cache_persistence import freeze_fingerprint, stale_frozen
+        graph, left, right, subtract = self.graph_with_subtract(registry)
+        graph.set_frozen(subtract.id, True, freeze_fingerprint(graph, subtract.id))
+        assert stale_frozen(graph) == []
+        self.swap(graph, left, right, subtract)
+        assert stale_frozen(graph) == [subtract.id]
