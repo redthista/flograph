@@ -16,7 +16,7 @@ import shutil
 import tempfile
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings
 
 # Also before any window exists: every QSettings the suite opens lands in a
 # throwaway folder, one per worker, never in the developer's real
@@ -51,6 +51,20 @@ atexit.register(shutil.rmtree, _USER_DIR, ignore_errors=True)
 gc.disable()
 
 
+def _drain_qt_events(app):
+    """Finish Qt cleanup even without an outer QApplication.exec().
+
+    flograph issue #99: processEvents alone leaves DeferredDelete events
+    pending. A later test's nested event loop then inherits that teardown,
+    which can strand a worker result and keeps old windows in memory.
+    """
+    app.processEvents()
+    app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Hand Qt its leftovers while Python can still take them back.
 
@@ -67,8 +81,7 @@ def pytest_sessionfinish(session, exitstatus):
         app.clipboard().clear()
     gc.collect()
     if app is not None:
-        app.processEvents()
-        app.processEvents()
+        _drain_qt_events(app)
 
 from flograph.core import Graph, NodeInstance, NodeRegistry, parse_spec
 
@@ -99,8 +112,7 @@ def _drain_qt_after_each_test():
     app = app_module.QApplication.instance() if app_module else None
     gc.collect()
     if app is not None:
-        app.processEvents()
-        app.processEvents()  # deferred deletions posted by the first pass
+        _drain_qt_events(app)
 
 
 class FakeContext:
