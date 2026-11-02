@@ -49,6 +49,13 @@ class TestRenderLinks:
         assert out == "look at Nowhere please"
         assert missing == ["Nowhere"]
 
+    def test_editable_wiki_can_link_to_create_a_missing_page(self):
+        out, missing = render_links(
+            "look at [[folder/Nowhere|the guide]]", self.cat,
+            link_missing=True)
+        assert out == "look at [the guide](newpage:nowhere)"
+        assert missing == ["folder/Nowhere"]
+
     def test_obsidian_image_embed_becomes_a_markdown_image(self):
         out, _ = render_links("![[diagram.png]] ![[shot.png|200]]", self.cat)
         assert "![diagram.png](diagram.png)" in out
@@ -185,6 +192,116 @@ class TestResolveWikiDir:
     def test_a_real_folder_is_used_as_given(self, tmp_path):
         assert resolve_wiki_dir(str(tmp_path)) == tmp_path
         assert resolve_wiki_dir(f"  {tmp_path}  ") == tmp_path
+
+
+class TestPageEditing:
+    def test_creating_a_page_uses_the_title_as_an_h1(self, tmp_path):
+        page = docpages.create_page(tmp_path, "Team Guide")
+        assert page.slug == "team-guide"
+        assert page.path.read_text(encoding="utf-8") == "# Team Guide\n\n"
+
+    def test_page_titles_cannot_escape_the_wiki_folder(self, tmp_path):
+        for title in ("../outside", "a/b", "a\\b", ""):
+            with pytest.raises(ValueError):
+                docpages.create_page(tmp_path, title)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_creating_an_existing_slug_is_rejected(self, tmp_path):
+        (tmp_path / "Team-Guide.md").write_text("# Team Guide\n", encoding="utf-8")
+        with pytest.raises(FileExistsError):
+            docpages.create_page(tmp_path, "team guide")
+
+    def test_rename_rewrites_inbound_links_and_sidebar(self, tmp_path):
+        (tmp_path / "Old-Page.md").write_text("# Old Page\n\nBody\n", encoding="utf-8")
+        (tmp_path / "Other.md").write_text(
+            "[[Old Page#First Part|the page]] ![[old-page]] `[[Old Page]]`\n"
+            "```md\n[[Old Page]]\n```\n![[image.png]]\n",
+            encoding="utf-8")
+        (tmp_path / "_Sidebar.md").write_text(
+            "- [[Old Page|Start]]\n- [[Old Page]]\n", encoding="utf-8")
+        (tmp_path / "_Footer.md").write_text("See [[Old Page]].\n", encoding="utf-8")
+
+        renamed = docpages.rename_page(tmp_path, "old-page", "New Guide")
+
+        assert renamed.slug == "new-guide"
+        assert renamed.path.read_text(encoding="utf-8").startswith("# New Guide\n")
+        assert not (tmp_path / "Old-Page.md").exists()
+        other = (tmp_path / "Other.md").read_text(encoding="utf-8")
+        assert "[[new-guide#First Part|the page]]" in other
+        assert "![[new-guide|New Guide]]" in other
+        assert "`[[Old Page]]`" in other
+        assert "```md\n[[Old Page]]\n```" in other
+        assert "![[image.png]]" in other
+        sidebar_text = (tmp_path / "_Sidebar.md").read_text(encoding="utf-8")
+        assert "[[new-guide|Start]]" in sidebar_text
+        assert "[[new-guide|New Guide]]" in sidebar_text
+        assert "[[new-guide|New Guide]]" in (tmp_path / "_Footer.md").read_text(
+            encoding="utf-8")
+
+    def test_rename_updates_a_real_heading_after_a_fenced_example(self, tmp_path):
+        (tmp_path / "Old-Page.md").write_text(
+            "```markdown\n# Example heading\n```\n\n# Old Page\n\nBody\n",
+            encoding="utf-8")
+
+        renamed = docpages.rename_page(tmp_path, "old-page", "New Guide")
+
+        assert renamed.path.read_text(encoding="utf-8") == (
+            "```markdown\n# Example heading\n```\n\n# New Guide\n\nBody\n")
+
+    def test_rename_adds_heading_without_dropping_rewritten_self_links(
+            self, tmp_path):
+        (tmp_path / "Old-Page.md").write_text(
+            "```markdown\n# Example heading\n```\n\nSee [[Old Page]].\n",
+            encoding="utf-8")
+
+        renamed = docpages.rename_page(tmp_path, "old-page", "New Guide")
+
+        assert renamed.path.read_text(encoding="utf-8") == (
+            "# New Guide\n\n```markdown\n# Example heading\n```\n\n"
+            "See [[new-guide|New Guide]].\n")
+
+    def test_rename_rejects_an_existing_target_without_changing_files(self, tmp_path):
+        (tmp_path / "First.md").write_text("# First\n", encoding="utf-8")
+        (tmp_path / "Second.md").write_text("# Second\n", encoding="utf-8")
+        with pytest.raises(FileExistsError):
+            docpages.rename_page(tmp_path, "first", "Second")
+        assert (tmp_path / "First.md").exists()
+        assert (tmp_path / "Second.md").read_text(encoding="utf-8") == "# Second\n"
+
+    def test_delete_removes_the_page_and_keeps_links_as_text(self, tmp_path):
+        (tmp_path / "Home.md").write_text("# Home\n\n[[Setup]]\n", encoding="utf-8")
+        (tmp_path / "Setup.md").write_text("# Setup\n", encoding="utf-8")
+        (tmp_path / "_Sidebar.md").write_text(
+            "- [[Home]]\n- [[Setup]]\n", encoding="utf-8")
+        docpages.delete_page(tmp_path, "setup")
+        assert not (tmp_path / "Setup.md").exists()
+        rendered, missing = render_links(
+            (tmp_path / "Home.md").read_text(encoding="utf-8"), catalog(tmp_path))
+        assert "Setup" in rendered
+        assert missing == ["Setup"]
+        assert "setup" not in (tmp_path / "_Sidebar.md").read_text(
+            encoding="utf-8").lower()
+
+    def test_sidebar_can_be_written_with_sections_and_reordered_pages(self, tmp_path):
+        entries = [NavEntry("Basics", None, (
+            NavEntry("Setup", "setup"), NavEntry("Home", "home"))),
+            NavEntry("Reference", None, (NavEntry("API", "api"),))]
+        docpages.write_sidebar(tmp_path, entries)
+        text = (tmp_path / "_Sidebar.md").read_text(encoding="utf-8")
+        assert text == (
+            "- **Basics**\n  - [[setup|Setup]]\n  - [[home|Home]]\n"
+            "- **Reference**\n  - [[api|API]]\n")
+        pages = {slug: DocPage(slug, slug.title(), tmp_path / f"{slug}.md")
+                 for slug in ("setup", "home", "api")}
+        loaded = parse_sidebar(text, pages)
+        assert [entry.title for entry in loaded[0].children] == ["Setup", "Home"]
+
+    def test_bundled_handbook_is_read_only_except_for_an_explicit_override(
+            self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FLOGRAPH_DOCS_DIR", raising=False)
+        assert docpages.is_bundled_docs(docs_dir())
+        monkeypatch.setenv("FLOGRAPH_DOCS_DIR", str(tmp_path))
+        assert not docpages.is_bundled_docs(tmp_path)
 
 
 class TestBreadcrumb:

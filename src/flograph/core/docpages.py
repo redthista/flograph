@@ -17,8 +17,10 @@ from __future__ import annotations
 import importlib.resources
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
+import tempfile
 
 # `[[Target]]`, `[[Target#anchor]]`, `[[Target|shown label]]`, or a
 # combination. The negative lookbehind leaves the `![[embed]]` form to
@@ -34,7 +36,7 @@ IMAGE_SUFFIXES = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".svgz",
 })
 
-_H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+_H1_RE = re.compile(r"^#[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
 # fenced blocks and inline spans — link/embed syntax inside them is a
 # *quotation* of the syntax (this handbook shows report `![[embeds]]` that
@@ -120,6 +122,242 @@ def resolve_wiki_dir(folder: str | None) -> Path:
     return docs_dir()
 
 
+def is_bundled_docs(directory: Path) -> bool:
+    """Whether *directory* is flograph's installed handbook.
+
+    The handbook is shipped as application documentation and must never be
+    edited through a Wiki card. An explicit ``FLOGRAPH_DOCS_DIR`` override
+    is a user folder, so it remains editable when the filesystem allows it.
+    """
+    try:
+        bundled = Path(str(importlib.resources.files("flograph.docs")))
+        return directory.resolve() == bundled.resolve()
+    except (OSError, TypeError):
+        return False
+
+
+def _safe_page_stem(title: str) -> str:
+    """A single Markdown filename component for a user-entered page title."""
+    title = title.strip()
+    if (not title or any(c in title for c in '/\\:*?"<>|#[]')
+            or any(ord(c) < 32 for c in title)
+            or title in {".", ".."} or title.endswith(".")
+            or title.split(".", 1)[0].upper() in {
+                "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3",
+                "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+                "LPT7", "LPT8", "LPT9"}):
+        raise ValueError("Enter a page title without filename punctuation")
+    stem = re.sub(r"\s+", "-", title)
+    if not stem or stem.startswith("."):
+        raise ValueError("Enter a page title that can be used as a filename")
+    return stem
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Replace one UTF-8 text file atomically within its own directory."""
+    temporary = _stage_text(path, text)
+    try:
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _stage_text(path: Path, text: str, *, mode_from: Path | None = None) -> Path:
+    """Write a sibling temporary file with permissions copied from a source."""
+    source = mode_from or path
+    try:
+        mode = stat.S_IMODE(source.stat().st_mode)
+    except OSError:
+        mode = 0o644
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp",
+                                dir=path.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        Path(name).unlink(missing_ok=True)
+        raise
+    return Path(name)
+
+
+def create_page(directory: Path, title: str, body: str | None = None) -> DocPage:
+    """Create a root-level Markdown page and return its catalog entry."""
+    stem = _safe_page_stem(title)
+    path = directory / f"{stem}.md"
+    slug = _slug(stem)
+    if path.exists() or slug in catalog(directory):
+        raise FileExistsError(f"A page named {title!r} already exists")
+    content = body if body is not None else f"# {title.strip()}\n\n"
+    _atomic_write(path, content)
+    return DocPage.read(path, directory)
+
+
+def _rewrite_page_links(text: str, old_slug: str, new_slug: str,
+                        *, default_label: str | None = None) -> str:
+    """Rewrite links to a renamed page, preserving labels and anchors.
+
+    Both ``[[Page]]`` and non-image Obsidian ``![[Page]]`` embeds are
+    handled. Code spans and fenced blocks remain untouched, as in
+    ``render_links``.
+    """
+    old = _slug(old_slug)
+
+    def matches(target: str) -> bool:
+        target_slug = _slug(target)
+        return target_slug == old or target_slug.rsplit("/", 1)[-1] == old
+
+    def rewrite(segment: str) -> str:
+        def link(match: re.Match[str]) -> str:
+            target, anchor, label = match.group(1), match.group(2), match.group(3)
+            if not matches(target):
+                return match.group(0)
+            result = f"[[{new_slug}"
+            if anchor:
+                result += f"#{anchor}"
+            if label:
+                result += f"|{label}"
+            elif default_label is not None:
+                result += f"|{default_label}"
+            return result + "]]"
+
+        def embed(match: re.Match[str]) -> str:
+            target, option = match.group(1), match.group(2)
+            if _is_image(target) or not matches(target):
+                return match.group(0)
+            result = f"![[{new_slug}"
+            if option:
+                result += f"|{option}"
+            elif default_label is not None:
+                result += f"|{default_label}"
+            return result + "]]"
+
+        return WIKILINK_RE.sub(link, EMBED_RE.sub(embed, segment))
+
+    return _outside_code(text, rewrite)
+
+
+def _rename_page_heading(text: str, title: str) -> tuple[str, bool]:
+    """Rename the first real H1, without treating an example as a heading."""
+    found = False
+
+    def update(segment: str) -> str:
+        nonlocal found
+        if found:
+            return segment
+        changed, count = _H1_RE.subn(
+            lambda _match: f"# {title}", segment, count=1)
+        found = bool(count)
+        return changed
+
+    return _outside_code(text, update), found
+
+
+def rename_page(directory: Path, slug: str, title: str) -> DocPage:
+    """Rename a page and update inbound wiki links plus `_Sidebar.md`.
+
+    All rewritten files are staged beside their originals before any replace
+    so a read/encoding/write failure leaves the wiki untouched. Individual
+    filesystem replacements are atomic; filesystem-wide transactions are
+    not available, so a replace failure is reported to the caller.
+    """
+    pages = catalog(directory)
+    page = pages.get(_slug(slug))
+    if page is None:
+        raise FileNotFoundError(f"Page {slug!r} no longer exists")
+    stem = _safe_page_stem(title)
+    destination = page.path.with_name(f"{stem}.md")
+    new_slug = _slug(stem)
+    if (destination != page.path and destination.exists()) or (
+            new_slug != page.slug and new_slug in pages):
+        raise FileExistsError(f"A page named {title!r} already exists")
+
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for path in _all_wiki_markdown(directory):
+            original = path.read_text(encoding="utf-8")
+            changed = _rewrite_page_links(
+                original, page.slug, new_slug,
+                default_label=title.strip())
+            if path == page.path:
+                changed, has_heading = _rename_page_heading(
+                    changed, title.strip())
+                if not has_heading:
+                    changed = f"# {title.strip()}\n\n" + changed
+            if changed == original:
+                continue
+            staged.append((_stage_text(path, changed), path))
+        if destination != page.path:
+            # Stage the page's rewritten text at its new filename; its old
+            # path is removed only after every other staged file is ready.
+            page_stage = next((tmp for tmp, original in staged
+                               if original == page.path), None)
+            if page_stage is None:
+                page_stage = _stage_text(
+                    destination, f"# {title.strip()}\n\n", mode_from=page.path)
+                staged.append((page_stage, destination))
+            else:
+                staged.remove((page_stage, page.path))
+                staged.append((page_stage, destination))
+        for temporary, target in staged:
+            os.replace(temporary, target)
+        if destination != page.path:
+            page.path.unlink()
+    except BaseException:
+        for temporary, _target in staged:
+            temporary.unlink(missing_ok=True)
+        raise
+    return DocPage.read(destination, directory)
+
+
+def delete_page(directory: Path, slug: str) -> None:
+    """Delete a page and remove it from an existing sidebar.
+
+    Links in page content remain as plain unresolved text; this preserves a
+    useful hint for a reader without silently changing authored prose.
+    """
+    page = catalog(directory).get(_slug(slug))
+    if page is None:
+        raise FileNotFoundError(f"Page {slug!r} no longer exists")
+    page.path.unlink()
+    if (directory / "_Sidebar.md").is_file():
+        def without(entries):
+            kept = []
+            for entry in entries:
+                if entry.slug == page.slug:
+                    continue
+                children = tuple(without(entry.children))
+                if entry.slug is None and not children:
+                    continue
+                kept.append(NavEntry(entry.title, entry.slug, children))
+            return kept
+        write_sidebar(directory, without(sidebar(directory)))
+
+
+def write_sidebar(directory: Path, entries: list[NavEntry]) -> None:
+    """Persist the displayed navigation hierarchy as GitHub-wiki Markdown."""
+    def lines(items: list[NavEntry] | tuple[NavEntry, ...], depth: int) -> list[str]:
+        out = []
+        for entry in items:
+            bullet = " " * (depth * 2) + "- "
+            if entry.slug:
+                out.append(f"{bullet}[[{entry.slug}|{entry.title}]]")
+            else:
+                out.append(f"{bullet}**{entry.title}**")
+            out.extend(lines(entry.children, depth + 1))
+        return out
+
+    _atomic_write(directory / "_Sidebar.md", "\n".join(lines(entries, 0)) + "\n")
+
+
 def _md_files(directory: Path):
     """Every `.md` file under `directory`, recursively. Skips `_`-prefixed
     files (`_Sidebar.md` and the other GitHub-wiki specials) and anything
@@ -128,6 +366,15 @@ def _md_files(directory: Path):
         rel = path.relative_to(directory)
         if path.name.startswith("_"):
             continue
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        yield path
+
+
+def _all_wiki_markdown(directory: Path):
+    """All Markdown documents in a wiki, including `_Sidebar` and specials."""
+    for path in sorted(directory.rglob("*.md")):
+        rel = path.relative_to(directory)
         if any(part.startswith(".") for part in rel.parts):
             continue
         yield path
@@ -281,12 +528,15 @@ def _is_image(name: str) -> bool:
     return os.path.splitext(name)[1].lower() in IMAGE_SUFFIXES
 
 
-def render_links(text: str, pages: dict[str, DocPage]) -> tuple[str, list[str]]:
+def render_links(text: str, pages: dict[str, DocPage], *,
+                 link_missing: bool = False) -> tuple[str, list[str]]:
     """Rewrite `[[wikilinks]]` and Obsidian `![[embeds]]` to ordinary
     Markdown. `![[image.png]]` becomes a Markdown image (the UI resolves and
-    loads it); `![[Note]]` and `[[Note]]` become links. Returns the new text
-    and the link targets that matched no page (the integrity test uses the
-    second value — a shipped page must not point at a missing one)."""
+    loads it); `![[Note]]` and `[[Note]]` become links. When `link_missing`
+    is true, an unresolved `[[Target]]` becomes a `newpage:` link so an
+    editable Wiki card can offer to create it. Returns the new text and the
+    missing targets; the handbook integrity test checks the latter.
+    """
     missing: list[str] = []
 
     def embed(m: re.Match[str]) -> str:
@@ -306,6 +556,10 @@ def render_links(text: str, pages: dict[str, DocPage]) -> tuple[str, list[str]]:
         page = _lookup(target, pages)
         if page is None:
             missing.append(target)
+            if link_missing:
+                from urllib.parse import quote
+                slug = _slug(target.rsplit("/", 1)[-1])
+                return f"[{shown}](newpage:{quote(slug, safe='-_.~')})"
             return shown  # brackets dropped; reads as plain text, like GitHub
         href = link_target(page.slug)
         if anchor:

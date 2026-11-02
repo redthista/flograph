@@ -835,3 +835,16 @@ would on a GitHub wiki. Navigating is cosmetic — it never re-runs the flow.
 Write your model's user guide once and it ships on the dashboard to whoever
 opens it. Dropping a folder of `.md` files onto the canvas creates the node
 for you.
+
+When the folder is writable, use **Edit** to change the current page's raw
+Markdown, then **Save** to write it and return to the rendered page. If you
+leave a modified page, choose **Save**, **Discard** or **Cancel**. The
+**Pages** menu creates a page, renames or deletes the current page, and opens
+**Organize navigation**. Click an unresolved `[[wikilink]]` to show a button
+for creating that page; creating it keeps you on the new page. Renaming
+rewrites links in the wiki folder and updates the page's title; deleting
+removes it from `_Sidebar.md` while leaving links in authored page text for
+you to fix. In the navigation editor, drag pages
+to reorder them or into sections, add a section, rename it inline, or remove
+it; **Save** writes the new tree to `_Sidebar.md`. The bundled handbook is
+read-only, as are folders the current user cannot write to.

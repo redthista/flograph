@@ -34,7 +34,8 @@ HOME_SLUG = "home"
 
 # Qt rich text supports only a small CSS subset (same note as report/render.py).
 _DOCS_CSS = f"""
-body {{ color: {theme.NODE_TEXT.name()}; }}
+body {{ color: {theme.NODE_TEXT.name()};
+       background-color: {theme.NODE_BODY.name()}; }}
 h1 {{ font-size: 20px; color: {theme.NODE_TEXT.name()}; }}
 h2 {{ font-size: 16px; color: {theme.NODE_TEXT.name()};
       border-bottom: 1px solid {theme.NODE_BORDER.name()}; padding-bottom: 3px; }}
@@ -86,29 +87,50 @@ class DocsBrowser(QTextBrowser):
 
     #: emitted after navigation so the toolbar / nav tree can re-sync
     navigated = Signal()
+    #: the target of a link that does not exist, for an editor to offer creation
+    page_missing = Signal(str)
 
-    def __init__(self, parent=None, directory: Path | None = None) -> None:
+    def __init__(self, parent=None, directory: Path | None = None, *,
+                 allow_missing: bool = False) -> None:
         super().__init__(parent)
         self.setOpenLinks(False)  # every link comes through _on_anchor
         self.anchorClicked.connect(self._on_anchor)
         self.document().setDefaultStyleSheet(_DOCS_CSS)
+        self.setStyleSheet(
+            f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
+            f" color: {theme.NODE_TEXT.name()}; border: none; padding: 6px; }}")
 
         self._dir: Path | None = directory
         self._catalog = catalog(directory)
+        self._allow_missing = bool(allow_missing)
         self._history: list[str] = []
         self._pos = -1
         self.go_home()
 
     # ---------------------------------------------------------------- pages
 
-    def set_folder(self, directory: Path | None) -> None:
+    def set_folder(self, directory: Path | None, *,
+                   allow_missing: bool | None = None) -> None:
         """Point the browser at a different folder of pages — clears history
         and shows that folder's home page."""
         self._dir = directory
+        if allow_missing is not None:
+            self._allow_missing = bool(allow_missing)
         self._catalog = catalog(directory)
         self._history = []
         self._pos = -1
         self.go_home()
+
+    def reload_catalog(self) -> None:
+        """Refresh page structure and discard history with obsolete slugs."""
+        self._catalog = catalog(self._dir)
+        self._history = []
+        self._pos = -1
+
+    def reload_page(self, slug: str) -> None:
+        """Re-render the current file after the editor saves it."""
+        self._catalog = catalog(self._dir)
+        self.show_page(slug, record=False)
 
     def home_slug(self) -> str | None:
         """`home` if the folder has a Home page, else the first page the nav
@@ -133,10 +155,13 @@ class DocsBrowser(QTextBrowser):
             return
         page = self._catalog.get(slug) if slug else None
         if page is None:
+            if slug:
+                self.page_missing.emit(slug)
             self._render(_NOT_FOUND.format(name=slug))
         else:
             text, _ = render_links(page.path.read_text(encoding="utf-8"),
-                                   self._catalog)
+                                   self._catalog,
+                                   link_missing=self._allow_missing)
             self._render(text, page.path.parent)
         if anchor:
             self.scrollToAnchor(anchor)
@@ -221,6 +246,9 @@ class DocsBrowser(QTextBrowser):
 
     def _on_anchor(self, url: QUrl) -> None:
         scheme = url.scheme()
+        if scheme == "newpage":
+            self.page_missing.emit(url.path().strip("/"))
+            return
         if scheme in ("http", "https", "mailto"):
             QDesktopServices.openUrl(url)
             return
