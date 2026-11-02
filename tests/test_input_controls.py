@@ -980,6 +980,23 @@ class TestControlTiles:
         assert item._control_widget is not None
         assert item._control_widget._read() == 25
 
+    def test_a_form_tile_submits_through_the_undoable_value(self, window):
+        from flograph.ui.controls import FormControl
+
+        node = window.graph.add_node(
+            window.registry.instantiate("flograph.input.user_form"))
+        window.graph.set_param(node.id, "fields", "name|text|Name|")
+        _page, item = self._tile(window, node)
+
+        assert isinstance(item._control_widget, FormControl)
+        item._control_widget._editors["name"].setText("Ada")
+        item._control_widget._edited()
+        item._control_widget._submit_button.click()
+
+        assert json.loads(node.params["value"]) == {"name": "Ada"}
+        window.undo_stack.undo()
+        assert node.params["value"] == ""
+
     def test_a_tile_lands_big_enough_for_its_shape(self, window):
         from flograph.ui.dashboard.tile_item import TITLE_H, default_tile_size
         node = add_control(window, "toggle")

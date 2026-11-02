@@ -196,6 +196,10 @@ tile on a dashboard — the node *is* the view.
 `slicer`, `button`, `note`, `report`, `control`, plus the structural
 `reroute`, `goto`, `from`, `vars`.
 
+`form` is a submit-only record editor. Its schema rules live in the Qt-free
+`core.form`; the shared `FormControl` host is used on the canvas and on
+dashboard tiles. See [[Input Controls]].
+
 For an input control, `"card": "control"` plus `"control": <shape>` —
 `slider`, `range`, `number`, `text`, `date`, `toggle`, `choice`. One host
 renders every control from that declaration plus your `PARAMS`, so a new

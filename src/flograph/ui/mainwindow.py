@@ -2240,7 +2240,7 @@ class MainWindow(QMainWindow):
             self._on_table_viewer_node_succeeded(node_id)
         elif kind == "slicer":
             self._on_slicer_node_succeeded(node_id)
-        elif kind == "control":
+        elif kind in ("control", "form"):
             self._on_control_node_succeeded(node_id)
         elif kind == "grid":
             self._on_grid_node_succeeded(node_id)
@@ -2292,11 +2292,12 @@ class MainWindow(QMainWindow):
         constants somebody typed."""
         node = self.graph.nodes.get(node_id)
         item = self.scene.node_items.get(node_id)
-        if node is None or item is None or card_kind(node) != "control":
+        if node is None or item is None or card_kind(node) not in ("control", "form"):
             return
-        from flograph.engine.introspect import control_upstream
-        item.set_control_upstream(
-            control_upstream(self.graph, self.engine.cache, node_id))
+        from flograph.engine.introspect import control_upstream, form_upstream
+        resolver = form_upstream if card_kind(node) == "form" else control_upstream
+        item.set_control_upstream(resolver(self.graph, self.engine.cache,
+                                           node_id))
 
     # ------------------------------------------------------ dashboard pages
 
@@ -4141,7 +4142,7 @@ class MainWindow(QMainWindow):
         dirtied the subgraph, and request_run turns a drag's worth of values
         into one run of the final one."""
         node = self.graph.nodes.get(node_id)
-        if node is None or card_kind(node) != "control":
+        if node is None or card_kind(node) not in ("control", "form"):
             return
         self.engine.request_run([node_id, *self.graph.downstream(node_id)])
 
@@ -6734,14 +6735,15 @@ class MainWindow(QMainWindow):
     #: reopens as a placeholder and stays one until the node is re-run —
     #: which is exactly the bug that adding grid/report/image/pdf fixed.
     _CARD_DATA_KINDS = ("figure", "webview", "table_viewer", "kpi",
-                        "slicer", "control", "grid", "report", "image", "pdf")
+                        "slicer", "control", "form", "grid", "report",
+                        "image", "pdf")
 
     #: Of those, the kinds that display what their *inputs* hold rather than
     #: their own output: a slicer's options and a control's bounds come from
     #: upstream, a linked Table merges the frame feeding it, and a report
     #: renders the nodes its `![[...]]` embeds name. Their sources have to be
     #: warmed too, and their cards have to be refreshed when one lands.
-    _CARD_READS_INPUTS = ("slicer", "control", "grid", "report")
+    _CARD_READS_INPUTS = ("slicer", "control", "form", "grid", "report")
 
     def _display_warm_ids(self, registered: list[str]) -> list[str]:
         """Which spilled entries the visible cards are waiting on.

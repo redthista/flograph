@@ -145,6 +145,14 @@ def control_upstream(graph: Graph, cache: OutputCache,
             if v is not None and not (isinstance(v, str) and v == "")}
 
 
+def form_upstream(graph: Graph, cache: OutputCache, node_id: str) -> dict:
+    """The optional field-schema input supplied to a User Form node."""
+    if graph.input_connection(node_id, "fields") is None:
+        return {}
+    value = cached_input(graph, cache, node_id, "fields")
+    return {"fields": value} if value is not None else {}
+
+
 def choice_options(graph: Graph, cache: OutputCache,
                    node_id: str) -> "list[str] | None":
     """The options a Choice control should offer: derived from whatever is

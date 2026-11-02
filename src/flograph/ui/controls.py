@@ -42,8 +42,9 @@ from typing import Optional
 from PySide6.QtCore import QDate, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox, QHBoxLayout, QLabel,
-    QLineEdit, QPlainTextEdit, QSizePolicy, QSlider, QStyle,
+    QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox, QFormLayout,
+    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea,
+    QSizePolicy, QSlider, QSpinBox, QStyle,
     QStyleOptionButton, QStyleOptionSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -100,6 +101,8 @@ CONTROL_SIZES: dict[str, tuple[float, float]] = {
     "list": (240.0, 220.0),
 }
 DEFAULT_CONTROL_SIZE = (220.0, 90.0)
+FORM_SIZE = (360.0, 320.0)
+FORM_MAX_SIZE = (960.0, 1600.0)
 
 
 def control_size(kind: str) -> tuple[float, float]:
@@ -2150,6 +2153,344 @@ _CONTROLS = {
 }
 
 
+class FormControl(ControlWidget):
+    """A submit-only record editor backed by a User Form node.
+
+    Field edits stay local until Submit. The single committed value is a JSON
+    object param, so Submit is one undoable graph edit and Reset never sends
+    an incomplete record downstream.
+    """
+
+    load_requested = Signal()
+
+    def _build(self) -> None:
+        from PySide6.QtWidgets import QFrame
+
+        self._problem = QLabel("")
+        self._problem.setObjectName("control_panel_problem")
+        self._problem.setWordWrap(True)
+        self._problem.setStyleSheet(f"color: {INVALID.name()};")
+        self._problem.hide()
+        self._layout.addWidget(self._problem)
+
+        self._empty_hint = QLabel("Set up fields in Properties or connect a "
+                                  "fields source.")
+        self._empty_hint.setObjectName("bound")
+        self._empty_hint.setWordWrap(True)
+        self._layout.addWidget(self._empty_hint)
+
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("control_form_scroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet(
+            "QScrollArea, QScrollArea > QWidget > QWidget"
+            " { background: transparent; }")
+        self._layout.addWidget(self._scroll, 1)
+
+        footer = QWidget()
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(0, 4, 0, 0)
+        footer_layout.setSpacing(6)
+        self._load_button = QPushButton("Load")
+        self._load_button.setObjectName("panel_apply")
+        self._load_button.clicked.connect(self.load_requested)
+        self._reset_form_button = QPushButton("Reset")
+        self._reset_form_button.setObjectName("panel_reset")
+        self._reset_form_button.clicked.connect(self._reset_form)
+        self._submit_button = QPushButton("Submit")
+        self._submit_button.setObjectName("panel_apply")
+        self._submit_button.clicked.connect(self._submit)
+        for button in (self._load_button, self._reset_form_button,
+                       self._submit_button):
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setCursor(Qt.PointingHandCursor)
+        footer_layout.addWidget(self._load_button)
+        footer_layout.addStretch(1)
+        footer_layout.addWidget(self._reset_form_button)
+        footer_layout.addWidget(self._submit_button)
+        self._layout.addWidget(footer)
+        self._fields = []
+        self._schema_key: tuple = ()
+        self._editors: dict[str, QWidget] = {}
+        self._field_labels: dict[str, QLabel] = {}
+        self._dirty = False
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.form import parse_entry, schema_from_upstream
+
+        try:
+            fields = schema_from_upstream(
+                self._upstream.get("fields"), params.get("fields", ""))
+            self._problem.clear()
+            self._problem.hide()
+        except (TypeError, ValueError) as exc:
+            self._problem.setText(str(exc))
+            self._problem.show()
+            fields = []
+        key = tuple((f.name, f.kind, f.label, repr(f.default), f.options,
+                     f.required) for f in fields)
+        preserved = self._read_entry() if self._dirty else None
+        if key != self._schema_key:
+            self._rebuild(fields)
+            self._schema_key = key
+        self._fields = fields
+        self._empty_hint.setVisible(not fields and not self._problem.text())
+        self._load_button.setVisible(bool(str(params.get("load_targets", "")
+                                               or "").strip()))
+        self._load_button.setEnabled(False)
+        self._load_button.setToolTip(
+            "Load is waiting for its target-output mapping to be configured")
+        self._reset_form_button.setText(
+            str(params.get("reset_label", "Reset") or "Reset"))
+        self._submit_button.setText(
+            str(params.get("submit_label", "Submit") or "Submit"))
+        if not fields:
+            return
+        if preserved is not None:
+            entry = preserved
+        else:
+            try:
+                entry = parse_entry(params.get("value", ""), fields,
+                                    check_required=False)
+            except ValueError as exc:
+                self._problem.setText(str(exc))
+                self._problem.show()
+                entry = {}
+            else:
+                if not params.get("value"):
+                    self._problem.clear()
+                    self._problem.hide()
+        self._set_entry(entry, preserve_raw=preserved is not None)
+
+    def _rebuild(self, fields) -> None:
+        body = QWidget()
+        body.setObjectName("readout_row")
+        layout = QFormLayout(body)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
+        editors: dict[str, QWidget] = {}
+        labels: dict[str, QLabel] = {}
+        for field in fields:
+            label = QLabel(field.label + (" *" if field.required else ""))
+            label.setWordWrap(True)
+            editor = self._make_editor(field)
+            editor.setObjectName(f"form_{field.name}")
+            editors[field.name] = editor
+            labels[field.name] = label
+            layout.addRow(label, editor)
+            self._connect_editor(editor)
+        old = self._scroll.takeWidget()
+        if old is not None:
+            old.deleteLater()
+        self._scroll.setWidget(body)
+        self._editors = editors
+        self._field_labels = labels
+
+    def _make_editor(self, field):
+        from PySide6.QtCore import QDate
+
+        if field.kind in ("text", "password"):
+            editor = QLineEdit()
+            editor.setMaxLength(2_000_000_000)
+            if field.kind == "password":
+                editor.setEchoMode(QLineEdit.Password)
+            return editor
+        if field.kind == "textarea":
+            editor = QPlainTextEdit()
+            editor.setMaximumHeight(92)
+            return editor
+        if field.kind == "int":
+            editor = QSpinBox()
+            editor.setRange(-999_999_999, 999_999_999)
+            editor.setSpecialValueText("")
+            editor.setValue(editor.minimum())
+            return editor
+        if field.kind == "float":
+            editor = QDoubleSpinBox()
+            editor.setRange(-1e12, 1e12)
+            editor.setDecimals(6)
+            editor.setSpecialValueText("")
+            editor.setValue(editor.minimum())
+            return editor
+        if field.kind == "date":
+            editor = QDateEdit()
+            editor.setCalendarPopup(True)
+            editor.setDisplayFormat(ISO_FORMAT)
+            editor.setMinimumDate(QDate(1752, 9, 14))
+            editor.setSpecialValueText("")
+            editor.setDate(editor.minimumDate())
+            return editor
+        if field.kind == "toggle":
+            return QCheckBox()
+        if field.kind == "choice":
+            from .canvas.popup_lift import CardComboBox
+            editor = CardComboBox()
+            editor.addItem("Select…", "")
+            editor.addItems(list(field.options))
+            for index, value in enumerate(field.options, 1):
+                editor.setItemData(index, value)
+            return editor
+        raise ValueError(f"unsupported form field type {field.kind!r}")
+
+    def _connect_editor(self, editor: QWidget) -> None:
+        if isinstance(editor, QLineEdit):
+            editor.textEdited.connect(self._edited)
+        elif isinstance(editor, QPlainTextEdit):
+            editor.textChanged.connect(self._edited)
+        elif isinstance(editor, (QSpinBox, QDoubleSpinBox)):
+            editor.valueChanged.connect(self._edited)
+        elif isinstance(editor, QDateEdit):
+            editor.dateChanged.connect(self._edited)
+        elif isinstance(editor, QCheckBox):
+            editor.toggled.connect(self._edited)
+        elif isinstance(editor, QComboBox):
+            editor.activated.connect(self._edited)
+
+    def _set_entry(self, entry: dict, *, preserve_raw: bool = False) -> None:
+        from flograph.core.form import coerce, default_entry
+
+        defaults = default_entry(self._fields)
+        self._syncing = True
+        try:
+            for field in self._fields:
+                value = entry.get(field.name, defaults.get(field.name))
+                editor = self._editors.get(field.name)
+                if editor is None:
+                    continue
+                if not preserve_raw:
+                    try:
+                        value = coerce(field, value)
+                    except ValueError:
+                        value = defaults.get(field.name)
+                if isinstance(editor, QLineEdit):
+                    editor.setText("" if value is None else str(value))
+                elif isinstance(editor, QPlainTextEdit):
+                    editor.setPlainText("" if value is None else str(value))
+                elif isinstance(editor, (QSpinBox, QDoubleSpinBox)):
+                    if value is None or value == "":
+                        editor.setValue(editor.minimum())
+                    else:
+                        editor.setValue(value)
+                elif isinstance(editor, QDateEdit):
+                    from flograph.ui.controls import iso_to_qdate
+                    parsed = iso_to_qdate(value)
+                    editor.setDate(parsed or editor.minimumDate())
+                elif isinstance(editor, QCheckBox):
+                    editor.setChecked(bool(value))
+                elif isinstance(editor, QComboBox):
+                    index = editor.findData(value if value is not None else "")
+                    if index < 0 and value not in (None, ""):
+                        editor.addItem(f"{value}  (not in options)", value)
+                        index = editor.count() - 1
+                    editor.setCurrentIndex(max(0, index))
+                self._mark_field(field.name, False)
+        finally:
+            self._syncing = False
+
+    def _read_entry(self) -> dict:
+        from flograph.core.form import coerce
+
+        values = {}
+        for field in self._fields:
+            editor = self._editors.get(field.name)
+            if isinstance(editor, QLineEdit):
+                raw = editor.text()
+            elif isinstance(editor, QPlainTextEdit):
+                raw = editor.toPlainText()
+            elif isinstance(editor, QSpinBox):
+                raw = None if editor.value() == editor.minimum() else editor.value()
+            elif isinstance(editor, QDoubleSpinBox):
+                raw = None if editor.value() == editor.minimum() else editor.value()
+            elif isinstance(editor, QDateEdit):
+                raw = "" if editor.date() == editor.minimumDate() else \
+                    editor.date().toString(ISO_FORMAT)
+            elif isinstance(editor, QCheckBox):
+                raw = editor.isChecked()
+            elif isinstance(editor, QComboBox):
+                raw = editor.currentData()
+            else:
+                continue
+            try:
+                values[field.name] = coerce(field, raw)
+            except ValueError:
+                values[field.name] = raw
+        return values
+
+    def _edited(self, *_args) -> None:
+        if self._syncing:
+            return
+        self._dirty = True
+        self._problem.clear()
+        self._problem.hide()
+        for name in self._field_labels:
+            self._mark_field(name, False)
+        self._sync_buttons(self._params)
+
+    def _mark_field(self, name: str, invalid: bool) -> None:
+        label = self._field_labels.get(name)
+        field = next((field for field in self._fields if field.name == name), None)
+        if label is not None and field is not None:
+            label.setStyleSheet(f"color: {INVALID.name()};" if invalid else "")
+
+    def _submit(self) -> None:
+        import json
+
+        from flograph.core.form import coerce_entry
+
+        try:
+            entry = coerce_entry(self._fields, self._read_entry())
+        except ValueError as exc:
+            message = str(exc)
+            for field in self._fields:
+                if field.label in message:
+                    self._mark_field(field.name, True)
+                    break
+            self._problem.setText(message)
+            self._problem.show()
+            return
+        if not self._fields:
+            self._problem.setText("Set up at least one field before submitting.")
+            self._problem.show()
+            return
+        self._dirty = False
+        self._problem.clear()
+        self._problem.hide()
+        self._sync_buttons(self._params)
+        self.value_committed.emit(json.dumps(entry, ensure_ascii=False))
+
+    def _reset_form(self) -> None:
+        from flograph.core.form import default_entry
+
+        self._set_entry(default_entry(self._fields))
+        self._dirty = True
+        self._problem.clear()
+        self._problem.hide()
+        self._sync_buttons(self._params)
+
+    def _read(self):
+        return self._read_entry()
+
+    def _sync_buttons(self, _shown: dict) -> None:
+        # User Forms submit their whole record explicitly; the control-card
+        # Apply/Reset controls would suggest that individual edits are live.
+        self._pending.setVisible(self._dirty)
+        self._pending.setToolTip("This form has changes that have not been submitted")
+        self._apply_button.hide()
+        self._reset_button.hide()
+        self._caption_row.setVisible(
+            not self._caption.isHidden() or not self._help.isHidden()
+            or self._dirty)
+
+    def focus_editor(self) -> None:
+        if self._fields:
+            editor = self._editors.get(self._fields[0].name)
+            if editor is not None:
+                editor.setFocus()
+
+
 def build_control(kind: str, parent=None) -> Optional[ControlWidget]:
     """The widget for a control kind, or None for one this build doesn't
     know — a project saved by a newer flograph must still open."""
@@ -2162,7 +2503,10 @@ def host_control(node, parent=None) -> Optional[ControlWidget]:
     its default (for Reset) and synced to its params. The canvas card and
     the dashboard tile both build theirs here, then wire it with
     `connect_control`, so the two can't differ in what a press does."""
-    widget = build_control(node.spec.control or "", parent)
+    if node.spec.card == "form":
+        widget = FormControl(parent)
+    else:
+        widget = build_control(node.spec.control or "", parent)
     if widget is None:
         return None
     from flograph.core.control_apply import default_value

@@ -1,9 +1,8 @@
 # Input Controls
 
-The **Input** category holds the nodes you *set* rather than compute. Each
-one is a card on the canvas and a tile on a [[Dashboards and Reports|
-dashboard]], and both are the same control: move it in either place and the
-other follows.
+The **Input** category holds nodes you *set* rather than compute. Most are
+controls: each is one value on the canvas or a dashboard tile. **User Form**
+is the other shape — a card for entering one complete record.
 
 | Control | What it gives the flow |
 |---|---|
@@ -40,6 +39,41 @@ you wrote yourself from the **Control Template**:
 | **Required** | A red `*` on the caption; left empty, the box is outlined red and the nodes after it stop with "*Caption* is required". (Numbers, sliders, tick boxes and dropdowns always hold a value, so it has no effect on them.) |
 | **Help text** | An ⓘ beside the caption; hovering it shows the text. Write what the person using the dashboard needs to know. |
 | **Accent colour** | The control's own colour for its track, ticks, focus ring and buttons. **Theme** keeps the usual blue. |
+
+## User Form: collect one record
+
+Write one field per line in User Form's **Fields** property, or supply a
+schema through its optional **fields** input. Each line is
+`name|type|label|default[|options]`:
+
+```text
+name|text*|Full name|
+team|choice|Team|north|north,south
+visits|int|Previous visits|0
+joined|date|Join date|
+active|toggle|Still active|true
+```
+
+The supported types are `text`, `textarea`, `password`, `int`, `float`,
+`date`, `toggle` and `choice`. A `*` after the type makes the field
+required. Choice options are comma-separated. Submit checks required fields,
+converts values to their declared types and writes the whole entry as one
+undoable change. The `entry` output is the latest submitted record as a
+dictionary; before the first submission it is an empty dictionary.
+
+`password` masks what is typed, but the submitted value is saved in the
+project like other node parameters. It is for obscuring the field on screen,
+not for storing a secret.
+
+Edits stay in the form until Submit. The amber dot means the visible values
+have not been submitted yet. Reset fills in the field defaults locally; it
+does not replace the last submitted record until Submit.
+
+**Form from Table** writes a schema from a DataFrame's columns. Wire its
+`fields` output to User Form's `fields` input to derive field names, labels
+and common numeric, boolean and date types. Turn on **Use text fields** when
+every column should be entered as text. The generated schema is plain text
+and can be edited in the User Form's Properties.
 
 ## Each control's own options
 

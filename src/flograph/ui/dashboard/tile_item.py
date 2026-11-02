@@ -38,7 +38,8 @@ from ..slicer_list import SlicerPanel
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
-    "control", "report", "image", "pdf", "wiki", "note", "pagelinks"})
+    "control", "form", "report", "image", "pdf", "wiki", "note",
+    "pagelinks"})
 
 
 def is_tile_able(node) -> bool:
@@ -165,8 +166,12 @@ def default_tile_size(node) -> tuple[float, float]:
         return (float(node.params.get("width", 320) or 320),
                 float(node.params.get("height", 240 if kind == "image" else 420)
                       or 240) + TITLE_H)
-    if kind == "control":
-        from ..controls import control_size
+    if kind in ("control", "form"):
+        from ..controls import FORM_SIZE, control_size
+        if kind == "form":
+            width = float(node.params.get("width", FORM_SIZE[0]) or FORM_SIZE[0])
+            height = float(node.params.get("height", FORM_SIZE[1]) or FORM_SIZE[1])
+            return (width, height + TITLE_H)
         width, height = control_size(node.spec.control or "")
         return (width, height + TITLE_H)
     return (420.0, 320.0)
@@ -596,7 +601,7 @@ class TileItem(QGraphicsObject):
             node = self._node()
             full = WikiView(
                 folder=str((node.params.get("folder", "") if node else "") or ""),
-                show_nav=True)  # a full screen has room for the tree
+                show_nav=True, editable=True)  # a full screen has room for the tree
             slug = self._wiki_view.current_slug()
             if slug:
                 full.show_page(slug)
@@ -628,6 +633,7 @@ class TileItem(QGraphicsObject):
             "kpi": "kpi",
             "slicer": "slicer",
             "control": "control",
+            "form": "control",
             "image": "image",
             "pdf": "pdf",
             "note": "note",
@@ -708,7 +714,8 @@ class TileItem(QGraphicsObject):
             node = self._node()
             widget = WikiView(
                 folder=str((node.params.get("folder", "") if node else "") or ""),
-                show_nav=bool(node.params.get("show_nav", True)) if node else True)
+                show_nav=bool(node.params.get("show_nav", True)) if node else True,
+                editable=True)
             page = str((node.params.get("page", "") if node else "") or "")
             if page:
                 widget.show_page(page)
@@ -1137,11 +1144,15 @@ class TileItem(QGraphicsObject):
             # a control holds its own value, so like a Table tile there is
             # nothing to wait for — it's live the moment it's placed. A run
             # only ever refreshes the options a Choice offers.
-            from flograph.engine.introspect import control_upstream
+            from flograph.engine.introspect import control_upstream, form_upstream
             self._placeholder.hide()
             self._control_widget.sync(node.params)
-            self._control_widget.set_upstream(control_upstream(
-                self._graph, self._engine.cache, self.tile.node_id))
+            upstream = (form_upstream(self._graph, self._engine.cache,
+                                      self.tile.node_id)
+                        if node.spec.card == "form" else
+                        control_upstream(self._graph, self._engine.cache,
+                                         self.tile.node_id))
+            self._control_widget.set_upstream(upstream)
             widget.show()
         elif kind == "report":
             # like a Table tile there is nothing to wait for: the text is a

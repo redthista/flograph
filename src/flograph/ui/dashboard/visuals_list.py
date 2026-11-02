@@ -40,6 +40,7 @@ _KIND_GLYPHS = {
     # carry those, and a fourth would be four marks nobody can tell apart
     # at 9pt
     "control": "⇵",
+    "form": "▧",
     "button": "▶",
     # a pilcrow: a paragraph of text, which is all a note is
     "note": "¶",
@@ -61,6 +62,7 @@ KIND_LABELS = {
     "wiki": "Wiki",
     "slicer": "Slicer",
     "control": "Input control",
+    "form": "User Form",
     "button": "Button",
     "note": "Note",
     "pagelinks": "Page links",

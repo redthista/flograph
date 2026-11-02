@@ -1044,7 +1044,8 @@ class NodeItem(QGraphicsObject):
         self.pdf_card = kind == "pdf"
         self.image_card = kind == "image" or self.pdf_card
         self.slicer = kind == "slicer"
-        self.control = kind == "control"
+        self.form = kind == "form"
+        self.control = kind in ("control", "form")
         # Goto/From: the two ends of a link the canvas doesn't draw
         self.goto_card = kind == "goto"
         self.from_card = kind == "from"
@@ -2273,7 +2274,8 @@ class NodeItem(QGraphicsObject):
     def _build_wiki_widget(self) -> None:
         from ..wiki import WikiView
         view = WikiView(folder=self._wiki_folder(),
-                        show_nav=bool(self.node.params.get("show_nav", True)))
+                        show_nav=bool(self.node.params.get("show_nav", True)),
+                        editable=True)
         self._wiki_view = view
         page = str(self.node.params.get("page", "") or "")
         if page:
@@ -2758,12 +2760,17 @@ class NodeItem(QGraphicsObject):
     # -------------------------------------------------------------- controls
 
     def _control_default_size(self) -> tuple[float, float]:
-        from ..controls import control_size
+        from ..controls import FORM_SIZE, control_size
+        if self.form:
+            return FORM_SIZE
         return control_size(self.node.spec.control or "")
 
     def _control_ceiling(self) -> tuple[float, float]:
         """(max_w, max_h) a control card may be resized to — the node's own
         width/height PARAMS say the same (test_card_size_limits)."""
+        if self.form:
+            from ..controls import FORM_MAX_SIZE
+            return FORM_MAX_SIZE
         if self.node.spec.control in TALL_CONTROLS:
             return TALL_CONTROL_MAX_W, TALL_CONTROL_MAX_H
         return CONTROL_MAX_W, CONTROL_MAX_H

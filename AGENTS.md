@@ -119,7 +119,7 @@ since it is the only explanation a user can reach from the canvas.
 
 Optional `NODE["card"]` gives a node a rich canvas card / dashboard tile
 (`figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`, `button`,
-`note`, `control`, ...). `card: "control"` additionally requires
+`note`, `control`, `form`, ...). `card: "control"` additionally requires
 `NODE["control"]` naming the widget shape (`slider`, `number`, `text`,
 `date`, `toggle`, `choice`) — one host in `ui/controls.py` renders all of
 them from that plus `PARAMS`, so a new control node is usually just a
@@ -129,6 +129,9 @@ may also come from its own optional input ports, resolved by
 `run()` must agree on — option lists, bounds, clamping — lives in
 `core/controls.py` and is never duplicated: if they disagree, the card
 shows one number and the flow carries another.
+`card: "form"` is a submit-only typed record editor. Its schema and value
+coercion live in Qt-free `core/form.py`; the shared `FormControl` host is
+used by both canvas and dashboard tiles.
 Relevant skills: `.opencode/skills/new-node/` and `.opencode/skills/flograph/`.
 
 **The Table grid's commands live once**, as QActions in

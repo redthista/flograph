@@ -341,7 +341,8 @@ search box narrows the whole tree to favorites only. Favorites persist
 per-machine in settings.
 
 **Input** — Slider, Between Slider, Number, Text, Date, Date Range, Time,
-Date & Time, Toggle, Choice, Multi Choice, Checklist, Colour, File, Input Panel.
+Date & Time, Toggle, Choice, Multi Choice, Checklist, Colour, File, Input Panel,
+User Form and Form from Table.
 
 **IO** — **Read File** reads CSV, Excel, JSON (incl. JSONL), Parquet and
 SQLite through one node: pick the **Format** (or leave it on *auto* and let

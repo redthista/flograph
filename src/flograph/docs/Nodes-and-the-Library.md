@@ -38,8 +38,11 @@ version.
 
 ## The standard library
 
-**Input** — Slider, Between Slider, Number, Text, Date, Toggle, Choice. You
-*set* these rather than compute them; see [[Dashboards and Reports]].
+**Input** — Slider, Between Slider, Number, Text, Date, Toggle, Choice and
+Input Panel. **User Form** collects a typed record when submitted; **Form
+from Table** writes a matching field schema from a DataFrame. You *set*
+these rather than compute them; see [[Input Controls]] and
+[[Dashboards and Reports]].
 
 **IO** — **Read File** reads CSV, Excel, JSON/JSONL, Parquet and SQLite
 through one node: pick the **Format** (or leave it *auto*) and the **Engine**

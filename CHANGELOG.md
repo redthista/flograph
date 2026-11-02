@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | **User Form and Form from Table** | Collect a typed record on a canvas card or dashboard tile, submit it as one dict, and derive its field schema from a table. Load remains disabled while its target-output mapping is unresolved (#5, work in progress). |
 | Dev | **Report refresh test waits for layout** | Removes an adaptive debounce from the cosmetic-change propagation check and waits for the actual preview job, so load-dependent rendering time cannot consume its old two-second budget (#100). |
 | Dev | **Complete Qt teardown between tests** | Explicitly drains deferred Qt deletions so long serial runs release old windows between tests and do not inherit their cleanup during a later worker result (#99). |
 | Fix | **Cached results distinguish wire ports** | Swapping input wires or choosing another output from the same source now invalidates cached results and flags affected frozen results. Unfrozen results on ambiguous legacy wiring re-run once; frozen values stay pinned but older multi-port pins may need review. Simple single-input/single-output chains keep their existing fingerprints (#97). |
