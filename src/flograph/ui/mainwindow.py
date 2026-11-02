@@ -224,6 +224,8 @@ class MainWindow(QMainWindow):
         # when idle; while up, Save/Open-a-second-save and starting a run
         # wait for it (see _cache_still_writing) rather than racing it.
         self._cache_save_signals: Optional[CacheSaveSignals] = None
+        self._save_failed = False
+        self._confirming_discard = False
         # Nodes already told about, this session, as having a result a save
         # could not store — so a flow that always holds one is told once,
         # not on every Ctrl+S.
@@ -6312,23 +6314,36 @@ class MainWindow(QMainWindow):
             title_bar.refresh_title()
 
     def _confirm_discard(self) -> bool:
-        if self.undo_stack.isClean():
-            return True
-        answer = QMessageBox.question(
-            self, "Unsaved changes",
-            "The project has unsaved changes. Save them first?",
-            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-            QMessageBox.Save)
-        if answer == QMessageBox.Save:
-            return self._save()
-        return answer == QMessageBox.Discard
+        # flograph issue #92: starting a save is not permission to replace
+        # its graph. Keep the outgoing project until the write succeeds.
+        if self._confirming_discard:
+            return False
+        self._confirming_discard = True
+        try:
+            if not self._wait_for_cache_save():
+                return False
+            if self.undo_stack.isClean():
+                return True
+            answer = QMessageBox.question(
+                self, "Unsaved changes",
+                "The project has unsaved changes. Save them first?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save)
+            if answer == QMessageBox.Save:
+                return (self._save() and self._wait_for_cache_save()
+                        and not self._save_failed and self.undo_stack.isClean())
+            return answer == QMessageBox.Discard
+        finally:
+            self._confirming_discard = False
 
     def closeEvent(self, event) -> None:
         if not self.confirm_close or self._confirm_discard():
             self._wait_for_cache_load()
             # "Save them first?" may just have started a background cache
             # write; see it out or the side-car it was writing is lost.
-            self._wait_for_cache_save()
+            if not self._wait_for_cache_save():
+                event.ignore()
+                return
             self._save_window_state()
             self._report_exporter.close()
             event.accept()
@@ -6844,8 +6859,7 @@ class MainWindow(QMainWindow):
         # One atomic .flograph bundle (graph + cached results), written off
         # the GUI thread.
         self._push_recent(self._project_path)
-        self._start_project_save(carry_from or self._project_path)
-        return True
+        return self._start_project_save(carry_from or self._project_path)
 
     def _export_workflow(self) -> bool:
         """Write the graph alone to a `.flowf` file — no cached results,
@@ -6874,7 +6888,7 @@ class MainWindow(QMainWindow):
         self.show_status(f"Exported workflow to {path}", 4000)
         return True
 
-    def _start_project_save(self, carry_from: str) -> None:
+    def _start_project_save(self, carry_from: str) -> bool:
         """Write the .flograph bundle off the GUI thread, with progress on
         the line.
 
@@ -6886,6 +6900,7 @@ class MainWindow(QMainWindow):
         it no longer copies the previous file's. `carry_from` is the file
         unchanged blobs are copied from — the same path on a plain Save, the
         old path on Save As."""
+        self._save_failed = False
         path = self._project_path
         self._capture_view_state()
         plan = cache_persistence.plan_project_save(
@@ -6902,13 +6917,14 @@ class MainWindow(QMainWindow):
                     path, plan, prev_path=carry_from,
                     compress=self.cache_compression_enabled)
             except OSError as exc:
+                self._save_failed = True
                 QMessageBox.critical(self, "Save failed", save_failure_text(
                     f'"{path}"', exc))
-                return
+                return False
             if self.undo_stack.index() == self._save_clean_index:
                 self.undo_stack.setClean()
             self._announce_saved()
-            return
+            return True
 
         signals = CacheSaveSignals(parent=self)
         signals.progressed.connect(self._on_cache_save_progress)
@@ -6924,6 +6940,7 @@ class MainWindow(QMainWindow):
             CacheSaveRunnable(path, plan, signals,
                               compress=self.cache_compression_enabled,
                               prev_path=carry_from))
+        return True
 
     def _set_titlebar_saving(self, saving: bool) -> None:
         title_bar = getattr(self, "_title_bar", None)
@@ -6947,6 +6964,7 @@ class MainWindow(QMainWindow):
             signals.progressed.disconnect()
             signals.skipped.disconnect()
             signals.finished.disconnect()
+        self._save_failed = bool(error)
         if error:
             QMessageBox.critical(self, "Save failed", error)
             return
@@ -6998,23 +7016,33 @@ class MainWindow(QMainWindow):
             4000)
         return True
 
-    def _wait_for_cache_save(self) -> None:
-        """On close: pump events until the background cache write lands.
+    def _wait_for_cache_save(self) -> bool:
+        """Finish the outgoing save before Open, New, an example or Close.
 
-        Closing right after "Save them first?" would otherwise tear down the
-        window under a runnable that may be halfway through writing blobs —
-        atomic per blob, but a manifest that never gets written throws away
-        the whole side-car's worth of work. Bounded like
-        _wait_for_cache_load, for the same reason."""
+        The modal progress window keeps Qt responsive without allowing edits
+        or a second project switch during the wait. Cancel stays in the
+        current project; the writer and its completion handlers stay alive.
+        """
         if self._cache_save_signals is None:
-            return
-        deadline = time.monotonic() + 60
-        while self._cache_save_signals is not None and time.monotonic() < deadline:
-            QApplication.processEvents(QEventLoop.WaitForMoreEvents, 200)
-        signals, self._cache_save_signals = self._cache_save_signals, None
-        if signals is not None:
-            signals.progressed.disconnect()
-            signals.finished.disconnect()
+            return True
+        from PySide6.QtWidgets import QProgressDialog
+
+        dialog = QProgressDialog(
+            "Finishing the current project's save…", "Stay in project",
+            0, 0, self)
+        dialog.setWindowTitle("Saving project")
+        dialog.setWindowModality(Qt.ApplicationModal)
+        dialog.setMinimumDuration(0)
+        dialog.show()
+        try:
+            while self._cache_save_signals is not None:
+                QApplication.processEvents(QEventLoop.WaitForMoreEvents, 100)
+                if dialog.wasCanceled():
+                    return False
+            return not self._save_failed
+        finally:
+            dialog.close()
+            dialog.deleteLater()
 
     def _save_as(self) -> bool:
         # Before the dialog and before _project_path moves: refusing after

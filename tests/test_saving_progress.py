@@ -337,3 +337,151 @@ class TestDiskWatchWiring:
         window._new_project()
         assert window.resource_monitor._disk_path is None
         assert window.resource_monitor._disk_drive is None
+
+class TestSaveBeforeProjectSwitch:
+    """flograph issue #92: finish saving the outgoing graph first."""
+
+    @pytest.mark.parametrize("action", ["open", "new", "example", "close"])
+    def test_save_finishes_before_leaving_the_current_project(
+            self, action, qtbot, window, cached_constant, monkeypatch, tmp_path):
+        from PySide6.QtCore import QTimer
+        from flograph.ui.commands import SetParamCommand
+
+        outgoing = tmp_path / "outgoing.flograph"
+        incoming = tmp_path / "incoming.flograph"
+        serialization.save(Graph(), incoming)
+        window._project_path = str(outgoing)
+        window.undo_stack.push(SetParamCommand(
+            window.graph, cached_constant.id, "value", "changed"))
+        monkeypatch.setattr(mod.QMessageBox, "question",
+                            lambda *a, **k: mod.QMessageBox.Save)
+        original_write = cache_persistence.write_project
+        started, release = threading.Event(), threading.Event()
+        observed = []
+
+        def delayed_write(*args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise OSError("test did not release save")
+            return original_write(*args, **kwargs)
+
+        def inspect_then_release():
+            if not started.is_set():
+                QTimer.singleShot(10, inspect_then_release)
+                return
+            observed.append((window._project_path,
+                             cached_constant.id in window.graph.nodes))
+            release.set()
+
+        monkeypatch.setattr(cache_persistence, "write_project", delayed_write)
+        QTimer.singleShot(10, inspect_then_release)
+        try:
+            if action == "open":
+                assert window.open_path(str(incoming))
+            elif action == "new":
+                window._new_project()
+            elif action == "example":
+                window._open_example(incoming)
+            else:
+                window.confirm_close = True
+                from PySide6.QtGui import QCloseEvent
+                event = QCloseEvent()
+                window.closeEvent(event)
+                assert event.isAccepted()
+            qtbot.waitUntil(lambda: bool(observed), timeout=6000)
+            assert observed == [(str(outgoing), True)]
+            assert window._cache_save_signals is None
+            saved = serialization.load(outgoing, window.registry)
+            assert saved.nodes[cached_constant.id].params["value"] == "changed"
+        finally:
+            release.set()
+            window.confirm_close = False
+
+    @pytest.mark.parametrize("cached", [False, True])
+    def test_failed_save_keeps_the_current_project(
+            self, cached, qtbot, window, registry, monkeypatch, tmp_path):
+        from flograph.ui.commands import SetParamCommand
+
+        node = window.graph.add_node(
+            registry.instantiate("flograph.util.constant"))
+        window.undo_stack.push(SetParamCommand(window.graph, node.id,
+                                               "value", "keep me"))
+        if cached:
+            window.engine.cache.set(node.id, {"value": "keep me"}, wall_time=0.01)
+        outgoing = tmp_path / "outgoing.flograph"
+        incoming = tmp_path / "incoming.flograph"
+        serialization.save(Graph(), incoming)
+        window._project_path = str(outgoing)
+        errors = []
+        monkeypatch.setattr(mod.QMessageBox, "question",
+                            lambda *a, **k: mod.QMessageBox.Save)
+        monkeypatch.setattr(mod.QMessageBox, "critical",
+                            lambda *a: errors.append(a[1]))
+
+        def fail(*args, **kwargs):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(cache_persistence, "write_project", fail)
+        assert window.open_path(str(incoming)) is False
+        assert window._project_path == str(outgoing)
+        assert node.id in window.graph.nodes
+        assert not window.undo_stack.isClean()
+        assert errors == ["Save failed"]
+
+    def test_cancelling_the_wait_leaves_the_save_connected(
+            self, qtbot, window, cached_constant, monkeypatch, tmp_path):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QProgressDialog
+
+        window._project_path = str(tmp_path / "outgoing.flograph")
+        release = threading.Event()
+        original_write = cache_persistence.write_project
+
+        def delayed_write(*args, **kwargs):
+            if not release.wait(5):
+                raise OSError("test did not release save")
+            return original_write(*args, **kwargs)
+
+        monkeypatch.setattr(cache_persistence, "write_project", delayed_write)
+        assert window._save()
+        signals = window._cache_save_signals
+        QTimer.singleShot(10, lambda: window.findChild(QProgressDialog).cancel())
+        try:
+            assert window._confirm_discard() is False
+            assert window._cache_save_signals is signals
+            assert cached_constant.id in window.graph.nodes
+        finally:
+            release.set()
+            qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                            timeout=6000)
+        assert window.status_message().startswith("Saved ")
+
+    def test_clean_project_also_finishes_a_save_already_in_flight(
+            self, qtbot, window, cached_constant, monkeypatch, tmp_path):
+        from PySide6.QtCore import QTimer
+
+        outgoing = tmp_path / "outgoing.flograph"
+        incoming = tmp_path / "incoming.flograph"
+        serialization.save(Graph(), incoming)
+        window._project_path = str(outgoing)
+        release = threading.Event()
+        original_write = cache_persistence.write_project
+
+        def delayed_write(*args, **kwargs):
+            if not release.wait(5):
+                raise OSError("test did not release save")
+            return original_write(*args, **kwargs)
+
+        monkeypatch.setattr(cache_persistence, "write_project", delayed_write)
+        monkeypatch.setattr(mod.QMessageBox, "question",
+                            lambda *a, **k: pytest.fail("clean project prompted"))
+        assert window.undo_stack.isClean()
+        assert window._save()
+        QTimer.singleShot(10, release.set)
+        try:
+            assert window.open_path(str(incoming))
+            assert window._cache_save_signals is None
+            assert container.is_bundle(outgoing)
+            assert window._project_path == str(incoming)
+        finally:
+            release.set()

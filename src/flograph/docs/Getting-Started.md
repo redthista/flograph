@@ -74,8 +74,12 @@ in: open one, click a node to see the data on it, press **F5** to re-run.
 5. **Run.** **F5** runs everything; **F6** runs just the selection;
    right-click a node for *Run to this node*. Status lights read at a glance:
    grey idle, yellow queued, pulsing blue running, green done, red error.
-6. **Save.** **Ctrl+S** writes a `.flograph` file (plain JSON). Results are
-   cached beside it, so reopening restores them without a re-run.
+6. **Save.** **Ctrl+S** writes a `.flograph` bundle containing the workflow
+   and its saved results, so reopening can restore them without a re-run.
+   If you choose **Save** before opening another project, creating a new
+   one, opening an example or closing, flograph finishes the save first.
+   A failed save keeps the current project open. **Stay in project** stops
+   the switch while the background save continues.
 
 ## Where to go next
 
