@@ -147,6 +147,11 @@ class TestBundledExamples:
         # the load/layout checks below.
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
+        if name == "38_machine_learning.flograph":
+            # The example trains real estimators; keep the default dev suite
+            # usable without the optional ML and Plotly extras.
+            pytest.importorskip("sklearn")
+            pytest.importorskip("plotly")
         window._open_example(template_path(name))
         assert window.graph.nodes
         assert not any(n.spec.broken for n in window.graph.nodes.values())
