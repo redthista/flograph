@@ -482,11 +482,15 @@ class TestCosmeticChangesStillReachTheViews:
         page.refresh_preview()
         assert page.preview.document().toHtml().count("<td") == 0
 
+        # flograph issue #100: the adaptive debounce can consume 1.5 s by
+        # itself. This checks automatic refresh, not that delay or the
+        # machine's rasterization speed; wait for the actual layout to land.
+        page._timer.setInterval(0)
         source.dirty = False        # nodes are born dirty; start from clean
         window.graph.set_param(source.id, "columns", 2)
         qtbot.waitUntil(
-            lambda: page.preview.document().toHtml().count("<td") == 4,
-            timeout=2000)
+            lambda: not page.preview_busy(), timeout=20000)
+        assert page.preview.document().toHtml().count("<td") == 4
         assert not source.dirty          # ...and it never ran to do it
 
     def test_a_report_card_re_renders(self, window):

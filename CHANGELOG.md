@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Dev | **Report refresh test waits for layout** | Removes an adaptive debounce from the cosmetic-change propagation check and waits for the actual preview job, so load-dependent rendering time cannot consume its old two-second budget (#100). |
 | Dev | **Complete Qt teardown between tests** | Explicitly drains deferred Qt deletions so long serial runs release old windows between tests and do not inherit their cleanup during a later worker result (#99). |
 | Dev | **Memory-aware test runner** | Caps parallel workers by available RAM and, on Linux with user systemd, limits memory for the whole test run with swap disabled (#95). |
 | Feature | **Date Arithmetic and Complete Date Range** | Two Transform nodes for dates. **Date Arithmetic** gives the gap between a start column and an end column, a fixed end date, or today — in days, business days (Mon–Fri), weeks, months or years, whole completed steps, negative when the end is first — or **shifts** every date by an amount of any of those units (31 Jan + 1 month = 28 Feb). **Complete Date Range** adds the rows a daily, weekly, monthly, quarterly or yearly series is missing, per group if you pick *Group by* columns, over each group's own span, the whole table's, or an explicit From/To; the added rows are left empty, set to 0, or carry the last real row forward. |
