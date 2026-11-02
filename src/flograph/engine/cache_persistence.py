@@ -1066,6 +1066,51 @@ def load_outputs(project_path: str | Path, node_id: str) -> Any:
     return normalize_strings(load_blob(project_path, node_id))
 
 
+def load_cached_outputs(graph: Graph, project_path: str | Path,
+                        node_id: str) -> Optional[dict[str, Any]]:
+    """Load one current cached node output, following aliases as needed.
+
+    This is for callers that need one named result from a saved project,
+    without restoring every cache blob into memory. Invalid or unreadable
+    entries return None so the caller can run the graph instead.
+    """
+    try:
+        entries = resolve_entries(graph, project_path)
+    except Exception:
+        return None
+    metas = dict(entries)
+    if node_id not in metas:
+        return None
+    visiting: set[str] = set()
+
+    def read(current: str) -> Optional[dict[str, Any]]:
+        if current in visiting:
+            return None
+        meta = metas.get(current)
+        if not isinstance(meta, dict):
+            return None
+        visiting.add(current)
+        try:
+            alias = meta.get("alias")
+            if isinstance(alias, dict):
+                if not _alias_matches_source(meta, metas):
+                    return None
+                source = read(str(alias.get("node", "")))
+                port, output_port = alias.get("port"), alias.get("as")
+                if (source is None or port not in source
+                        or not isinstance(output_port, str)):
+                    return None
+                return {output_port: source[port]}
+            outputs = load_outputs(project_path, current)
+            return outputs if isinstance(outputs, dict) else None
+        except Exception:
+            return None
+        finally:
+            visiting.discard(current)
+
+    return read(node_id)
+
+
 def register_cache(graph: Graph, cache: OutputCache,
                    project_path: str | Path) -> list[str]:
     """Register every still-valid cache entry *without loading anything*.

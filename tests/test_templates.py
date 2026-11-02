@@ -76,11 +76,13 @@ class TestBundledExamples:
             "35_chart_rules.flograph",
             "36_table_totals.flograph",
             "37_input_panel.flograph",
+            "38_run_flow_child.flograph",
+            "39_run_flow_parent.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 37
+        assert len(window._examples_menu.actions()) == 39
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -126,6 +128,7 @@ class TestBundledExamples:
         "36_table_totals.flograph",
         # 37's two tables are its own; the panel and Apply Filters are pandas
         "37_input_panel.flograph",
+        "38_run_flow_child.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
@@ -150,6 +153,17 @@ class TestBundledExamples:
         window._project_path = str(tmp_path / "existing.flograph")
         window._open_example(template_path("01_load_filter_visualize.flograph"))
         assert window._project_path is None
+
+    def test_run_flow_tutorial_parent_returns_child_value(
+            self, qtbot, window):
+        window._open_example(template_path("39_run_flow_parent.flograph"))
+        node = next(n for n in window.graph.nodes.values()
+                    if n.type_id == "flograph.scripting.run_flow")
+        window.graph.set_param(
+            node.id, "project", str(template_path("38_run_flow_child.flograph")))
+
+        assert wait_run(qtbot, window.engine)
+        assert window.engine.cache.outputs_for(node.id)["value"] == 42
 
     def test_web_library_visuals_loads_and_is_wired(self, qtbot, window):
         """Template 24 can't be *run* here — its visuals need a downloaded

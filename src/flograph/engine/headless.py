@@ -4,6 +4,10 @@
     flograph run project.flograph --var region=North
     python -m flograph.engine.headless project.flograph   # same thing, longhand
 
+The internal ``--capture-output NAME --capture-file PATH`` options return
+the value from the named Flow Output node to a Run Flow parent node. They
+use a current saved result when available; ``--always-run`` bypasses it.
+
 `--var name=value` overrides what the project's Variables node declares, so
 one flow becomes a parameterisable job: the same canvas, run per region or
 per date by a scheduler, with nothing edited in between. Repeat the flag for
@@ -29,10 +33,14 @@ from flograph.paths import user_data_dir, user_nodes_dir
 from .scheduler import ExecutionEngine
 
 
-def parse_args(argv: list[str]) -> tuple[str, dict[str, str]]:
-    """`(project path, overrides)`, or ValueError with what was wrong."""
+def parse_args(
+        argv: list[str]
+        ) -> tuple[str, dict[str, str], str | None, str | None, bool]:
+    """`(project, vars, output name, output file, always run) or ValueError."""
     project = None
     overrides: dict[str, str] = {}
+    output_name = output_file = None
+    always_run = False
     rest = list(argv)
     while rest:
         arg = rest.pop(0)
@@ -46,6 +54,30 @@ def parse_args(argv: list[str]) -> tuple[str, dict[str, str]]:
                 raise ValueError(f"expected --var name=value, got {arg!r}")
             overrides[name] = value
             continue
+        if arg in ("--capture-output", "--capture-file"):
+            if not rest:
+                raise ValueError(f"{arg} needs a value")
+            value = rest.pop(0)
+            if not value or value.startswith("-"):
+                raise ValueError(f"{arg} needs a value")
+            if arg == "--capture-output":
+                output_name = value
+            else:
+                output_file = value
+            continue
+        if arg.startswith("--capture-output="):
+            output_name = arg.partition("=")[2]
+            if not output_name:
+                raise ValueError("--capture-output needs a value")
+            continue
+        if arg.startswith("--capture-file="):
+            output_file = arg.partition("=")[2]
+            if not output_file:
+                raise ValueError("--capture-file needs a value")
+            continue
+        if arg == "--always-run":
+            always_run = True
+            continue
         if arg.startswith("-"):
             raise ValueError(f"unknown option {arg!r}")
         if project is not None:
@@ -53,7 +85,11 @@ def parse_args(argv: list[str]) -> tuple[str, dict[str, str]]:
         project = arg
     if project is None:
         raise ValueError("no project file given")
-    return project, overrides
+    if (output_name is None) != (output_file is None):
+        raise ValueError("--capture-output and --capture-file must be used together")
+    if always_run and output_name is None:
+        raise ValueError("--always-run requires output capture")
+    return project, overrides, output_name, output_file, always_run
 
 
 def apply_overrides(graph, overrides: dict[str, str]) -> None:
@@ -99,9 +135,11 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if any(a in ("-h", "--help") for a in argv):
         print(__doc__.strip())
+        print("\nInternal output capture: --capture-output NAME --capture-file PATH"
+              " [--always-run]")
         return 0
     try:
-        project, overrides = parse_args(argv)
+        project, overrides, output_name, output_file, always_run = parse_args(argv)
     except ValueError as exc:
         print(f"{exc}\n\n{__doc__.strip()}", file=sys.stderr)
         return 2
@@ -120,6 +158,30 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    output_node_id = None
+    if output_name is not None:
+        matches = [node_id for node_id, node in graph.nodes.items()
+                   if node.type_id == "flograph.scripting.flow_output"
+                   and str(node.params.get("name", "")).strip() == output_name]
+        if len(matches) != 1:
+            reason = "was not found" if not matches else "is ambiguous"
+            print(f"flow output {output_name!r} {reason}", file=sys.stderr)
+            return 1
+        output_node_id = matches[0]
+        if not always_run:
+            from .cache_persistence import load_cached_outputs
+            cached = load_cached_outputs(graph, project, output_node_id)
+            if cached is not None and "value" in cached:
+                try:
+                    from .cache_persistence import _dump
+                    with open(output_file, "wb") as stream:
+                        _dump(cached["value"], stream)
+                except Exception as exc:
+                    print(f"couldn't capture cached flow output: {exc}",
+                          file=sys.stderr)
+                    return 1
+                print(f"using saved output {output_name!r}", file=sys.stderr)
+                return 0
     engine = ExecutionEngine(graph)
 
     engine.node_log.connect(
@@ -148,7 +210,21 @@ def main(argv: list[str] | None = None) -> int:
 
     done = sum(1 for n in graph.nodes.values() if n.status == NodeStatus.DONE)
     print(f"{done}/{len(graph.nodes)} nodes completed", file=sys.stderr)
-    return 0 if result.get("ok") else 1
+    if not result.get("ok"):
+        return 1
+    if output_node_id is not None:
+        try:
+            outputs = engine.cache.outputs_for(output_node_id)
+            if "value" not in outputs:
+                raise ValueError("the Flow Output node produced no value")
+            from .cache_persistence import _dump
+            with open(output_file, "wb") as stream:
+                _dump(outputs["value"], stream)
+        except Exception as exc:
+            print(f"couldn't capture flow output {output_name!r}: {exc}",
+                  file=sys.stderr)
+            return 1
+    return 0
 
 
 if __name__ == "__main__":

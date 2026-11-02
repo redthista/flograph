@@ -1,0 +1,137 @@
+{
+  "flograph_version": "0.1.31",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "cc9142683c4440ada225f7e2985fd300",
+        "type": "flograph.input.number",
+        "pos": [
+          0,
+          150
+        ],
+        "params": {
+          "caption": "Value to return",
+          "value": 42.0,
+          "minimum": -1000000.0,
+          "maximum": 1000000.0,
+          "step": 1.0,
+          "decimals": 0,
+          "prefix": "",
+          "suffix": "",
+          "thousands": false,
+          "width": 200,
+          "height": 84,
+          "apply": "instantly",
+          "draft": "",
+          "show_reset": false,
+          "variable": "answer",
+          "required": false,
+          "help": "",
+          "accent": ""
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0,
+        "extra_inputs": []
+      },
+      {
+        "id": "795689fa7d9d4dac8b188859f26451d4",
+        "type": "flograph.scripting.flow_output",
+        "pos": [
+          360,
+          150
+        ],
+        "params": {
+          "name": "answer"
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1,
+        "extra_inputs": []
+      },
+      {
+        "id": "c5a60cb7ab5746209fe1819e33b566b5",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "text": "# Child flow\n\nThis flow publishes a value through **Flow Output** under the name `answer`. In **Run Flow**, set Output name to `answer`.\n\nChange **Value to return** and run this flow. Save the project after the run if you want the parent to reuse its saved result. A parent can also pass `answer=73` through Run Flow's **Variables** setting.",
+          "width": 460,
+          "height": 0
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2,
+        "extra_inputs": []
+      }
+    ],
+    "connections": [
+      {
+        "id": "581dab51bc94427f89247604b75291f9",
+        "src": [
+          "cc9142683c4440ada225f7e2985fd300",
+          "value"
+        ],
+        "dst": [
+          "795689fa7d9d4dac8b188859f26451d4",
+          "value"
+        ]
+      }
+    ],
+    "frames": [],
+    "shapes": [],
+    "pages": [],
+    "env_path": ""
+  }
+}

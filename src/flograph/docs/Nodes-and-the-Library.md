@@ -85,8 +85,9 @@ menu.
 **Util** — Constant, Reroute, Note, Action Button, Page Links, Goto, From,
 Variables.
 
-**Scripting** — Python Script, plus Node Template and Control Template to
-fork when writing your own.
+**Scripting** — Python Script, **Run Flow** and **Flow Output** for running a
+child project and returning a named value, plus Node Template and Control
+Template to fork when writing your own.
 
 ## Every node is Python
 

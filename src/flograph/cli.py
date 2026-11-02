@@ -10,8 +10,9 @@
 `run` is the headless path (see `flograph.engine.headless`): it loads the
 file, applies any `--var name=value` overrides, runs the whole graph on a
 `QCoreApplication` — no widgets, no display — and exits non-zero if a node
-failed. It still needs PySide6 installed, because the engine uses Qt signals
-and an event loop; it does not need a screen. Anything that is not a
+failed. Run Flow uses internal output-capture flags to return a value from a
+named Flow Output node. It still needs PySide6 installed, because the engine
+uses Qt signals and an event loop; it does not need a screen. Anything that is not a
 recognised subcommand or flag opens the GUI, so `flograph` and
 `flograph some.flograph` behave exactly as before.
 """

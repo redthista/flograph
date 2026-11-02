@@ -1,0 +1,81 @@
+{
+  "flograph_version": "0.1.31",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "78a0ca2cab1140d09e291930c8e9f163",
+        "type": "flograph.scripting.run_flow",
+        "pos": [
+          0,
+          150
+        ],
+        "params": {
+          "project": "",
+          "output": "answer",
+          "timeout": 60,
+          "always_run": false,
+          "variables": ""
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0,
+        "extra_inputs": []
+      },
+      {
+        "id": "86996741a9884da08632c675c6eb7cab",
+        "type": "flograph.util.note",
+        "pos": [
+          430,
+          70
+        ],
+        "params": {
+          "text": "# Run another flow\n\nIn **Run Flow**, browse to `38_run_flow_child.flograph` in the examples folder, then run this flow. The child runs in its own process; its named `answer` value returns on the `value` output.\n\nThe first run executes the child. Save the child after a run to let Run Flow reuse its current saved result; turn on **Always run child** for a fresh run. Set **Variables** to `answer=73` to override the child's Number control. Set a timeout to stop a long child run.",
+          "width": 460,
+          "height": 0
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1,
+        "extra_inputs": []
+      }
+    ],
+    "connections": [],
+    "frames": [],
+    "shapes": [],
+    "pages": [],
+    "env_path": ""
+  }
+}

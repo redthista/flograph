@@ -351,11 +351,22 @@ class TestHeadlessVar:
     def test_parses_both_flag_forms(self):
         assert headless.parse_args(
             ["a.flograph", "--var", "x=1", "--var=y=2"]
-        ) == ("a.flograph", {"x": "1", "y": "2"})
+        ) == ("a.flograph", {"x": "1", "y": "2"}, None, None, False)
 
     def test_a_value_may_contain_equals(self):
-        _, overrides = headless.parse_args(["a.flograph", "--var", "q=a=b"])
+        _, overrides, _, _, _ = headless.parse_args(
+            ["a.flograph", "--var", "q=a=b"])
         assert overrides == {"q": "a=b"}
+
+    def test_parses_a_named_output_capture(self):
+        assert headless.parse_args([
+            "a.flograph", "--capture-output", "table",
+            "--capture-file", "result.pkl",
+        ]) == ("a.flograph", {}, "table", "result.pkl", False)
+
+    def test_requires_both_output_capture_flags(self):
+        with pytest.raises(ValueError, match="must be used together"):
+            headless.parse_args(["a.flograph", "--capture-output", "table"])
 
     @pytest.mark.parametrize("argv", [
         [], ["a", "b"], ["a", "--var"], ["a", "--var", "nope"], ["a", "--x"],

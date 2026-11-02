@@ -409,8 +409,9 @@ document, in a real browser, refreshed in place when the flow re-runs.
 
 **Util** — Constant, Reroute, Note, Action Button, Goto, From, Variables.
 
-**Scripting** — Python Script, plus Node Template and Control Template to
-fork when you're writing your own.
+**Scripting** — Python Script, **Run Flow** and **Flow Output** for running a
+child project and returning a named value, plus Node Template and Control
+Template to fork when you're writing your own.
 
 ---
 

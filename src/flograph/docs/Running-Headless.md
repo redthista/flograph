@@ -23,6 +23,24 @@ python -m flograph run project.flograph             # equivalent
 `flograph` with no `run` subcommand — or with a path, `--version`, or nothing
 — opens the GUI exactly as before.
 
+## Run one flow from another
+
+Use **Flow Output** in the child project to mark a value that can travel back
+to its parent. Give it a name, such as `result`. In the parent project, add a
+**Run Flow** node, browse to the child `.flograph` or `.flowf`, and enter that
+output name. Its `value` output carries the selected value into the parent
+graph. A child can expose several values through Flow Output nodes with
+different names. Run Flow uses that value from the child's saved cache when
+the graph still matches; otherwise it runs the child to produce it. Turn on
+**Always run child** to bypass the saved result.
+
+Run Flow starts the child in a separate process, from the folder containing
+the child project. It waits for the child flow to finish and returns the
+named value; the **Timeout** setting bounds how long it may run. Optional
+**Variables** are written as `name=value`, one per line, and passed as the
+same `--var` overrides accepted by `flograph run`. The whole child graph runs
+when no current saved result is available or **Always run child** is on.
+
 ## From Python
 
 ```python
