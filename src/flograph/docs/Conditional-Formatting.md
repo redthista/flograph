@@ -43,8 +43,20 @@ A rule is `columns  verb  argument`:
 | `on` (in a `=>`) | `profit < 0 => fg red, on totals` | draw on the total rows instead of (or as well as) the data rows |
 
 Tests for a highlight: `> < >= <= = !=`, `between 10 20`, `contains`,
-`starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`.
+`starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`,
+`top N`, `bottom N`.
 `=` and `!=` take a [[#value-patterns|pattern]] — `status = late* => bg red`.
+
+**Best and worst.** `top 5` and `bottom 5` pick out the five largest and
+smallest values of the whole column — or a share of it, `top 10%` — so a
+product list shows its best and worst sellers without a Sort and a Filter:
+
+    units top 5    => row green
+    units bottom 5 => row red
+    product if units top 3 => icon ★ amber
+
+They are measured over the whole table, not the rows on screen, and a value
+tied with the fifth is in too.
 
 Colours are a preset — `green` `red` `amber` `blue` `grey` `purple` — or a
 `#hex`. `bg` takes the preset as a dark fill that text reads on; `fg` (the

@@ -59,7 +59,9 @@ _OPS = [("is greater than", ">"), ("is ≥", ">="), ("is less than", "<"),
         ("contains", "contains"), ("starts with", "starts"),
         ("ends with", "ends"), ("matches (regex)", "matches"),
         ("is between", "between"), ("is empty", "empty"),
-        ("is not empty", "notempty")]
+        ("is not empty", "notempty"),
+        # the value is a count (5) or a share (10%) of the column
+        ("is in the top", "top"), ("is in the bottom", "bottom")]
 #: What a pattern may say, wherever a rule compares a written value with
 #: a cell's. Kept in one place because the condition box and the value→icon
 #: map both say it, and they must not say it differently.
@@ -1625,8 +1627,10 @@ class RuleBuilder(QDialog):
         # only the two that compare a whole value take a pattern; contains
         # and matches are their own kinds of partial match already
         wild = op in ("=", "!=")
+        ranked = op in ("top", "bottom")
         self._val1.setPlaceholderText("late  ·  late*  ·  A?  ·  \"10*\""
-                                      if wild else "")
+                                      if wild else
+                                      "5  ·  10%" if ranked else "")
         self._val1.setToolTip(_WILDCARD_HELP if wild else "")
         self._refresh()
 
@@ -1833,7 +1837,8 @@ class RuleBuilder(QDialog):
             words = {">": ">", ">=": ">=", "<": "<", "<=": "<=", "=": "=",
                      "!=": "!=", "contains": "contains", "starts": "starts with",
                      "ends": "ends with", "matches": "matches",
-                     "empty": "is empty", "notempty": "is not empty"}
+                     "empty": "is empty", "notempty": "is not empty",
+                     "top": "top", "bottom": "bottom"}
             test = _other_col_value(self._hl_test)
             subject = f"{cols} if {quote_column(test)}" if test else cols
             if op in ("empty", "notempty"):

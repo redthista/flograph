@@ -350,7 +350,8 @@ the extension decide) and the **Engine** — *polars* parses in Rust and
 releases the GIL, so several readers genuinely run at once. The single-format
 Read nodes are all still there, as are Write CSV/Excel/Parquet/JSON/SQLite
 and **Write Text**, which puts a string on disk — an exported chart, a
-report, anything a script built. **Save Report** writes a report page to
+report, anything a script built. **Write Excel (Sheets)** puts several
+tables into one workbook, a sheet each, with an optional summary tab. **Save Report** writes a report page to
 HTML or PDF each time the flow runs, after everything the page shows;
 drag a file onto the canvas to get the right reader already configured. **Read
 CSV/Excel/Parquet (Folder)** reads a whole directory as one stacked table, and
@@ -370,7 +371,15 @@ Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,
 Statistics, Data Profile, Numeric Binning (fixed-width, quantile or
 hand-named buckets), Crosstab (a two-way frequency matrix), Period
-Comparison (prior period / year-ago deltas and change).
+Comparison (prior period / year-ago deltas and change), Cohort Analysis
+(first-seen cohorts and the retention matrix).
+
+**ML** — Train/Test Split, Feature Scaler, One-Hot Encode, Label Encode,
+Correlation Matrix, Train Model, Predict, Model Evaluation, Cross-Validation,
+K-Means Clustering and Outlier Detection. A trained model, a fitted scaler or
+encoder is a value like any other: wire it into the next node to reuse it on
+the test rows. Fitting a model needs scikit-learn (the `ml` extra); the
+preparation nodes and Model Evaluation don't.
 
 **Viz** — Show Table, Show Plot (matplotlib, live on-canvas), Show Plotly
 (a real interactive plotly.js chart embedded on the canvas — hover, zoom and
@@ -386,7 +395,10 @@ lines, a note — without touching what it plots), Plotly Table (a table drawn
 as a Plotly figure, for when it has to match the charts beside it rather
 than be read — Show Table is the one for reading), Show Web View (render
 *anything* that produces HTML: folium maps, altair, bokeh, your own
-template), Card (a Power BI-style KPI number),
+template), Card (a Power BI-style KPI number), Sparkline Card, Goal Card
+(against a target or last year, as a change or a progress bar), Status Light,
+Alert List (a "needs attention" tray), Plain-English Summary (the number as
+a sentence),
 Table Spec (the incoming table's structure), Chart per Value and Chart per
 Value (Plotly) — one chart per distinct value of a column, as a stack, in
 either backend, the Plotly one offering the same 28 chart types as Show
@@ -407,7 +419,11 @@ runs nothing and dirties nothing, on a card or a tile alike), Report.
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.
 
-**Util** — Constant, Reroute, Note, Action Button, Goto, From, Variables.
+**Util** — Constant, Reroute, Note, Action Button, Goto, From, Variables,
+As-of Stamp.
+
+**Automation** — Notify, Shell Command, Wait for File, File Operations
+(copy, move, rename, zip or delete, with a dry run).
 
 **Scripting** — Python Script, **Run Flow** and **Flow Output** for running a
 child project and returning a named value, plus Node Template and Control

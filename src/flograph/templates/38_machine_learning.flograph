@@ -1,0 +1,1077 @@
+{
+ "flograph_version": "0.1.31",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "t38_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "text": "# Machine learning, step by step\n\nThis flow is a worked tutorial. Read the notes **top to bottom**: each band is\none chapter, with the explanation on the left and the nodes doing it on the\nright. Press **Run All** (F5), then change things and watch what moves.\n\n**The question.** 160 house sales. Can we predict a house's **price** from\nits size, rooms, age, garden and city (*regression*)? Its price **band**\n(*classification*)? And do the houses fall into natural **groups** nobody\nlabelled (*clustering*)?\n\n**The shape every ML node wants: a tidy table.** One **row per example**\n(one house), one **column per measurement** (a *feature*), and — for\nregression and classification — one column holding the answer you want\npredicted (the *target*). Everything here is a pandas **DataFrame** flowing\ndown a wire; a fitted encoder, scaler or model flows down a wire too, as an\n**object** you plug into the next node.\n\n| Your data | Good fit? | What to do first |\n|---|---|---|\n| numbers (size, age, spend) | yes — the native food | maybe **Feature Scaler** |\n| a few categories (city, plan) | yes | **One-Hot Encode** |\n| ordered or target categories | yes | **Label Encode** |\n| yes / no columns | yes | nothing — read as 0 / 1 |\n| dates | after a step | **Date Part** / **Date Arithmetic** → numbers |\n| a time series | after a step | lags with **Window Function**; split *without* shuffle |\n| gaps (empty cells) | no — refused | **Missing Values** first |\n| free text, images | no — not these nodes | LLM nodes; an image pack |\n\n**How big?** Everything happens in memory on this PC: from a few dozen rows\n(less is guessing) to a few hundred thousand is comfortable.",
+     "width": 1440,
+     "height": 560
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_n1",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     800
+    ],
+    "params": {
+     "text": "## 1 · Know your data\n\n**Houses** is a Table node — type over any cell and everything after it\nre-runs.\n\n**Correlation Matrix** asks which numbers move together. `price_k` against\n`size_m2` is near +1: size will be the strongest clue. Hover a cell for the\npair. Two *features* that are almost +1 with each other say the same thing\ntwice — keep one. It needs **number** columns; text is skipped.\n\n**Outlier Detection** finds rows that don't fit. Row 38 has a price of 4,200\n(someone typed an extra zero). One row like that drags a regression line\ntowards itself and gives K-Means a cluster of one. *IQR* (the default) is\nrobust because the outlier can't stretch the scale it is judged on.\n\nLook at it first (*flag only*, top), then drop it (*drop*, bottom): the\ncleaned table is published as **houses** with a Goto, and every later\nchapter picks it up with a From — no long wires.",
+     "width": 620,
+     "height": 620
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_houses",
+    "type": "flograph.io.table",
+    "pos": [
+     760,
+     800
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"size_m2\", \"type\": \"integer\"}, {\"name\": \"rooms\", \"type\": \"integer\"}, {\"name\": \"age_years\", \"type\": \"integer\"}, {\"name\": \"garden\", \"type\": \"bool\"}, {\"name\": \"city\", \"type\": \"text\"}, {\"name\": \"price_k\", \"type\": \"number\"}, {\"name\": \"band\", \"type\": \"text\"}], \"rows\": [[147, 3, 8, true, \"York\", 541.0, \"over 450k\"], [135, 5, 75, true, \"Leeds\", 444.8, \"300k to 450k\"], [124, 3, 74, true, \"Leeds\", 365.1, \"300k to 450k\"], [61, 1, 67, true, \"York\", 222.9, \"under 300k\"], [135, 3, 78, true, \"Leeds\", 356.1, \"300k to 450k\"], [161, 5, 16, false, \"Hull\", 487.3, \"over 450k\"], [70, 2, 23, true, \"Hull\", 200.4, \"under 300k\"], [165, 4, 55, true, \"Leeds\", 531.7, \"over 450k\"], [81, 2, 66, false, \"York\", 259.4, \"under 300k\"], [117, 3, 54, false, \"Hull\", 300.7, \"300k to 450k\"], [133, 4, 67, false, \"Hull\", 347.7, \"300k to 450k\"], [185, 6, 74, false, \"York\", 568.1, \"over 450k\"], [136, 4, 84, true, \"Hull\", 390.2, \"300k to 450k\"], [189, 6, 0, true, \"York\", 693.3, \"over 450k\"], [172, 5, 86, false, \"Hull\", 422.4, \"300k to 450k\"], [90, 3, 82, false, \"Leeds\", 265.3, \"under 300k\"], [158, 4, 26, true, \"Hull\", 444.1, \"300k to 450k\"], [147, 4, 90, true, \"Hull\", 420.0, \"300k to 450k\"], [64, 1, 9, true, \"Hull\", 191.1, \"under 300k\"], [197, 4, 0, false, \"Leeds\", 639.7, \"over 450k\"], [144, 4, 40, true, \"Leeds\", 457.5, \"over 450k\"], [185, 5, 41, false, \"Leeds\", 539.9, \"over 450k\"], [45, 1, 31, true, \"Hull\", 99.1, \"under 300k\"], [57, 3, 15, true, \"Leeds\", 237.9, \"under 300k\"], [157, 5, 60, false, \"Leeds\", 489.1, \"over 450k\"], [91, 2, 13, true, \"York\", 381.5, \"300k to 450k\"], [189, 5, 13, false, \"York\", 624.3, \"over 450k\"], [54, 2, 41, true, \"Hull\", 150.2, \"under 300k\"], [151, 5, 87, false, \"Leeds\", 459.5, \"over 450k\"], [100, 3, 46, true, \"Leeds\", 388.1, \"300k to 450k\"], [157, 4, 35, true, \"Hull\", 452.8, \"over 450k\"], [69, 3, 62, false, \"Leeds\", 204.2, \"under 300k\"], [108, 2, 0, true, \"Leeds\", 369.9, \"300k to 450k\"], [169, 4, 90, false, \"Hull\", 459.8, \"over 450k\"], [166, 6, 4, false, \"Hull\", 529.4, \"over 450k\"], [179, 4, 83, false, \"Hull\", 416.5, \"300k to 450k\"], [146, 5, 20, true, \"Hull\", 480.4, \"over 450k\"], [147, 3, 21, true, \"York\", 4200.0, \"over 450k\"], [54, 2, 83, true, \"Leeds\", 173.7, \"under 300k\"], [169, 5, 89, true, \"York\", 553.7, \"over 450k\"], [111, 3, 74, true, \"Hull\", 299.0, \"under 300k\"], [174, 5, 67, true, \"York\", 580.5, \"over 450k\"], [61, 3, 54, true, \"Leeds\", 245.0, \"under 300k\"], [153, 4, 25, false, \"York\", 530.3, \"over 450k\"], [113, 2, 83, false, \"York\", 336.9, \"300k to 450k\"], [44, 3, 43, true, \"Hull\", 185.0, \"under 300k\"], [81, 3, 33, true, \"Hull\", 247.5, \"under 300k\"], [47, 1, 35, false, \"York\", 235.9, \"under 300k\"], [102, 4, 43, true, \"Leeds\", 392.3, \"300k to 450k\"], [123, 4, 17, false, \"Hull\", 357.3, \"300k to 450k\"], [78, 2, 17, true, \"York\", 288.1, \"under 300k\"], [140, 4, 71, false, \"Hull\", 367.2, \"300k to 450k\"], [158, 5, 23, true, \"Hull\", 458.1, \"over 450k\"], [100, 2, 21, false, \"Hull\", 274.1, \"under 300k\"], [151, 5, 18, true, \"Hull\", 470.9, \"over 450k\"], [44, 1, 5, true, \"Leeds\", 183.8, \"under 300k\"], [43, 1, 31, false, \"York\", 199.4, \"under 300k\"], [152, 4, 12, false, \"Leeds\", 470.6, \"over 450k\"], [144, 4, 72, false, \"Leeds\", 444.5, \"300k to 450k\"], [62, 2, 52, true, \"Hull\", 200.9, \"under 300k\"], [146, 4, 33, true, \"York\", 523.4, \"over 450k\"], [65, 2, 23, true, \"Hull\", 198.1, \"under 300k\"], [133, 3, 38, false, \"York\", 461.4, \"over 450k\"], [179, 5, 0, true, \"York\", 623.5, \"over 450k\"], [113, 3, 10, false, \"York\", 461.4, \"over 450k\"], [114, 3, 65, false, \"Hull\", 297.4, \"under 300k\"], [143, 5, 47, false, \"York\", 484.0, \"over 450k\"], [161, 6, 17, true, \"York\", 574.7, \"over 450k\"], [82, 3, 83, true, \"York\", 283.0, \"under 300k\"], [92, 2, 46, false, \"Leeds\", 277.6, \"under 300k\"], [171, 5, 51, true, \"York\", 557.1, \"over 450k\"], [188, 6, 5, false, \"Hull\", 579.8, \"over 450k\"], [156, 5, 58, true, \"Leeds\", 515.6, \"over 450k\"], [164, 5, 56, false, \"York\", 569.2, \"over 450k\"], [72, 2, 66, false, \"York\", 224.5, \"under 300k\"], [146, 4, 72, true, \"York\", 516.7, \"over 450k\"], [94, 1, 54, false, \"Leeds\", 271.4, \"under 300k\"], [104, 2, 78, false, \"Leeds\", 276.4, \"under 300k\"], [81, 2, 37, false, \"Leeds\", 244.8, \"under 300k\"], [93, 2, 77, true, \"York\", 331.1, \"300k to 450k\"], [197, 5, 64, false, \"Leeds\", 568.4, \"over 450k\"], [49, 1, 40, false, \"York\", 225.0, \"under 300k\"], [107, 3, 70, true, \"Leeds\", 356.6, \"300k to 450k\"], [182, 4, 24, true, \"Hull\", 543.9, \"over 450k\"], [166, 4, 24, false, \"Hull\", 534.4, \"over 450k\"], [60, 1, 17, false, \"Leeds\", 209.0, \"under 300k\"], [138, 3, 18, true, \"Hull\", 448.1, \"300k to 450k\"], [118, 3, 71, true, \"Leeds\", 344.2, \"300k to 450k\"], [49, 2, 85, false, \"York\", 118.0, \"under 300k\"], [130, 3, 59, false, \"Hull\", 357.2, \"300k to 450k\"], [49, 2, 38, false, \"Leeds\", 149.2, \"under 300k\"], [82, 1, 5, true, \"Hull\", 248.2, \"under 300k\"], [99, 4, 77, false, \"Hull\", 233.3, \"under 300k\"], [90, 2, 47, true, \"Leeds\", 316.7, \"300k to 450k\"], [158, 4, 14, true, \"Hull\", 495.7, \"over 450k\"], [48, 2, 69, true, \"Leeds\", 149.6, \"under 300k\"], [155, 4, 69, true, \"Hull\", 447.6, \"300k to 450k\"], [95, 2, 65, true, \"York\", 327.1, \"300k to 450k\"], [55, 1, 3, true, \"Leeds\", 221.5, \"under 300k\"], [101, 3, 82, false, \"Leeds\", 288.1, \"under 300k\"], [140, 3, 52, false, \"York\", 460.6, \"over 450k\"], [93, 1, 85, true, \"Hull\", 191.2, \"under 300k\"], [65, 3, 65, true, \"Leeds\", 233.1, \"under 300k\"], [132, 3, 70, false, \"Leeds\", 384.3, \"300k to 450k\"], [84, 1, 60, true, \"Leeds\", 263.5, \"under 300k\"], [67, 2, 23, true, \"York\", 255.8, \"under 300k\"], [49, 1, 8, true, \"Hull\", 143.9, \"under 300k\"], [113, 3, 17, false, \"Leeds\", 424.4, \"300k to 450k\"], [151, 3, 12, false, \"Hull\", 413.0, \"300k to 450k\"], [60, 3, 14, true, \"Leeds\", 263.5, \"under 300k\"], [65, 2, 90, false, \"Leeds\", 160.0, \"under 300k\"], [65, 1, 56, true, \"Leeds\", 205.8, \"under 300k\"], [76, 2, 66, false, \"Leeds\", 235.9, \"under 300k\"], [115, 4, 54, false, \"Leeds\", 335.1, \"300k to 450k\"], [138, 4, 44, false, \"Leeds\", 415.0, \"300k to 450k\"], [118, 3, 79, true, \"York\", 397.4, \"300k to 450k\"], [200, 5, 44, false, \"York\", 624.0, \"over 450k\"], [74, 2, 74, true, \"York\", 230.3, \"under 300k\"], [161, 4, 80, true, \"Leeds\", 521.2, \"over 450k\"], [162, 4, 51, true, \"Hull\", 501.2, \"over 450k\"], [63, 1, 74, true, \"Leeds\", 183.2, \"under 300k\"], [183, 5, 88, false, \"York\", 556.4, \"over 450k\"], [99, 3, 37, false, \"Leeds\", 350.1, \"300k to 450k\"], [111, 4, 16, true, \"Hull\", 372.0, \"300k to 450k\"], [56, 2, 47, true, \"Hull\", 139.3, \"under 300k\"], [178, 4, 60, true, \"Leeds\", 513.2, \"over 450k\"], [61, 1, 69, false, \"York\", 153.0, \"under 300k\"], [67, 1, 45, true, \"Leeds\", 232.8, \"under 300k\"], [148, 5, 74, false, \"Hull\", 436.5, \"300k to 450k\"], [134, 3, 4, true, \"Leeds\", 504.4, \"over 450k\"], [197, 5, 52, true, \"York\", 609.6, \"over 450k\"], [145, 3, 82, true, \"York\", 470.6, \"over 450k\"], [88, 2, 78, true, \"York\", 314.1, \"300k to 450k\"], [136, 4, 20, false, \"York\", 453.6, \"over 450k\"], [119, 4, 5, false, \"Hull\", 359.6, \"300k to 450k\"], [92, 2, 28, true, \"Leeds\", 316.5, \"300k to 450k\"], [158, 3, 3, false, \"Hull\", 413.5, \"300k to 450k\"], [178, 4, 62, true, \"Leeds\", 543.6, \"over 450k\"], [111, 3, 70, false, \"Leeds\", 335.5, \"300k to 450k\"], [172, 4, 1, true, \"York\", 607.4, \"over 450k\"], [58, 1, 63, true, \"Leeds\", 178.4, \"under 300k\"], [157, 4, 10, true, \"Hull\", 499.2, \"over 450k\"], [60, 3, 71, false, \"Leeds\", 176.4, \"under 300k\"], [154, 4, 39, false, \"Hull\", 447.0, \"300k to 450k\"], [129, 4, 15, true, \"Hull\", 431.0, \"300k to 450k\"], [176, 5, 5, true, \"Hull\", 580.0, \"over 450k\"], [175, 5, 59, true, \"Hull\", 513.0, \"over 450k\"], [192, 5, 16, false, \"Hull\", 561.1, \"over 450k\"], [159, 4, 21, true, \"Leeds\", 551.7, \"over 450k\"], [171, 5, 81, true, \"Leeds\", 525.0, \"over 450k\"], [156, 3, 0, true, \"Leeds\", 504.4, \"over 450k\"], [136, 4, 32, false, \"Hull\", 370.3, \"300k to 450k\"], [178, 5, 12, true, \"Leeds\", 596.2, \"over 450k\"], [175, 3, 33, false, \"York\", 561.2, \"over 450k\"], [69, 1, 64, true, \"Leeds\", 196.8, \"under 300k\"], [190, 4, 90, true, \"York\", 637.8, \"over 450k\"], [163, 4, 18, false, \"Hull\", 496.1, \"over 450k\"], [108, 3, 37, false, \"York\", 372.4, \"300k to 450k\"], [65, 2, 73, true, \"York\", 248.0, \"under 300k\"], [185, 5, 37, false, \"York\", 601.7, \"over 450k\"]]}",
+     "width": 620,
+     "height": 380
+    },
+    "code": null,
+    "label": "Houses"
+   },
+   {
+    "id": "t38_corr",
+    "type": "flograph.ml.correlation_matrix",
+    "pos": [
+     1620,
+     800
+    ],
+    "params": {
+     "width": 460,
+     "height": 400
+    },
+    "code": null,
+    "label": "Correlation"
+   },
+   {
+    "id": "t38_flag",
+    "type": "flograph.ml.outlier_detection",
+    "pos": [
+     1620,
+     1280
+    ],
+    "params": {
+     "columns": "price_k"
+    },
+    "code": null,
+    "label": "Outliers (flag only)"
+   },
+   {
+    "id": "t38_flag_tbl",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1860,
+     1280
+    ],
+    "params": {
+     "width": 560,
+     "height": 260,
+     "format_rules": "outlier = True => row red"
+    },
+    "code": null,
+    "label": "Spot the typo"
+   },
+   {
+    "id": "t38_drop",
+    "type": "flograph.ml.outlier_detection",
+    "pos": [
+     760,
+     1320
+    ],
+    "params": {
+     "columns": "price_k",
+     "action": "drop"
+    },
+    "code": null,
+    "label": "Outliers (drop)"
+   },
+   {
+    "id": "t38_pub",
+    "type": "flograph.util.goto",
+    "pos": [
+     1000,
+     1340
+    ],
+    "params": {
+     "name": "houses"
+    },
+    "code": null,
+    "label": "→ houses"
+   },
+   {
+    "id": "t38_n2",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     1880
+    ],
+    "params": {
+     "text": "## 2 · Prepare the features\n\n**Train/Test Split** holds back a quarter of the rows (**test**) that the\nmodel never sees while it learns (**train**). Scoring a model on rows it\nlearned from is like marking your own homework. *Stratify by* `band` keeps\neach band's share the same on both sides. For anything in time order,\nuntick *Shuffle* so you test on the most recent rows.\n\n**One-Hot Encode** turns `city` into 0/1 columns (`city_Leeds`,\n`city_York`). Use it for categories with **no order** and not too many\nvalues. *Drop first* leaves one out (Hull = both 0), which linear models\nneed.\n\n**Label Encode** (bottom) turns categories into 0, 1, 2… Use it for a\n**target** or a category with a real order, and it can *decode* codes back\nto words. Don't feed codes for an unordered category to a linear model —\nit would read York (2) as \"twice\" Leeds (1).\n\n**Feature Scaler** puts the numbers on one scale. Linear, ridge, lasso,\nlogistic and K-Means need it; tree models don't care.\n\n**The golden rule** — look at the wires crossing between the rows: the\n**test** side doesn't learn its own encoder or scaler, it is handed the\n**train** side's. Fit on train, *apply* to test, or test-row information\nleaks into the model.",
+     "width": 620,
+     "height": 760
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_from2",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     2080
+    ],
+    "params": {
+     "source": "t38_pub"
+    },
+    "code": null,
+    "label": "houses →"
+   },
+   {
+    "id": "t38_split",
+    "type": "flograph.ml.train_test_split",
+    "pos": [
+     1020,
+     2060
+    ],
+    "params": {
+     "test_size": 0.25,
+     "stratify": "band"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_ohe_tr",
+    "type": "flograph.ml.one_hot_encode",
+    "pos": [
+     1280,
+     1920
+    ],
+    "params": {
+     "columns": "city",
+     "drop_first": true
+    },
+    "code": null,
+    "label": "One-Hot (fit)"
+   },
+   {
+    "id": "t38_ohe_te",
+    "type": "flograph.ml.one_hot_encode",
+    "pos": [
+     1280,
+     2200
+    ],
+    "params": {
+     "columns": "city"
+    },
+    "code": null,
+    "label": "One-Hot (apply)"
+   },
+   {
+    "id": "t38_sc_tr",
+    "type": "flograph.ml.feature_scaler",
+    "pos": [
+     1540,
+     1920
+    ],
+    "params": {
+     "columns": "size_m2, rooms, age_years"
+    },
+    "code": null,
+    "label": "Scaler (fit)"
+   },
+   {
+    "id": "t38_sc_te",
+    "type": "flograph.ml.feature_scaler",
+    "pos": [
+     1540,
+     2200
+    ],
+    "params": {},
+    "code": null,
+    "label": "Scaler (apply)"
+   },
+   {
+    "id": "t38_pub_tr",
+    "type": "flograph.util.goto",
+    "pos": [
+     1800,
+     1940
+    ],
+    "params": {
+     "name": "train"
+    },
+    "code": null,
+    "label": "→ train"
+   },
+   {
+    "id": "t38_pub_te",
+    "type": "flograph.util.goto",
+    "pos": [
+     1800,
+     2220
+    ],
+    "params": {
+     "name": "test"
+    },
+    "code": null,
+    "label": "→ test"
+   },
+   {
+    "id": "t38_labels",
+    "type": "flograph.ml.label_encode",
+    "pos": [
+     1020,
+     2440
+    ],
+    "params": {
+     "columns": "band"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_labels_tbl",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1280,
+     2400
+    ],
+    "params": {
+     "width": 520,
+     "height": 220
+    },
+    "code": null,
+    "label": "Band as codes"
+   },
+   {
+    "id": "t38_n3",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     2960
+    ],
+    "params": {
+     "text": "## 3 · Regression — predict a number\n\n**Train Model** learns `price_k` from every other number column of the\n**train** rows (text like `band` is left out on its own). *Ridge* is a\nstraight-line model that resists over-fitting; swap the *Algorithm* to\n*random forest* and compare. **Feature importances** shows what it leans\non.\n\n**Predict** runs the trained model — the **model** wire is the whole fitted\nmodel as a value — over the **test** rows, adding a `prediction` column.\n\n**Model Evaluation** compares `price_k` with `prediction` on rows the model\nnever saw:\n\n* **MAE** — the typical miss, in the target's own units (£k here).\n* **RMSE** — the same, but big misses count extra. Much bigger than MAE =\n  a few bad misses.\n* **R²** — share of the variation explained: 1 is perfect, 0 is no better\n  than guessing the average for every house.\n\nOn the chart a perfect model sits on the dashed line. Hover a point to see\nthe house it missed.",
+     "width": 620,
+     "height": 640
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_tr3",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     3020
+    ],
+    "params": {
+     "source": "t38_pub_tr"
+    },
+    "code": null,
+    "label": "train →"
+   },
+   {
+    "id": "t38_te3",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     3300
+    ],
+    "params": {
+     "source": "t38_pub_te"
+    },
+    "code": null,
+    "label": "test →"
+   },
+   {
+    "id": "t38_reg",
+    "type": "flograph.ml.train_model",
+    "pos": [
+     1020,
+     3000
+    ],
+    "params": {
+     "target_column": "price_k",
+     "algorithm": "ridge"
+    },
+    "code": null,
+    "label": "Train Model (price)"
+   },
+   {
+    "id": "t38_reg_imp",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1280,
+     2940
+    ],
+    "params": {
+     "width": 380,
+     "height": 240
+    },
+    "code": null,
+    "label": "Feature importances"
+   },
+   {
+    "id": "t38_reg_pred",
+    "type": "flograph.ml.predict",
+    "pos": [
+     1280,
+     3300
+    ],
+    "params": {
+     "round": 1
+    },
+    "code": null,
+    "label": "Predict (price)"
+   },
+   {
+    "id": "t38_reg_eval",
+    "type": "flograph.ml.model_evaluation",
+    "pos": [
+     1760,
+     2960
+    ],
+    "params": {
+     "actual_column": "price_k",
+     "width": 480,
+     "height": 420
+    },
+    "code": null,
+    "label": "Regression check"
+   },
+   {
+    "id": "t38_reg_scores",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1760,
+     3460
+    ],
+    "params": {
+     "width": 300,
+     "height": 200
+    },
+    "code": null,
+    "label": "Regression scores"
+   },
+   {
+    "id": "t38_n4",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     4000
+    ],
+    "params": {
+     "text": "## 4 · Classification — predict a class\n\nSame rows, a different question: which **band** is the house in? The\ntarget is text, so the task is read as *classification*. `price_k` is\nnamed out of the features on purpose — it *is* the answer in disguise, and\na model that peeks at it scores 100% and is useless.\n\n*Random forest* needs no scaling and copes with mixed features; it is a\nstrong first choice for classification.\n\n**Predict** with *Add probabilities* gives one column per band: how sure\nthe model is. Sort by it to find the houses it nearly got wrong.\n\n**Model Evaluation** now shows a **confusion matrix**: actual bands down\nthe side, predictions across. The diagonal is right; everything else is a\nmix-up — and mix-ups between *neighbouring* bands are the forgivable kind.\n*Normalize* shows each row as shares, so a weak band stands out.\n\n* **accuracy** — share predicted right.\n* **precision** — when it says \"over 450k\", how often is it?\n* **recall** — of the real \"over 450k\" houses, how many did it find?\n* **F1** — one number balancing the two.",
+     "width": 620,
+     "height": 680
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_tr4",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     4060
+    ],
+    "params": {
+     "source": "t38_pub_tr"
+    },
+    "code": null,
+    "label": "train →"
+   },
+   {
+    "id": "t38_te4",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     4340
+    ],
+    "params": {
+     "source": "t38_pub_te"
+    },
+    "code": null,
+    "label": "test →"
+   },
+   {
+    "id": "t38_cls",
+    "type": "flograph.ml.train_model",
+    "pos": [
+     1020,
+     4040
+    ],
+    "params": {
+     "target_column": "band",
+     "algorithm": "random forest",
+     "feature_columns": "size_m2, rooms, age_years, garden, city_Leeds, city_York",
+     "trees": 200
+    },
+    "code": null,
+    "label": "Train Model (band)"
+   },
+   {
+    "id": "t38_cls_pred",
+    "type": "flograph.ml.predict",
+    "pos": [
+     1280,
+     4340
+    ],
+    "params": {
+     "probability": true
+    },
+    "code": null,
+    "label": "Predict (band)"
+   },
+   {
+    "id": "t38_cls_eval",
+    "type": "flograph.ml.model_evaluation",
+    "pos": [
+     1560,
+     4000
+    ],
+    "params": {
+     "actual_column": "band",
+     "normalize": true,
+     "width": 480,
+     "height": 420
+    },
+    "code": null,
+    "label": "Classification check"
+   },
+   {
+    "id": "t38_cls_probs",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     2100,
+     4000
+    ],
+    "params": {
+     "width": 360,
+     "height": 420
+    },
+    "code": null,
+    "label": "How sure it was"
+   },
+   {
+    "id": "t38_n5",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     4960
+    ],
+    "params": {
+     "text": "## 5 · Is it really that good? Cross-validation\n\nOne train/test split is one roll of the dice: a lucky split flatters a\nmodel. **Cross-Validation** cuts the rows into 5 *folds*, trains on four\nand scores the fifth, five times over, and reports the mean and the spread\n(**std**).\n\nTwo side by side — *ridge* and *random forest*, same features, same folds\n— is how to choose an algorithm **before** training the one you keep.\nPrefer the higher mean R²; a big std means the score depends on which rows\nit got, which usually means too little data.\n\nCross-validation fits its own models each time, so it takes the cleaned\ntable straight from **houses** and names its features — text columns have\nto be encoded first, as in chapter 2.",
+     "width": 620,
+     "height": 520
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_from5",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     5160
+    ],
+    "params": {
+     "source": "t38_pub"
+    },
+    "code": null,
+    "label": "houses →"
+   },
+   {
+    "id": "t38_cv_lin",
+    "type": "flograph.ml.cross_validation",
+    "pos": [
+     1020,
+     5000
+    ],
+    "params": {
+     "target_column": "price_k",
+     "algorithm": "ridge",
+     "feature_columns": "size_m2, rooms, age_years, garden"
+    },
+    "code": null,
+    "label": "Cross-validate ridge"
+   },
+   {
+    "id": "t38_cv_rf",
+    "type": "flograph.ml.cross_validation",
+    "pos": [
+     1020,
+     5300
+    ],
+    "params": {
+     "target_column": "price_k",
+     "algorithm": "random forest",
+     "feature_columns": "size_m2, rooms, age_years, garden",
+     "trees": 100
+    },
+    "code": null,
+    "label": "Cross-validate forest"
+   },
+   {
+    "id": "t38_cv_lin_tbl",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1280,
+     4960
+    ],
+    "params": {
+     "width": 440,
+     "height": 200
+    },
+    "code": null,
+    "label": "Ridge, 5 folds"
+   },
+   {
+    "id": "t38_cv_rf_tbl",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1280,
+     5260
+    ],
+    "params": {
+     "width": 440,
+     "height": 200
+    },
+    "code": null,
+    "label": "Forest, 5 folds"
+   },
+   {
+    "id": "t38_n6",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     5760
+    ],
+    "params": {
+     "text": "## 6 · No target? Find groups with K-Means\n\nClustering has no answer column. **K-Means** puts each house with the\nnearest of *k* centres, moving the centres until they settle — groups of\nlook-alikes, found rather than labelled.\n\n* **Standardize** is on: without it, a column in hundreds (price) would\n  out-vote one in tens (rooms).\n* **k** is yours to choose. Try 2, 3, 4: the right one gives groups you\n  can *name* from the **centres** table (\"big and dear\", \"small, cheap\n  and old\"…).\n* The chart squashes the chosen columns to two directions so you can see\n  the groups; click one in the legend to hide it.\n\nThe `cluster` column comes back on **table** — feed it into chapter 3 as a\nfeature, or use it to filter a dashboard.",
+     "width": 620,
+     "height": 560
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t38_from6",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     760,
+     5960
+    ],
+    "params": {
+     "source": "t38_pub"
+    },
+    "code": null,
+    "label": "houses →"
+   },
+   {
+    "id": "t38_km",
+    "type": "flograph.ml.kmeans_clustering",
+    "pos": [
+     1020,
+     5760
+    ],
+    "params": {
+     "k": 3,
+     "columns": "size_m2, age_years, price_k",
+     "width": 480,
+     "height": 420
+    },
+    "code": null,
+    "label": "Clusters"
+   },
+   {
+    "id": "t38_km_centres",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1740,
+     5760
+    ],
+    "params": {
+     "width": 560,
+     "height": 200
+    },
+    "code": null,
+    "label": "Cluster centres"
+   }
+  ],
+  "connections": [
+   {
+    "id": "t38_c01",
+    "src": [
+     "t38_houses",
+     "table"
+    ],
+    "dst": [
+     "t38_corr",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c02",
+    "src": [
+     "t38_houses",
+     "table"
+    ],
+    "dst": [
+     "t38_flag",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c03",
+    "src": [
+     "t38_flag",
+     "cleaned"
+    ],
+    "dst": [
+     "t38_flag_tbl",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c04",
+    "src": [
+     "t38_houses",
+     "table"
+    ],
+    "dst": [
+     "t38_drop",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c05",
+    "src": [
+     "t38_drop",
+     "cleaned"
+    ],
+    "dst": [
+     "t38_pub",
+     "value"
+    ]
+   },
+   {
+    "id": "t38_c06",
+    "src": [
+     "t38_from2",
+     "value"
+    ],
+    "dst": [
+     "t38_split",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c07",
+    "src": [
+     "t38_split",
+     "train"
+    ],
+    "dst": [
+     "t38_ohe_tr",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c08",
+    "src": [
+     "t38_split",
+     "test"
+    ],
+    "dst": [
+     "t38_ohe_te",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c09",
+    "src": [
+     "t38_ohe_tr",
+     "encoder"
+    ],
+    "dst": [
+     "t38_ohe_te",
+     "encoder"
+    ]
+   },
+   {
+    "id": "t38_c10",
+    "src": [
+     "t38_ohe_tr",
+     "table"
+    ],
+    "dst": [
+     "t38_sc_tr",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c11",
+    "src": [
+     "t38_ohe_te",
+     "table"
+    ],
+    "dst": [
+     "t38_sc_te",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c12",
+    "src": [
+     "t38_sc_tr",
+     "scaler"
+    ],
+    "dst": [
+     "t38_sc_te",
+     "scaler"
+    ]
+   },
+   {
+    "id": "t38_c13",
+    "src": [
+     "t38_sc_tr",
+     "scaled"
+    ],
+    "dst": [
+     "t38_pub_tr",
+     "value"
+    ]
+   },
+   {
+    "id": "t38_c14",
+    "src": [
+     "t38_sc_te",
+     "scaled"
+    ],
+    "dst": [
+     "t38_pub_te",
+     "value"
+    ]
+   },
+   {
+    "id": "t38_c15",
+    "src": [
+     "t38_from2",
+     "value"
+    ],
+    "dst": [
+     "t38_labels",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c16",
+    "src": [
+     "t38_labels",
+     "encoded"
+    ],
+    "dst": [
+     "t38_labels_tbl",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c17",
+    "src": [
+     "t38_tr3",
+     "value"
+    ],
+    "dst": [
+     "t38_reg",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c18",
+    "src": [
+     "t38_reg",
+     "importances"
+    ],
+    "dst": [
+     "t38_reg_imp",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c19",
+    "src": [
+     "t38_reg",
+     "model"
+    ],
+    "dst": [
+     "t38_reg_pred",
+     "model"
+    ]
+   },
+   {
+    "id": "t38_c20",
+    "src": [
+     "t38_te3",
+     "value"
+    ],
+    "dst": [
+     "t38_reg_pred",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c21",
+    "src": [
+     "t38_reg_pred",
+     "table"
+    ],
+    "dst": [
+     "t38_reg_eval",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c22",
+    "src": [
+     "t38_reg_eval",
+     "metrics"
+    ],
+    "dst": [
+     "t38_reg_scores",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c23",
+    "src": [
+     "t38_tr4",
+     "value"
+    ],
+    "dst": [
+     "t38_cls",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c24",
+    "src": [
+     "t38_cls",
+     "model"
+    ],
+    "dst": [
+     "t38_cls_pred",
+     "model"
+    ]
+   },
+   {
+    "id": "t38_c25",
+    "src": [
+     "t38_te4",
+     "value"
+    ],
+    "dst": [
+     "t38_cls_pred",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c26",
+    "src": [
+     "t38_cls_pred",
+     "table"
+    ],
+    "dst": [
+     "t38_cls_eval",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c27",
+    "src": [
+     "t38_cls_pred",
+     "probabilities"
+    ],
+    "dst": [
+     "t38_cls_probs",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c28",
+    "src": [
+     "t38_from5",
+     "value"
+    ],
+    "dst": [
+     "t38_cv_lin",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c29",
+    "src": [
+     "t38_from5",
+     "value"
+    ],
+    "dst": [
+     "t38_cv_rf",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c30",
+    "src": [
+     "t38_cv_lin",
+     "summary"
+    ],
+    "dst": [
+     "t38_cv_lin_tbl",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c31",
+    "src": [
+     "t38_cv_rf",
+     "summary"
+    ],
+    "dst": [
+     "t38_cv_rf_tbl",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c32",
+    "src": [
+     "t38_from6",
+     "value"
+    ],
+    "dst": [
+     "t38_km",
+     "table"
+    ]
+   },
+   {
+    "id": "t38_c33",
+    "src": [
+     "t38_km",
+     "centers"
+    ],
+    "dst": [
+     "t38_km_centres",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "t38_f0",
+    "title": "0 · Read me first",
+    "rect": [
+     -40,
+     -70,
+     1520,
+     670
+    ],
+    "color": "#2b3a55"
+   },
+   {
+    "id": "t38_f1",
+    "title": "1 · Know your data",
+    "rect": [
+     -40,
+     730,
+     2480,
+     920
+    ],
+    "color": "#2f4a3f"
+   },
+   {
+    "id": "t38_f2",
+    "title": "2 · Prepare the features",
+    "rect": [
+     -40,
+     1810,
+     2480,
+     900
+    ],
+    "color": "#3b3355"
+   },
+   {
+    "id": "t38_f3",
+    "title": "3 · Regression",
+    "rect": [
+     -40,
+     2850,
+     2480,
+     880
+    ],
+    "color": "#2f4a3f"
+   },
+   {
+    "id": "t38_f4",
+    "title": "4 · Classification",
+    "rect": [
+     -40,
+     3930,
+     2480,
+     820
+    ],
+    "color": "#3b3355"
+   },
+   {
+    "id": "t38_f5",
+    "title": "5 · Cross-validation",
+    "rect": [
+     -40,
+     4890,
+     2480,
+     660
+    ],
+    "color": "#4a3f2f"
+   },
+   {
+    "id": "t38_f6",
+    "title": "6 · Clustering",
+    "rect": [
+     -40,
+     5690,
+     2480,
+     700
+    ],
+    "color": "#2b3a55"
+   }
+  ],
+  "pages": [
+   {
+    "id": "t38_report",
+    "title": "ML tutorial",
+    "kind": "report",
+    "body": "# Machine learning in flograph\n\nA short read through the flow on the canvas, with its live results. Every\nchart and table below is a node in that flow — change the data or a\nsetting there and this page follows.\n\n## The data\n\nOne row per house sale, one column per measurement: the tidy table every\nML node expects. Size is the strongest clue to price:\n\n![[Correlation|width=80%]]\n\nOne price had an extra zero. Outlier Detection flagged it and the rest of\nthe flow works on the table without it.\n\n## Predicting the price (regression)\n\nTrained on three quarters of the houses, scored on the quarter it never\nsaw. Points near the dashed line are good guesses:\n\n![[Regression check|width=80%]]\n\n![[Regression scores]]\n\n## Predicting the band (classification)\n\nThe diagonal is right; off it are mix-ups, mostly between neighbouring\nbands:\n\n![[Classification check|width=80%]]\n\n## How much to trust it\n\nFive folds, two algorithms — the mean is the score, the std is the luck:\n\n![[Ridge, 5 folds]]\n\n![[Forest, 5 folds]]\n\n## Groups nobody labelled\n\n![[Clusters|width=80%]]\n\n![[Cluster centres]]\n",
+    "tiles": []
+   }
+  ]
+ }
+}

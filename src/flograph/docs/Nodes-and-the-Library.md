@@ -72,7 +72,18 @@ Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,
 Statistics, Data Profile, Numeric Binning (fixed-width, quantile or
 hand-named buckets), Crosstab (a two-way frequency matrix), Period
-Comparison (prior period / year-ago deltas and change).
+Comparison (prior period / year-ago deltas and change), Cohort Analysis
+(first-seen cohorts and the retention matrix).
+
+**ML** — Train/Test Split, Feature Scaler, One-Hot Encode, Label Encode,
+Correlation Matrix, Train Model, Predict, Model Evaluation, Cross-Validation,
+K-Means Clustering, Outlier Detection. A trained model, a fitted scaler or an
+encoder flows on like any other value — wire it into a second node and the
+test rows are treated exactly as the training rows were. A typical chain:
+Train/Test Split → One-Hot Encode / Feature Scaler → Train Model on
+**train**, then Predict and Model Evaluation on **test**. Fitting a model
+needs scikit-learn (Manage Packages); the rest don't. **File ▸ Open Example
+▸ 38 Machine learning** walks through all of it as a tutorial.
 
 **Viz** — Show Table, Show Plot (matplotlib), Show Plotly (an interactive
 plotly.js chart on the canvas, in any of the 28 Plotly Express chart types),
@@ -80,10 +91,17 @@ Plotly Style, Plotly Table, Show Web View (anything that produces HTML —
 folium, altair, bokeh, your own template), Card (a KPI number), Chart per
 Value, Gantt Chart (a project plan that works its own dates out), Image, PDF
 Viewer, Report. Any web-view node has **Open in Browser** on its right-click
-menu.
+menu. For dashboards: Sparkline Card, Goal Card (against a target or last
+year), Status Light (green / amber / red), Alert List (a "needs attention"
+tray — put a Filter Rows in front) and Plain-English Summary (the number as
+a sentence). In a table, `top 5` / `bottom 5` rules pick out the best and
+worst rows — see [[Conditional-Formatting]].
 
 **Util** — Constant, Reroute, Note, Action Button, Page Links, Goto, From,
-Variables.
+Variables, As-of Stamp.
+
+**Automation** — Notify, Shell Command, Wait for File, File Operations
+(copy, move, rename, zip or delete; **Dry run** to check first).
 
 **Scripting** — Python Script, **Run Flow** and **Flow Output** for running a
 child project and returning a named value, plus Node Template and Control

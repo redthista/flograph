@@ -1,0 +1,244 @@
+{
+ "flograph_version": "0.1.31",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "t41_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     -320
+    ],
+    "params": {
+     "text": "# Files\n**Write Excel (Sheets)** puts several tables in one workbook, a sheet each;\n**File Operations** then copies it into an archive folder, zips the copy,\nand shows what a delete *would* remove (dry run). Everything goes in the\nfolder named by `out_dir` in **Variables**, relative to where flograph was\nstarted — change it there.",
+     "width": 1100,
+     "height": 200
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t41_vars",
+    "type": "flograph.util.variables",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "assignments": "out_dir = flograph_files_demo"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t41_sales",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     160
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"month\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}], \"rows\": [[\"2026-07\", 23800], [\"2026-08\", 24600], [\"2026-09\", 26100]]}",
+     "width": 300,
+     "height": 180
+    },
+    "code": null,
+    "label": "Sales"
+   },
+   {
+    "id": "t41_costs",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     420
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"month\", \"type\": \"text\"}, {\"name\": \"cost\", \"type\": \"number\"}], \"rows\": [[\"2026-07\", 17100], [\"2026-08\", 16900], [\"2026-09\", 18200]]}",
+     "width": 300,
+     "height": 180
+    },
+    "code": null,
+    "label": "Costs"
+   },
+   {
+    "id": "t41_regions",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     680
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"share\", \"type\": \"number\"}], \"rows\": [[\"North\", 0.42], [\"South\", 0.33], [\"East\", 0.25]]}",
+     "width": 300,
+     "height": 180
+    },
+    "code": null,
+    "label": "Regions"
+   },
+   {
+    "id": "t41_xlsx",
+    "type": "flograph.io.write_excel_sheets",
+    "pos": [
+     560,
+     420
+    ],
+    "params": {
+     "path": "${out_dir}/q3_pack.xlsx",
+     "add_summary": true,
+     "sheet_names": "Sales\nCosts\nBy region"
+    },
+    "code": null,
+    "label": null,
+    "extra_inputs": [
+     {
+      "name": "in3",
+      "type": "dataframe"
+     }
+    ]
+   },
+   {
+    "id": "t41_copy",
+    "type": "flograph.automation.file_operations",
+    "pos": [
+     800,
+     420
+    ],
+    "params": {
+     "operation": "copy",
+     "destination": "${out_dir}/archive/",
+     "overwrite": true
+    },
+    "code": null,
+    "label": "Copy to archive"
+   },
+   {
+    "id": "t41_zip",
+    "type": "flograph.automation.file_operations",
+    "pos": [
+     1040,
+     420
+    ],
+    "params": {
+     "operation": "zip",
+     "destination": "${out_dir}/archive.zip",
+     "overwrite": true
+    },
+    "code": null,
+    "label": "Zip the archive"
+   },
+   {
+    "id": "t41_dry",
+    "type": "flograph.automation.file_operations",
+    "pos": [
+     1280,
+     420
+    ],
+    "params": {
+     "operation": "delete",
+     "source": "${out_dir}/*.xlsx",
+     "dry_run": true
+    },
+    "code": null,
+    "label": "Delete (dry run)"
+   },
+   {
+    "id": "t41_n_files",
+    "type": "flograph.util.note",
+    "pos": [
+     560,
+     600
+    ],
+    "params": {
+     "text": "Each step hands its result on: the workbook's **path** → copied → the copy's\n**paths** → zipped. The delete is a **dry run**: its log lists what it would\nremove and nothing goes. The dashed wire is an *order edge* — it runs after\nthe zip, though no value passes.",
+     "width": 760,
+     "height": 160
+    },
+    "code": null,
+    "label": null
+   }
+  ],
+  "connections": [
+   {
+    "id": "t41_c01",
+    "src": [
+     "t41_sales",
+     "table"
+    ],
+    "dst": [
+     "t41_xlsx",
+     "sheet1"
+    ]
+   },
+   {
+    "id": "t41_c02",
+    "src": [
+     "t41_costs",
+     "table"
+    ],
+    "dst": [
+     "t41_xlsx",
+     "sheet2"
+    ]
+   },
+   {
+    "id": "t41_c03",
+    "src": [
+     "t41_regions",
+     "table"
+    ],
+    "dst": [
+     "t41_xlsx",
+     "in3"
+    ]
+   },
+   {
+    "id": "t41_c04",
+    "src": [
+     "t41_xlsx",
+     "path"
+    ],
+    "dst": [
+     "t41_copy",
+     "source"
+    ]
+   },
+   {
+    "id": "t41_c05",
+    "src": [
+     "t41_copy",
+     "paths"
+    ],
+    "dst": [
+     "t41_zip",
+     "source"
+    ]
+   },
+   {
+    "id": "t41_c06",
+    "src": [
+     "t41_zip",
+     "flow"
+    ],
+    "dst": [
+     "t41_dry",
+     "flow"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "t41_f_files",
+    "title": "Workbook, archive, zip",
+    "rect": [
+     -40,
+     -70,
+     1440,
+     980
+    ],
+    "color": "#4a3f2f"
+   }
+  ],
+  "pages": []
+ }
+}

@@ -1,0 +1,331 @@
+{
+ "flograph_version": "0.1.31",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "t40_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     -300
+    ],
+    "params": {
+     "text": "# Table helpers\n**Cohort Analysis** for retention, **Replace Values** with a lookup table,\nand Show Table's `top N` / `bottom N` rules for best and worst.",
+     "width": 900,
+     "height": 160
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t40_events",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"user\", \"type\": \"text\"}, {\"name\": \"when\", \"type\": \"date\"}], \"rows\": [[\"u01\", \"2026-01-15\"], [\"u01\", \"2026-02-17\"], [\"u01\", \"2026-03-10\"], [\"u01\", \"2026-06-25\"], [\"u02\", \"2026-02-24\"], [\"u02\", \"2026-03-01\"], [\"u02\", \"2026-04-24\"], [\"u02\", \"2026-05-21\"], [\"u02\", \"2026-06-23\"], [\"u03\", \"2026-03-02\"], [\"u03\", \"2026-04-20\"], [\"u03\", \"2026-05-09\"], [\"u03\", \"2026-07-17\"], [\"u04\", \"2026-04-22\"], [\"u04\", \"2026-07-02\"], [\"u05\", \"2026-01-27\"], [\"u05\", \"2026-04-24\"], [\"u05\", \"2026-05-06\"], [\"u06\", \"2026-02-10\"], [\"u06\", \"2026-03-06\"], [\"u06\", \"2026-05-14\"], [\"u06\", \"2026-07-07\"], [\"u07\", \"2026-03-20\"], [\"u07\", \"2026-05-15\"], [\"u07\", \"2026-07-27\"], [\"u08\", \"2026-04-08\"], [\"u08\", \"2026-05-04\"], [\"u08\", \"2026-06-21\"], [\"u09\", \"2026-01-11\"], [\"u09\", \"2026-02-15\"], [\"u09\", \"2026-03-18\"], [\"u09\", \"2026-06-02\"], [\"u10\", \"2026-02-20\"], [\"u10\", \"2026-03-26\"], [\"u10\", \"2026-05-27\"], [\"u10\", \"2026-07-01\"], [\"u11\", \"2026-03-14\"], [\"u11\", \"2026-04-08\"], [\"u11\", \"2026-06-26\"], [\"u12\", \"2026-04-06\"], [\"u12\", \"2026-05-09\"], [\"u12\", \"2026-07-11\"], [\"u13\", \"2026-01-06\"], [\"u13\", \"2026-03-06\"], [\"u13\", \"2026-04-17\"], [\"u13\", \"2026-05-14\"], [\"u14\", \"2026-02-10\"], [\"u14\", \"2026-03-08\"], [\"u14\", \"2026-04-21\"], [\"u14\", \"2026-07-06\"], [\"u15\", \"2026-03-21\"], [\"u15\", \"2026-05-26\"], [\"u15\", \"2026-06-12\"], [\"u15\", \"2026-07-22\"], [\"u16\", \"2026-04-25\"], [\"u16\", \"2026-05-17\"], [\"u17\", \"2026-01-20\"], [\"u17\", \"2026-02-19\"], [\"u17\", \"2026-03-21\"], [\"u17\", \"2026-07-02\"], [\"u18\", \"2026-02-19\"], [\"u18\", \"2026-03-24\"], [\"u18\", \"2026-05-17\"], [\"u19\", \"2026-03-01\"], [\"u19\", \"2026-04-09\"], [\"u19\", \"2026-06-06\"], [\"u20\", \"2026-04-01\"], [\"u20\", \"2026-05-24\"], [\"u20\", \"2026-06-07\"], [\"u20\", \"2026-07-20\"], [\"u21\", \"2026-01-14\"], [\"u21\", \"2026-02-22\"], [\"u21\", \"2026-04-16\"], [\"u21\", \"2026-05-15\"], [\"u21\", \"2026-07-24\"], [\"u22\", \"2026-02-16\"], [\"u22\", \"2026-03-20\"], [\"u22\", \"2026-05-15\"], [\"u23\", \"2026-03-16\"], [\"u23\", \"2026-04-14\"], [\"u23\", \"2026-07-13\"], [\"u24\", \"2026-04-14\"], [\"u24\", \"2026-05-25\"], [\"u24\", \"2026-06-19\"], [\"u24\", \"2026-07-21\"]]}",
+     "width": 320,
+     "height": 300
+    },
+    "code": null,
+    "label": "Logins"
+   },
+   {
+    "id": "t40_cohort",
+    "type": "flograph.transform.cohort_analysis",
+    "pos": [
+     560,
+     60
+    ],
+    "params": {
+     "user_id": "user",
+     "date_column": "when",
+     "retention_as": "percent"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t40_cohort_tbl",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     800,
+     0
+    ],
+    "params": {
+     "width": 620,
+     "height": 240
+    },
+    "code": null,
+    "label": "Retention by signup month"
+   },
+   {
+    "id": "t40_cohort_rows",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     800,
+     340
+    ],
+    "params": {
+     "width": 420,
+     "height": 220
+    },
+    "code": null,
+    "label": "Each login, labelled"
+   },
+   {
+    "id": "t40_n_cohort",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     400
+    ],
+    "params": {
+     "text": "Each person's **cohort** is the month of their first login; **period** counts\nmonths since. The matrix shows the share of each cohort still logging in —\nread across a row to see one cohort fade.",
+     "width": 560,
+     "height": 140
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t40_orders",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     760
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"order\", \"type\": \"text\"}, {\"name\": \"country\", \"type\": \"text\"}, {\"name\": \"amount\", \"type\": \"number\"}], \"rows\": [[\"A1\", \"GB\", 120], [\"A2\", \"FR\", 80], [\"A3\", \"DE\", 45], [\"A4\", \"XX\", 30], [\"A5\", \"gb\", 99]]}",
+     "width": 320,
+     "height": 220
+    },
+    "code": null,
+    "label": "Orders"
+   },
+   {
+    "id": "t40_countries",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     1060
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"code\", \"type\": \"text\"}, {\"name\": \"name\", \"type\": \"text\"}], \"rows\": [[\"GB\", \"United Kingdom\"], [\"FR\", \"France\"], [\"DE\", \"Germany\"]]}",
+     "width": 320,
+     "height": 180
+    },
+    "code": null,
+    "label": "Country lookup"
+   },
+   {
+    "id": "t40_mapped",
+    "type": "flograph.transform.replace_values",
+    "pos": [
+     560,
+     900
+    ],
+    "params": {
+     "columns": "country",
+     "case_insensitive": true,
+     "unmatched": "use default",
+     "default": "Unknown"
+    },
+    "code": null,
+    "label": "Country names"
+   },
+   {
+    "id": "t40_mapped_tbl",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     800,
+     820
+    ],
+    "params": {
+     "width": 400,
+     "height": 240
+    },
+    "code": null,
+    "label": "Orders with names"
+   },
+   {
+    "id": "t40_n_lookup",
+    "type": "flograph.util.note",
+    "pos": [
+     800,
+     1160
+    ],
+    "params": {
+     "text": "The lookup's first column is what to find, the second what to write. *Ignore\ncase* catches `gb`; *Unmatched cells → use default* turns `XX` into\n`Unknown`.",
+     "width": 400,
+     "height": 140
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t40_products",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     1580
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"sku\", \"type\": \"text\"}, {\"name\": \"units\", \"type\": \"integer\"}], \"rows\": [[\"Kettle\", 340], [\"Toaster\", 120], [\"Blender\", 410], [\"Mixer\", 75], [\"Grill\", 260], [\"Fryer\", 510], [\"Juicer\", 40], [\"Scales\", 190], [\"Press\", 95], [\"Wok\", 120]]}",
+     "width": 300,
+     "height": 320
+    },
+    "code": null,
+    "label": "Product sales"
+   },
+   {
+    "id": "t40_best_worst",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     560,
+     1580
+    ],
+    "params": {
+     "width": 360,
+     "height": 340,
+     "format_rules": "units top 3 => row green\nunits bottom 3 => row red\nsku if units top 1 => icon ★ amber"
+    },
+    "code": null,
+    "label": "Best & worst sellers"
+   },
+   {
+    "id": "t40_n_best",
+    "type": "flograph.util.note",
+    "pos": [
+     980,
+     1580
+    ],
+    "params": {
+     "text": "Rules in **Conditional formatting**:\n\n    units top 3    => row green\n    units bottom 3 => row red\n    sku if units top 1 => icon ★ amber\n\n`top 10%` works too. They are measured over the whole column, and a tie\nwith the last place is included.",
+     "width": 420,
+     "height": 260
+    },
+    "code": null,
+    "label": null
+   }
+  ],
+  "connections": [
+   {
+    "id": "t40_c01",
+    "src": [
+     "t40_events",
+     "table"
+    ],
+    "dst": [
+     "t40_cohort",
+     "table"
+    ]
+   },
+   {
+    "id": "t40_c02",
+    "src": [
+     "t40_cohort",
+     "retention"
+    ],
+    "dst": [
+     "t40_cohort_tbl",
+     "table"
+    ]
+   },
+   {
+    "id": "t40_c03",
+    "src": [
+     "t40_cohort",
+     "table"
+    ],
+    "dst": [
+     "t40_cohort_rows",
+     "table"
+    ]
+   },
+   {
+    "id": "t40_c04",
+    "src": [
+     "t40_orders",
+     "table"
+    ],
+    "dst": [
+     "t40_mapped",
+     "table"
+    ]
+   },
+   {
+    "id": "t40_c05",
+    "src": [
+     "t40_countries",
+     "table"
+    ],
+    "dst": [
+     "t40_mapped",
+     "lookup"
+    ]
+   },
+   {
+    "id": "t40_c06",
+    "src": [
+     "t40_mapped",
+     "table"
+    ],
+    "dst": [
+     "t40_mapped_tbl",
+     "table"
+    ]
+   },
+   {
+    "id": "t40_c07",
+    "src": [
+     "t40_products",
+     "table"
+    ],
+    "dst": [
+     "t40_best_worst",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "t40_f_cohort",
+    "title": "Cohort Analysis",
+    "rect": [
+     -40,
+     -70,
+     1500,
+     700
+    ],
+    "color": "#2f4a3f"
+   },
+   {
+    "id": "t40_f_lookup",
+    "title": "Replace Values with a lookup",
+    "rect": [
+     -40,
+     690,
+     1280,
+     700
+    ],
+    "color": "#2b3a55"
+   },
+   {
+    "id": "t40_f_best",
+    "title": "Best and worst",
+    "rect": [
+     -40,
+     1510,
+     1480,
+     480
+    ],
+    "color": "#3b3355"
+   }
+  ],
+  "pages": []
+ }
+}

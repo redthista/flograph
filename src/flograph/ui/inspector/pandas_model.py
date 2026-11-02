@@ -710,7 +710,7 @@ class PandasModel(QAbstractTableModel):
             start = block * _BLOCK
             rows = self._df.iloc[start:start + _BLOCK]
             found = self._row_cache[block] = {
-                i: evaluate_rows(rows, [rule])
+                i: evaluate_rows(rows, [rule], pool_frame=self._df)
                 for i, rule in enumerate(self._rules) if self._is_row_rule(rule)}
         return found
 
