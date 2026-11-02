@@ -543,18 +543,32 @@ grid; the search box filters across the page.
 
 ```bash
 uv pip install -p .venv/bin/python -e ".[dev]"
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/ -q
-
-# The full suite is ~6 min serial. Run it in parallel (pytest-xdist, in the
-# dev extra) — ~1 min on a 12-core machine:
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/ -q -n12 --dist loadfile
+scripts/run_tests.py                         # whole suite, adaptively
+scripts/run_tests.py tests/test_registry.py  # focused check
+scripts/run_tests.py --explain               # preview the resource budget
 ```
 
-`--dist loadfile` is required with `-n`: test modules share a module-scoped Qt
-fixture and isolate `QSettings` per file, so a module must run whole on one
-worker. Past `-n12` it stops scaling — `test_frames.py` is the long pole.
+### Resource-aware test runs
 
-Architecture (src layout):
+Use `scripts/run_tests.py` for tests. It chooses parallel workers from CPU
+load, temperature and available RAM, allowing about 3 GiB per worker plus
+room for the controller. `--workers N` is also bounded by available RAM;
+`--workers 0` runs serially. `--explain` previews the decision.
+
+On Linux with a working systemd user manager, the entire test process tree
+gets a memory ceiling of 60% of available RAM or half of total RAM, whichever
+is smaller, and cannot use swap. Reaching that ceiling can kill test workers
+and fail the run; retry with fewer workers. Other platforms still get the
+worker limit and print that OS memory enforcement is unavailable. The RAM
+budget is chosen at launch, so leave headroom when starting other heavy apps.
+
+Parallel runs use `--dist loadfile`: test modules share a module-scoped Qt
+fixture and isolate `QSettings` per file, so a module must run whole on one
+worker.
+
+### Architecture
+
+Source layout:
 
 - **`flograph/core`** — Qt-free model: graph, typed ports, script contract,
   registry, JSON serialization, spreadsheet engine, report parsing, layering.

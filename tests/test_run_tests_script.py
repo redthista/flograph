@@ -108,3 +108,41 @@ class TestTemperature:
         monkeypatch.setattr(script, "Path", lambda p: tmp_path
                             if str(p) == "/sys/class/hwmon" else Path(p))
         assert script.cpu_temperature() is None
+
+
+class TestMemory:
+    def test_busy_machine_limits_even_explicit_worker_count(self, script):
+        workers, budget = script.memory_plan(32 * script.GIB, 8 * script.GIB, 12)
+        assert budget == int(8 * script.GIB * 0.6)
+        assert workers == 1
+
+    def test_idle_machine_keeps_half_total_for_other_apps(self, script):
+        workers, budget = script.memory_plan(32 * script.GIB, 30 * script.GIB, 12)
+        assert budget == 16 * script.GIB
+        assert workers == 5
+
+    def test_serial_request_stays_serial(self, script):
+        assert script.memory_plan(32 * script.GIB, 30 * script.GIB, 0)[0] == 0
+
+    def test_low_memory_still_has_a_finite_budget(self, script):
+        workers, budget = script.memory_plan(8 * script.GIB, script.GIB, 12)
+        assert workers == 1
+        assert 0 < budget < script.GIB
+
+    def test_scope_probe_failure_does_not_claim_enforcement(self, script, monkeypatch):
+        import subprocess
+        monkeypatch.setattr(script.sys, 'platform', 'linux')
+        monkeypatch.setattr(script.shutil, 'which', lambda _: '/usr/bin/systemd-run')
+        monkeypatch.setattr(script.subprocess, 'run',
+                            lambda *a, **k: subprocess.CompletedProcess(a, 1))
+        assert script.memory_scope(script.GIB) == []
+
+    def test_scope_limits_all_children_and_disables_swap(self, script, monkeypatch):
+        import subprocess
+        monkeypatch.setattr(script.sys, 'platform', 'linux')
+        monkeypatch.setattr(script.shutil, 'which', lambda _: '/usr/bin/systemd-run')
+        monkeypatch.setattr(script.subprocess, 'run',
+                            lambda *a, **k: subprocess.CompletedProcess(a, 0))
+        command = script.memory_scope(script.GIB)
+        assert f'MemoryMax={script.GIB}' in command
+        assert 'MemorySwapMax=0' in command
