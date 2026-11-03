@@ -1784,6 +1784,14 @@ class MainWindow(QMainWindow):
         engine.node_progress.connect(on_node_progress)
         engine.node_log.connect(on_node_logged)
         engine.run_finished.connect(on_finished)
+        engine.node_succeeded.connect(self._refresh_managed_files)
+        engine.run_finished.connect(self._persist_managed_files)
+        QTimer.singleShot(0, lambda: self._refresh_managed_files(""))
+        self.graph.events.connected.connect(lambda *_: self._refresh_managed_files(""))
+        self.graph.events.param_changed.connect(
+            lambda node_id, name, _value: self._refresh_managed_files(node_id, stored=True)
+            if name == "_managed_files" else None)
+
         engine.node_failed.connect(self._on_node_failed)
         engine.node_succeeded.connect(self.editor_panel.on_node_succeeded)
         engine.node_succeeded.connect(self._on_figure_node_succeeded)
@@ -2284,6 +2292,66 @@ class MainWindow(QMainWindow):
                 scene = getattr(page, "scene", None)
                 if scene is not None:
                     scene.refresh_node_tiles(node_id)
+
+    def _refresh_managed_files(self, node_id: str, *, stored=False) -> None:
+        from flograph.core.managed_folder import ManagedFolder
+        if node_id and not stored:
+            entry = self.engine.cache.get(node_id)
+            if entry is None or not any(isinstance(v, ManagedFolder) for v in entry.outputs.values()):
+                return
+        for node in self.graph.nodes.values():
+            if node.spec.card not in ("managed_folder", "managed_reader"):
+                continue
+            item = self.scene.node_items.get(node.id)
+            widget = getattr(item, "_control_widget", None)
+            if widget is None:
+                continue
+            source = node.id
+            port = "folder"
+            if node.spec.card == "managed_reader":
+                conn = self.graph.input_connection(node.id, "folder")
+                if conn is None:
+                    continue
+                source, port = conn.src_node, conn.src_port
+            if node_id and source != node_id:
+                continue
+            entry = None if stored else self.engine.cache.get(source)
+            folder = entry.outputs.get(port) if entry else None
+            if folder is None:
+                upstream = self.graph.nodes.get(source)
+                if upstream and upstream.spec.card == "managed_folder":
+                    folder = ManagedFolder.from_params(upstream.params)
+            if isinstance(folder, ManagedFolder) and widget.folder != folder:
+                widget.set_folder(folder)
+
+    def _persist_managed_files(self, *args) -> None:
+        """Import computed folder snapshots through undo, after workers finish.
+
+        A refresh run verifies the new stored snapshot. Never write
+        graph params from a worker, or while downstream nodes are running.
+        """
+        from flograph.core.managed_folder import ManagedFolder, FILES_PARAM, METADATA_PARAM
+        snapshots = []
+        for node in self.graph.nodes.values():
+            if node.spec.card != "managed_folder" or node.dirty:
+                continue
+            entry = self.engine.cache.get(node.id)
+            folder = entry.outputs.get("folder") if entry else None
+            if (isinstance(folder, ManagedFolder)
+                    and (folder.to_param() != node.params.get(FILES_PARAM, {})
+                         or folder.metadata_param() != node.params.get(METADATA_PARAM, {}))):
+                snapshots.append((node.id, folder))
+        if snapshots:
+            self.undo_stack.beginMacro("Import uploaded files")
+            try:
+                for node_id, folder in snapshots:
+                    self.undo_stack.push(SetParamCommand(
+                        self.graph, node_id, FILES_PARAM, folder.to_param(), merge=False))
+                    self.undo_stack.push(SetParamCommand(
+                        self.graph, node_id, METADATA_PARAM, folder.metadata_param(), merge=False))
+            finally:
+                self.undo_stack.endMacro()
+            self.engine.request_run([node_id for node_id, _ in snapshots])
 
     def _on_control_node_succeeded(self, node_id: str) -> None:
         """Re-read whatever this control's own inputs supplied on that run —

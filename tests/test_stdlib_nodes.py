@@ -2332,3 +2332,153 @@ class TestFilterPage:
                        {"filters": filters, "show_numbers": False},
                        table=sales)
         assert list(out["filtered"]["units"]) == [20, 30]
+
+
+class TestLookupChooser:
+    def test_per_row_files_composite_keys_and_order(self, registry):
+        from flograph.core.managed_folder import ManagedFolder
+        folder = ManagedFolder().with_file("v1.csv", b"sku,area,price\nA,north,10\nB,south,20\n").with_file(
+            "v2.csv", b"sku,area,price\nA,north,12\nB,south,25\n")
+        table = pd.DataFrame({"product": ["B", "A", "A", "X"], "region": ["south", "north", "north", "north"],
+                              "lookup_file": ["v2.csv", "v1.csv", "v2.csv", "v1.csv"]}, index=[9, 2, 9, 1])
+        before = table.copy(deep=True)
+        out = run_node(registry, "flograph.transform.lookup_chooser",
+                       {"filename_column": "lookup_file", "left_on": "product, region", "right_on": "sku, area"},
+                       table=table, folder=folder)["table"]
+        assert out.index.tolist() == [9, 2, 9, 1]
+        assert out["price"].iloc[:3].tolist() == [25, 10, 12]
+        assert pd.isna(out["price"].iloc[3])
+        pd.testing.assert_frame_equal(table, before)
+
+    @pytest.mark.parametrize("params, rows, data, error", [
+        ({"left_on": "id,x"}, {"id": [1], "file": ["v.csv"]}, b"id,v\n1,2\n", "same number"),
+        ({}, {"id": [1], "file": [None]}, b"id,v\n1,2\n", "non-blank"),
+        ({}, {"id": [1], "file": ["v.csv"]}, b"id,v\n1,2\n1,3\n", "not unique"),
+        ({"right_on": "missing"}, {"id": [1], "file": ["v.csv"]}, b"id,v\n1,2\n", "Right columns missing"),
+    ])
+    def test_actionable_errors(self, registry, params, rows, data, error):
+        from flograph.core.managed_folder import ManagedFolder
+        config = {"filename_column": "file", "left_on": "id", "right_on": "id", **params}
+        with pytest.raises(ValueError, match=error):
+            run_node(registry, "flograph.transform.lookup_chooser", config, table=pd.DataFrame(rows),
+                     folder=ManagedFolder().with_file("v.csv", data))
+
+    def test_missing_file(self, registry):
+        from flograph.core.managed_folder import ManagedFolder
+        with pytest.raises(FileNotFoundError, match="absent.csv"):
+            run_node(registry, "flograph.transform.lookup_chooser",
+                     {"filename_column": "file", "left_on": "id", "right_on": "id"},
+                     table=pd.DataFrame({"id": [1], "file": ["absent.csv"]}), folder=ManagedFolder())
+
+
+class TestLookupRules:
+    def test_multiple_rules_default_all_and_optional_selection(self, registry, monkeypatch):
+        from flograph.core.managed_folder import ManagedFolder
+        import flograph.core.managed_folder as mf
+        folder = ManagedFolder().with_file("products.csv", b"sku,description,unused\nA,Apple,other\nB,Banana,other\n").with_file(
+            "prices.csv", b"sku,area,price,spare\nA,north,10,x\nB,south,20,y\n")
+        data = pd.DataFrame({"filename": ["a.csv", "b.csv", "a.csv"], "product": ["A", "B", "B"],
+                             "region": ["north", "south", "south"]}, index=[7, 7, 2])
+        original = data.copy(deep=True)
+        rules = pd.DataFrame([
+            {"source_file": "a.csv", "lookup_file": "products.csv", "left_on": "product", "right_on": "sku"},
+            {"source_file": "a.csv", "lookup_file": "prices.csv", "left_on": "product, region", "right_on": "sku, area", "columns": "price"},
+            {"source_file": "b.csv", "lookup_file": "products.csv", "left_on": "product", "right_on": "sku"},
+        ])
+        reads = []
+        reader = mf.read_table
+        def counted(folder, name, **kwargs):
+            reads.append(name)
+            return reader(folder, name, **kwargs)
+        monkeypatch.setattr(mf, "read_table", counted)
+        out = run_node(registry, "flograph.transform.lookup_chooser", table=data, folder=folder, rules=rules)
+        result = out["table"]
+        assert result["description"].tolist() == ["Apple", "Banana", "Banana"]
+        assert result["price"].iloc[[0, 2]].tolist() == [10, 20]
+        assert pd.isna(result["price"].iloc[1])
+        assert "unused" in result and "spare" not in result
+        assert "sku" not in result and "area" not in result
+        assert result.index.tolist() == [7, 7, 2]
+        assert reads == ["products.csv", "prices.csv"]
+        pd.testing.assert_frame_equal(data, original)
+
+    def test_diagnostics_preserve_main_rows(self, registry):
+        from flograph.core.managed_folder import ManagedFolder
+        folder = ManagedFolder().with_file("lookup.csv", b"id,value\n1,\n9,unused\n")
+        data = pd.DataFrame({"filename": ["a", "a", "unmapped"], "id": [1, 2, 3]})
+        rules = pd.DataFrame([
+            {"source_file": "a", "lookup_file": "lookup.csv", "left_on": "id", "right_on": "id"},
+            {"source_file": "a", "lookup_file": "missing.csv", "left_on": "id", "right_on": "id"},
+            {"source_file": "absent", "lookup_file": "lookup.csv", "left_on": "id", "right_on": "id"},
+        ])
+        out = run_node(registry, "flograph.transform.lookup_chooser", table=data, folder=folder, rules=rules)
+        assert len(out["table"]) == 3
+        reasons = set(out["diagnostics"]["reason"])
+        assert {"key_not_found", "lookup_key_unused", "empty_lookup_value", "no_rule", "missing_lookup_file", "source_not_found"} <= reasons
+
+    def test_existing_columns_and_conflicts_keep_first_values(self, registry):
+        from flograph.core.managed_folder import ManagedFolder
+        folder = ManagedFolder().with_file("one.csv", b"id,original,added\n1,overwrite,first\n").with_file("two.csv", b"id,added\n1,second\n")
+        rules = pd.DataFrame([{"source_file": "a", "lookup_file": name, "left_on": "id", "right_on": "id"}
+                              for name in ["one.csv", "two.csv"]])
+        out = run_node(registry, "flograph.transform.lookup_chooser", table=pd.DataFrame({"filename": ["a"], "id": [1], "original": ["keep"]}), folder=folder, rules=rules)
+        assert out["table"]["original"].tolist() == ["keep"]
+        assert out["table"]["added"].tolist() == ["first"]
+        assert {"column_already_exists", "conflicting_rules"} <= set(out["diagnostics"]["reason"])
+
+    def test_incomplete_keys_and_incompatible_key_types_are_diagnostics(self, registry):
+        from flograph.core.managed_folder import ManagedFolder
+        folder = ManagedFolder().with_file("keys.csv", b"id,value\n,do not match\n1,valid\n").with_file(
+            "text.csv", b"id,extra\nword,never\n")
+        table = pd.DataFrame({"filename": ["a", "a"], "id": [None, 1]})
+        rules = pd.DataFrame([{"source_file": "a", "lookup_file": name, "left_on": "id", "right_on": "id"}
+                              for name in ["keys.csv", "text.csv"]])
+        out = run_node(registry, "flograph.transform.lookup_chooser", table=table, folder=folder, rules=rules)
+        assert pd.isna(out["table"]["value"].iloc[0])
+        assert out["table"]["value"].iloc[1] == "valid"
+        assert {"missing_main_key", "missing_lookup_key", "join_error"} <= set(out["diagnostics"]["reason"])
+
+    def test_mixed_formats_encodings_and_sheets(self, registry):
+        import io
+        from flograph.core.managed_folder import ManagedFolder
+        pytest.importorskip("openpyxl")
+        pytest.importorskip("pyarrow")
+        excel = io.BytesIO()
+        with pd.ExcelWriter(excel, engine="openpyxl") as writer:
+            pd.DataFrame({"key": [1], "excel_value": ["café"]}).to_excel(writer, sheet_name="Data", index=False)
+        parquet = io.BytesIO()
+        pd.DataFrame({"key": [1], "parquet_value": [99]}).to_parquet(parquet, index=False)
+        folder = ManagedFolder().with_file("latin.csv", "key;latin_value\n1;café\n".encode("latin-1")).with_file(
+            "utf.csv", "key,utf_value\n1,日本語\n".encode("utf-8-sig")).with_file("book.xlsx", excel.getvalue()).with_file("data.parquet", parquet.getvalue())
+        rules = pd.DataFrame([
+            {"source_file": "a", "lookup_file": "latin.csv", "left_on": "id", "right_on": "key", "encoding": "latin-1", "separator": ";"},
+            {"source_file": "a", "lookup_file": "utf.csv", "left_on": "id", "right_on": "key", "encoding": "utf-8-sig"},
+            {"source_file": "a", "lookup_file": "book.xlsx", "left_on": "id", "right_on": "key", "sheet": "Data"},
+            {"source_file": "a", "lookup_file": "data.parquet", "left_on": "id", "right_on": "key"},
+        ])
+        out = run_node(registry, "flograph.transform.lookup_chooser", table=pd.DataFrame({"filename": ["a"], "id": [1]}), folder=folder, rules=rules)
+        assert out["diagnostics"].empty
+        assert out["table"].iloc[0][["latin_value", "utf_value", "excel_value", "parquet_value"]].tolist() == ["café", "日本語", "café", 99]
+
+    def test_same_excel_file_different_sheets(self, registry):
+        import io
+        from flograph.core.managed_folder import ManagedFolder
+        pytest.importorskip("openpyxl")
+        data = io.BytesIO()
+        with pd.ExcelWriter(data, engine="openpyxl") as writer:
+            pd.DataFrame({"id": [1], "value": [10]}).to_excel(writer, sheet_name="First", index=False)
+            pd.DataFrame({"id": [1], "value": [20]}).to_excel(writer, sheet_name="Second", index=False)
+        rules = pd.DataFrame([{"source_file": name, "lookup_file": "book.xlsx", "left_on": "id", "right_on": "id", "sheet": sheet}
+                              for name, sheet in [("a", "0"), ("b", "Second")]])
+        out = run_node(registry, "flograph.transform.lookup_chooser", table=pd.DataFrame({"filename": ["a", "b"], "id": [1, 1]}), folder=ManagedFolder().with_file("book.xlsx", data.getvalue()), rules=rules)
+        assert out["table"]["value"].tolist() == [10, 20]
+
+    def test_text_variants_compression_and_bad_encoding(self, registry):
+        import gzip
+        from flograph.core.managed_folder import ManagedFolder, read_table
+        folder = ManagedFolder().with_file("data.csv.gz", gzip.compress("id,name\n1,café\n".encode("cp1252"))).with_file(
+            "data.ndjson", '{"id":1,"name":"café"}\n'.encode("latin-1"))
+        assert read_table(folder, "data.csv.gz", encoding="cp1252")["name"].tolist() == ["café"]
+        assert read_table(folder, "data.ndjson", encoding="latin-1")["name"].tolist() == ["café"]
+        with pytest.raises(UnicodeDecodeError):
+            read_table(folder, "data.csv.gz", encoding="utf-8")

@@ -1045,7 +1045,8 @@ class NodeItem(QGraphicsObject):
         self.image_card = kind == "image" or self.pdf_card
         self.slicer = kind == "slicer"
         self.form = kind == "form"
-        self.control = kind in ("control", "form")
+        self.managed = kind in ("managed_folder", "managed_reader")
+        self.control = kind in ("control", "form") or self.managed
         # Goto/From: the two ends of a link the canvas doesn't draw
         self.goto_card = kind == "goto"
         self.from_card = kind == "from"
@@ -1330,6 +1331,9 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 240) or 240)
             return min(SLICER_MAX_H, max(self._slicer_min_height(), fixed))
+        if self.managed and self.node.spec.card == "managed_reader":
+            from ..managed_folder import reader_content_height
+            return HEADER_H + CARD_HANDLE + reader_content_height(self.node.params, self.width)
         if self.control:
             if self._live_height is not None:
                 return self._live_height
@@ -2760,6 +2764,8 @@ class NodeItem(QGraphicsObject):
     # -------------------------------------------------------------- controls
 
     def _control_default_size(self) -> tuple[float, float]:
+        if self.managed:
+            return (460, 320) if self.node.spec.card == "managed_folder" else (360, 200)
         from ..controls import FORM_SIZE, control_size
         if self.form:
             return FORM_SIZE
@@ -2768,6 +2774,8 @@ class NodeItem(QGraphicsObject):
     def _control_ceiling(self) -> tuple[float, float]:
         """(max_w, max_h) a control card may be resized to — the node's own
         width/height PARAMS say the same (test_card_size_limits)."""
+        if self.managed:
+            return 1200, 1000
         if self.form:
             from ..controls import FORM_MAX_SIZE
             return FORM_MAX_SIZE
@@ -2789,6 +2797,13 @@ class NodeItem(QGraphicsObject):
         flograph) leaves the card empty rather than refusing to load."""
         from ..controls import connect_control, host_control
 
+        if self.managed:
+            from ..managed_folder import ManagedFilesWidget
+            widget = ManagedFilesWidget(self)
+            self._control_widget = widget
+            self._control_proxy = self._card_proxy(widget)
+            self._layout_control_proxy()
+            return
         widget = host_control(self.node)
         if widget is None:
             return
@@ -4319,6 +4334,10 @@ class NodeItem(QGraphicsObject):
         if self.slicer:
             return (SLICER_MIN_W, SLICER_MAX_W,
                     self._slicer_min_height(), SLICER_MAX_H)
+        if self.managed:
+            if self.node.spec.card == "managed_reader":
+                return (300, 1200, self.body_height, self.body_height)
+            return (300, 1200, 200, 1000)
         if self.control:
             return (CONTROL_MIN_W, self._control_ceiling()[0],
                     CONTROL_MIN_H, self._control_ceiling()[1])

@@ -82,11 +82,12 @@ class TestBundledExamples:
             "39_status_cards.flograph",
             "40_table_helpers.flograph",
             "41_file_operations.flograph",
+            "42_managed_folder.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 43
+        assert len(window._examples_menu.actions()) == 44
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -137,6 +138,7 @@ class TestBundledExamples:
         "38_run_flow_child.flograph",
         "39_status_cards.flograph",
         "40_table_helpers.flograph",
+        "42_managed_folder.flograph",
         # 13, 18, 19, 21 and 41 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from

@@ -161,6 +161,28 @@ class BundleWriter:
 
     def write_project(self, data: dict) -> None:
         assert self._zip is not None
+        # Asset bytes belong to the project, never to the disposable cache.
+        import copy
+        import base64
+        import hashlib
+        from .managed_folder import FILES_PARAM
+        data = copy.deepcopy(data)
+        written = set()
+        for node in data.get("graph", {}).get("nodes", []):
+            params = node.get("params", {})
+            files = params.get(FILES_PARAM)
+            if not files:
+                continue
+            refs = {}
+            for name, encoded in files.items():
+                raw = base64.b64decode(encoded, validate=True)
+                member = "assets/" + hashlib.sha256(raw).hexdigest()
+                if member not in written:
+                    self._zip.writestr(member, raw)
+                    written.add(member)
+                refs[name] = member
+            params.pop(FILES_PARAM)
+            node["managed_assets"] = refs
         self._zip.writestr(PROJECT_MEMBER, json.dumps(data, indent=2))
 
     def write_manifest(self, manifest: dict) -> None:

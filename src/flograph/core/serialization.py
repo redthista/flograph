@@ -659,6 +659,26 @@ def load(path: str | Path, registry: NodeRegistry) -> Graph:
     if container.is_bundle(path):
         with container.BundleReader(path) as reader:
             text = reader.read_text(container.PROJECT_MEMBER)
+            if text is not None:
+                import base64
+                from .managed_folder import FILES_PARAM
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    raise GraphError(f"not a flograph project: invalid JSON ({exc})") from exc
+                for entry in payload.get("graph", {}).get("nodes", []):
+                    refs = entry.pop("managed_assets", {})
+                    if refs:
+                        files = {}
+                        for name, member in refs.items():
+                            if not member.startswith("assets/"):
+                                raise GraphError("Invalid managed file asset reference")
+                            raw = reader.read_bytes(member)
+                            if raw is None:
+                                raise GraphError(f"Missing managed file: {name}")
+                            files[name] = base64.b64encode(raw).decode("ascii")
+                        entry.setdefault("params", {})[FILES_PARAM] = files
+                text = json.dumps(payload)
         if text is None:
             raise GraphError(
                 "not a flograph project: the bundle has no project.json")

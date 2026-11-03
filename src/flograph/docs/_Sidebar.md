@@ -6,6 +6,7 @@
 - **Building flows**
   - [[Nodes and the Library]]
   - [[The Table Spreadsheet]]
+  - [[Managed Folders]]
   - [[Flow Variables]]
   - [[Flo Assistant]]
 - **Building nodes**
