@@ -199,14 +199,36 @@ name the node that reads it and tick <b>Update what follows</b>.</p>
 <h3>What the app knows</h3>
 <p>An embed under <code>flograph.</code> names something about the app,
 not a node. <code>![[flograph.status]]</code> is a coloured pill: up to
-date, out of date, running or failed, with the last run beside it. The rest
-are words for a sentence: <code>flograph.date</code>,
-<code>time</code>, <code>last_run</code>, <code>run_time</code>,
-<code>run_result</code>, <code>nodes</code>, <code>out_of_date</code>,
-<code>failed</code>, <code>file</code>, <code>file_size</code>,
-<code>saved</code>, <code>memory</code>, <code>version</code>. Type
-<code>![[flo</code> for the list. They print too &mdash; put
-<code>apponly::</code> before one that is only for the app.</p>
+date, out of date, running or failed, with when the flow last ran and how
+long it took. It redraws as a run starts and ends. The rest are plain words,
+so they sit inside a sentence:</p>
+<p><code>Data as of ![[flograph.last_run]] on ![[flograph.date]].</code></p>
+<table cellspacing="0" cellpadding="4">
+<tr><td><code>![[flograph.status]]</code></td>
+    <td>the flow's state, the last run and how long it took</td></tr>
+<tr><td><code>flograph.date</code>, <code>flograph.time</code></td>
+    <td>today's date, and the time the page was drawn</td></tr>
+<tr><td><code>flograph.last_run</code>, <code>run_time</code>,
+        <code>run_result</code></td>
+    <td>when the last run finished, how long it took, and whether it was OK,
+        failed or stopped</td></tr>
+<tr><td><code>flograph.nodes</code>, <code>out_of_date</code>,
+        <code>failed</code></td>
+    <td>how many nodes there are, how many are waiting to run, how many
+        failed</td></tr>
+<tr><td><code>flograph.file</code>, <code>file_size</code>,
+        <code>saved</code></td>
+    <td>the project file, its size, and when it was last saved</td></tr>
+<tr><td><code>flograph.memory</code>, <code>version</code></td>
+    <td>the memory flograph is using, and its version</td></tr>
+</table>
+<p>Type <code>![[flo</code> and the autocomplete lists them all. A fact
+that cannot be known &mdash; the file of a project not yet saved, say &mdash;
+shows as &ldquo;not saved yet&rdquo; or &ldquo;&mdash;&rdquo;; a misspelt
+one says so on the page. They print in the PDF and the HTML too, since the
+date a report went out is worth printing &mdash; put <code>apponly::</code>
+before one that is only for the app:
+<code>apponly:: ![[flograph.status]]</code>.</p>
 
 <h3>Columns</h3>
 <p>Text on the left, a chart on the right — a fenced <code>columns</code>
