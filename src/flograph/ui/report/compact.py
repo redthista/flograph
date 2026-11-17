@@ -25,6 +25,14 @@ PDF does.
 and the rest says in one declaration what it said in four or twelve:
 four equal margins are `margin`, four sides of one border are `border`.
 
+One more is mended in Qt's stylesheet rather than its styles: it opens with
+`p, li { white-space: pre-wrap; }`, meant for the text of a paragraph or an
+item. `white-space` inherits, so a list nested in an item took it too, and
+the newlines Qt puts between its `<li>` tags became blank lines — a nested
+list's items sat twice as far apart as a top-level one's, at any depth, under
+any theme or none. The rule is corrected where it is written: a list inside
+an item reads as normal text again.
+
 What a theme reads stays as it was. The themes pick out Qt's markup by the
 text of its inline styles (`[style*="margin-left:40px; margin-right:40px"]`
 for a quote, `[style*=" color:"]` for a span that has a colour of its
@@ -63,6 +71,11 @@ _FOLDS = (("margin-{}", "margin", False), ("padding-{}", "padding", True),
 _INDENTED = re.compile(r"text-indent:\s*(?!0(?:px)?\s*(?:;|$|\"))", re.I)
 
 
+#: Qt's own rule, and what it is mended to (see the docstring).
+_PRE_WRAP = "p, li { white-space: pre-wrap; }"
+_PRE_WRAP_MENDED = _PRE_WRAP + " li > ul, li > ol { white-space: normal; }"
+
+
 def compact_qt_html(html: str) -> str:
     """`html` (QTextDocument.toHtml's) with its inline styles shortened —
     see the module's docstring for what may and may not go."""
@@ -72,7 +85,7 @@ def compact_qt_html(html: str) -> str:
         style = _compact_style(match.group(2), drop_indent)
         return match.group(1) + style + match.group(3)
 
-    html = _STYLE_ATTR.sub(one, html)
+    html = _STYLE_ATTR.sub(one, html).replace(_PRE_WRAP, _PRE_WRAP_MENDED, 1)
     # an attribute left with nothing in it
     return html.replace(' style=""', "")
 

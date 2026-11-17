@@ -173,3 +173,17 @@ class TestTheWebPage:
                      "font-family:'monospace'", "font-family:'sans-serif'",
                      "border-style:none"):
             assert text in html, text
+
+
+def test_nested_list_does_not_inherit_pre_wrap():
+    """Qt's `p, li { white-space: pre-wrap }` inherits into a list nested in
+    an item, turning the newlines between its <li> tags into blank lines —
+    a nested list's items sat twice as far apart, at any depth. The rule is
+    mended where Qt writes it, so no theme has to know."""
+    from PySide6.QtGui import QTextDocument
+    doc = QTextDocument()
+    doc.setMarkdown("- a\n- b\n  - c\n    - d\n")
+    out = compact_qt_html(doc.toHtml())
+    assert out.count("white-space: pre-wrap") == 1  # Qt's rule, kept
+    assert "li > ul, li > ol { white-space: normal; }" in out
+    assert out.count("li > ul") == 1  # said once, not once per list

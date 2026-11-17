@@ -177,6 +177,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   border: 1px solid var(--line); border-radius: 3px; padding: 0 3px;
 }
 ul { margin: 6px 0 !important; padding-left: 18px; }
+li > ul, li > ol { margin: 0 !important; }
 li { margin: 1px 0 !important; }
 
 /* charts: a thin panel at the theme's shape */
@@ -331,6 +332,8 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
 }
 ul { margin: 8px 0 !important; padding: 12px 18px 12px 34px;
      background: var(--card); border-radius: 12px; box-shadow: var(--shadow); }
+li > ul, li > ol { margin: 0 !important; padding: 0 0 0 18px; background: none;
+                  border-radius: 0; box-shadow: none; border: 0; }
 li { margin: 2px 0 !important; }
 
 /* cards */
@@ -497,6 +500,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   background: rgba(34, 211, 238, 0.08); border-radius: 4px; padding: 0 4px;
 }
 ul { margin: 8px 0 !important; padding-left: 18px; }
+li > ul, li > ol { margin: 0 !important; }
 li::marker { color: var(--accent); }
 
 /* panels */
@@ -685,6 +689,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   border-radius: 2px; padding: 0 3px;
 }
 ul { margin: 6px 0 !important; padding-left: 18px; }
+li > ul, li > ol { margin: 0 !important; }
 li { margin: 2px 0 !important; }
 li::marker { color: var(--accent); }
 
@@ -880,6 +885,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   color: var(--amber); background: rgba(255, 176, 0, 0.08); padding: 0 3px;
 }
 ul { margin: 6px 0 !important; padding-left: 16px; }
+li > ul, li > ol { margin: 0 !important; }
 li { margin: 1px 0 !important; }
 li::marker { content: "\\25B8  "; color: var(--amber); }
 
@@ -1108,6 +1114,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   background: rgba(157, 140, 255, 0.14); border-radius: 5px; padding: 1px 5px;
 }
 ul { margin: 6px 0 !important; padding-left: 18px; }
+li > ul, li > ol { margin: 0 !important; }
 li { margin: 2px 0 !important; }
 li::marker { color: var(--pink); }
 
@@ -1323,6 +1330,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   background: var(--accent-soft); border-radius: 4px; padding: 0 4px;
 }
 ul { margin: 8px 0 !important; padding-left: 18px; }
+li > ul, li > ol { margin: 0 !important; }
 li::marker { color: var(--accent); }
 
 /* panels */
@@ -1507,6 +1515,7 @@ span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figu
   background: var(--panel-2); padding: 0 4px;
 }
 ul, ol { margin: 8px 0 !important; padding-left: 20px; }
+li > ul, li > ol { margin: 0 !important; }
 li::marker { color: var(--accent); font-weight: 700; }
 hr { border: 0; border-top: 1px solid var(--ink); margin: 28px 0; }
 
