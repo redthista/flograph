@@ -1088,7 +1088,8 @@ class NodeItem(QGraphicsObject):
                 BUTTON_MIN_W, float(node.params.get("width", BUTTON_W))))
         elif self.figure_card:
             self.width = min(FIGURE_MAX_W, max(
-                FIGURE_MIN_W, float(node.params.get("width", 420))))
+                self._figure_floor()[0],
+                float(node.params.get("width", 420))))
         elif self.table_viewer:
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(node.params.get("width", 420))))
@@ -1300,7 +1301,7 @@ class NodeItem(QGraphicsObject):
             if self._live_height is not None:
                 return self._live_height
             fixed = float(self.node.params.get("height", 320) or 320)
-            return min(FIGURE_MAX_H, max(FIGURE_MIN_H, fixed))
+            return min(FIGURE_MAX_H, max(self._figure_floor()[1], fixed))
         if self.table_viewer:
             if self._live_height is not None:
                 return self._live_height
@@ -1461,7 +1462,8 @@ class NodeItem(QGraphicsObject):
         if self.figure_card:
             self.prepareGeometryChange()
             self.width = min(FIGURE_MAX_W, max(
-                FIGURE_MIN_W, float(self.node.params.get("width", 420))))
+                self._figure_floor()[0],
+                float(self.node.params.get("width", 420))))
             # Columns/Rows/Fill are layout, not data: re-arrange now rather
             # than making the user re-run to see a grid change.
             self.relayout_figures()
@@ -4319,7 +4321,8 @@ class NodeItem(QGraphicsObject):
         if self.table:
             return TABLE_MIN_W, TABLE_MAX_W, TABLE_MIN_H, TABLE_MAX_H
         if self.figure_card:
-            return FIGURE_MIN_W, FIGURE_MAX_W, FIGURE_MIN_H, FIGURE_MAX_H
+            min_w, min_h = self._figure_floor()
+            return min_w, FIGURE_MAX_W, min_h, FIGURE_MAX_H
         if self.table_viewer:
             return (TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W,
                     TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H)
@@ -4347,6 +4350,24 @@ class NodeItem(QGraphicsObject):
         if self.button:
             return BUTTON_MIN_W, BUTTON_MAX_W, BUTTON_MIN_H, BUTTON_MAX_H
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
+
+    def _figure_floor(self) -> tuple[float, float]:
+        """(min_w, min_h) of a webview/figure card.
+
+        260 x 200 is right for a chart, which is no use smaller. It is wrong
+        for a status light or a stamp, which are small tiles by design: their
+        own `width`/`height` minimums (120 x 70) were silently overridden, so
+        every one drew at 260 x 200 or more and the panel offered sizes the
+        card refused. A node that declares a lower minimum gets it; one that
+        declares none, or a higher one, is unchanged.
+        """
+        floors = []
+        for name, generic in (("width", FIGURE_MIN_W), ("height", FIGURE_MIN_H)):
+            spec = self.node.spec.param(name)
+            declared = getattr(spec, "minimum", None) if spec else None
+            floors.append(min(generic, float(declared))
+                          if declared else generic)
+        return floors[0], floors[1]
 
     def _resizable(self) -> bool:
         """Whether this card offers a resize grip.

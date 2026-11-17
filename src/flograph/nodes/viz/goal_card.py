@@ -22,7 +22,7 @@ red over.
 NODE = {
     "label": "Goal Card",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "inputs": [("value", "any"),
                ("comparison", "any", {"optional": True}),
@@ -46,9 +46,9 @@ PARAMS = [
      "default": 0.8, "min": 0.0, "max": 10.0,
      "visible_when": {"mode": ["progress"]}},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 240, "min": 140, "max": 1600, "cosmetic": True},
+     "default": 240, "min": 140, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 140, "min": 90, "max": 1000, "cosmetic": True},
+     "default": 140, "min": 90, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]

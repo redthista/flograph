@@ -19,7 +19,7 @@ the lines, with "and N more" under them.
 NODE = {
     "label": "Alert List",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "inputs": [("table", "dataframe",
                 {"suggest": ["flograph.transform.filter_rows"]}),
@@ -39,9 +39,9 @@ PARAMS = [
     {"name": "max_rows", "type": "int", "label": "Most shown",
      "default": 20, "min": 1, "max": 1000},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 320, "min": 160, "max": 1600, "cosmetic": True},
+     "default": 320, "min": 160, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 220, "min": 90, "max": 2000, "cosmetic": True},
+     "default": 220, "min": 90, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]

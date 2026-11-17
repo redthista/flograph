@@ -19,7 +19,7 @@ with no refresh, worked out by the card itself as time passes — 0 never.
 NODE = {
     "label": "As-of Stamp",
     "category": "Util",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "inputs": [("trigger", "any", {"optional": True}),
                ("style", "object",
@@ -35,9 +35,9 @@ PARAMS = [
     {"name": "stale_minutes", "type": "int", "label": "Stale after (min)",
      "default": 0, "min": 0, "max": 525600},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 220, "min": 120, "max": 1600, "cosmetic": True},
+     "default": 220, "min": 120, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 60, "min": 40, "max": 600, "cosmetic": True},
+     "default": 60, "min": 40, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]

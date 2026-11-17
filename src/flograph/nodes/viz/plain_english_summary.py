@@ -19,7 +19,7 @@ chart title.
 NODE = {
     "label": "Plain-English Summary",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "inputs": [("value", "any", {"optional": True}),
                ("previous", "any", {"optional": True}),
@@ -47,9 +47,9 @@ PARAMS = [
     {"name": "higher_is_better", "type": "bool", "label": "Higher is better",
      "default": True, "visible_when": {"colour_direction": ["True"]}},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 360, "min": 160, "max": 2000, "cosmetic": True},
+     "default": 360, "min": 160, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 90, "min": 50, "max": 1000, "cosmetic": True},
+     "default": 90, "min": 50, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]

@@ -16,7 +16,7 @@ Expression or a Notify to branch on.
 NODE = {
     "label": "Status Light",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "inputs": [("value", "any"),
                ("style", "object",
@@ -36,9 +36,9 @@ PARAMS = [
     {"name": "show_value", "type": "bool", "label": "Show the number",
      "default": True},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 220, "min": 120, "max": 1600, "cosmetic": True},
+     "default": 220, "min": 120, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 110, "min": 70, "max": 1000, "cosmetic": True},
+     "default": 110, "min": 70, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]
