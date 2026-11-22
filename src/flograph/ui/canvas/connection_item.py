@@ -54,6 +54,28 @@ def _color_for(src: Optional[PortItem], dst: Optional[PortItem]) -> QColor:
     return theme.wire_color(concrete[0] if concrete else PortType.ANY)
 
 
+#: How strongly a wire shows, by its relation to the selected nodes. Quiet
+#: by default so the processing structure reads before the plumbing; a
+#: selected node's own wires come forward and the rest step back, so
+#: "what feeds this, and what does it feed" is answered by looking.
+WIRE_ALPHA_DEFAULT = 0.8
+WIRE_ALPHA_FOCUSED = 1.0
+WIRE_ALPHA_UNRELATED = 0.28
+#: extra width for a wire touching a selected node
+WIRE_FOCUS_EXTRA = 0.8
+
+
+def wire_focus(scene, conn) -> "Optional[bool]":
+    """None with nothing selected; True for a wire touching a selected
+    node; False for any other wire while something is selected. Reads the
+    scene's one precomputed set, so painting a wire costs a lookup, not a
+    walk of the selection."""
+    focus = getattr(scene, "focus_nodes", None)
+    if not focus:
+        return None
+    return conn.src_node in focus or conn.dst_node in focus
+
+
 class ConnectionItem(QGraphicsPathItem):
     def __init__(self, conn: Connection, src: PortItem, dst: PortItem) -> None:
         super().__init__()
@@ -153,6 +175,19 @@ class ConnectionItem(QGraphicsPathItem):
             color = theme.WIRE_VALID
             width = 3.0 if order else 5.0
         scene = self.scene()
+        alpha = WIRE_ALPHA_DEFAULT
+        if self.isSelected() or self._hover or self._drop_hint:
+            alpha = WIRE_ALPHA_FOCUSED
+        else:
+            related = wire_focus(scene, self.conn)
+            if related:
+                alpha = WIRE_ALPHA_FOCUSED
+                width += WIRE_FOCUS_EXTRA
+            elif related is False:
+                alpha = WIRE_ALPHA_UNRELATED
+        if alpha < 1.0:
+            color = QColor(color)
+            color.setAlphaF(color.alphaF() * alpha)
         threshold = getattr(scene, "lod_threshold", DEFAULT_LOD_THRESHOLD)
         lod_enabled = getattr(scene, "lod_enabled", True)
         lod = option.levelOfDetailFromTransform(painter.worldTransform())

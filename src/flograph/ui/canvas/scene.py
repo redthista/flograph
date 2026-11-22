@@ -424,6 +424,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # the other -- the only on-canvas evidence that a link exists, short
         # of asking for the line itself (see _refresh_link_lines)
         self.selectionChanged.connect(self._highlight_link_partners)
+        # the selected nodes whose wires come forward (connection_item.
+        # wire_focus); one set, read by each wire as it paints
+        self.focus_nodes: frozenset = frozenset()
+        self.selectionChanged.connect(self._focus_wires)
 
     # ------------------------------------------------------- event mirrors
 
@@ -1353,6 +1357,18 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # the loop above — an input pin fed only by a link would draw hollow
         for pin in self._frame_pins.values():
             pin.refresh_connected()
+
+    def _focus_wires(self) -> None:
+        """Bring the selected nodes' wires forward and let the rest step
+        back. Only when the set of selected nodes changes, and then one
+        scene-wide repaint rather than a call per wire: the selection
+        changes on every click, and the flow's size must not."""
+        focus = frozenset(item.node.id for item in self.selected_node_items())
+        if focus == self.focus_nodes:
+            return
+        self.focus_nodes = focus
+        if self.connection_items:
+            self.update()
 
     def _highlight_link_partners(self) -> None:
         """Light the cards linked to the selection, and put out the ones

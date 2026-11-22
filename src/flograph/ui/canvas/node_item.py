@@ -127,6 +127,13 @@ LABEL_LOD = 0.5  # hide port names below this zoom
 # (user-configurable via Settings > Canvas) are the actual source of truth —
 # see NodeGraphScene._flat_state.
 DEFAULT_LOD_THRESHOLD = 0.35
+#: Zoomed out, a card at least this wide on screen keeps a header strip and
+#: its name (at a fixed screen size), so a large flow seen whole still says
+#: what each card is. Processing nodes and small cards stay a bare fill --
+#: only a few cards are ever this big in one view, so the cost does not grow
+#: with the flow.
+FLAT_TITLE_MIN_PX = 90
+FLAT_TITLE_PX = 11.0
 
 # The ceiling every full-size card shares.
 #
@@ -3880,9 +3887,11 @@ class NodeItem(QGraphicsObject):
                 return tinted
         return theme.NODE_BODY
 
-    def _paint_flat(self, painter: QPainter) -> None:
+    def _paint_flat(self, painter: QPainter, lod: float = 0.0) -> None:
         """Cheap stand-in for the simplified state: one fill, no path/gradient/text —
-        the per-node cost that dominates when many nodes are visible at once."""
+        the per-node cost that dominates when many nodes are visible at once.
+        A card big enough on screen to be worth naming also gets a header
+        strip and its title (see FLAT_TITLE_MIN_PX)."""
         rect = QRectF(0, 0, self.width, self.body_height)
         # on the light canvas a bare white card melts into the page at this
         # zoom, so it keeps a hairline edge; the dark one never needed it
@@ -3897,13 +3906,40 @@ class NodeItem(QGraphicsObject):
             fill = theme.category_tint(self.node.spec.category, 0.30) or fill
         painter.setBrush(QBrush(fill))
         painter.drawRect(rect)
+        if (lod > 0 and not self._square and not self.compact
+                and self.width * lod >= FLAT_TITLE_MIN_PX):
+            self._paint_flat_title(painter, rect, lod)
+
+    def _paint_flat_title(self, painter: QPainter, rect: QRectF,
+                          lod: float) -> None:
+        """A header strip and the card's name, sized in screen pixels so it
+        reads at any zoom below the flat threshold."""
+        strip_h = min(rect.height(), (FLAT_TITLE_PX + 8.0) / lod)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(self._header_color()))
+        painter.drawRect(QRectF(rect.x(), rect.y(), rect.width(), strip_h))
+        painter.save()
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        font = painter.font()
+        font.setBold(False)
+        font.setWeight(QFont.DemiBold)
+        font.setPixelSize(max(1, round(FLAT_TITLE_PX / lod)))
+        painter.setFont(font)
+        painter.setPen(QPen(theme.NODE_TEXT))
+        text_rect = QRectF(rect.x() + 4.0 / lod, rect.y(),
+                           rect.width() - 8.0 / lod, strip_h)
+        label = f"⚠ {self.node.label}" if self.broken else self.node.label
+        text = painter.fontMetrics().elidedText(
+            label, Qt.ElideRight, int(text_rect.width()))
+        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
+        painter.restore()
 
     def paint(self, painter: QPainter,
               option: QStyleOptionGraphicsItem, widget=None) -> None:
         lod = option.levelOfDetailFromTransform(painter.worldTransform())
         if self.link_card:
             if self._flat:
-                self._paint_flat(painter)
+                self._paint_flat(painter, lod)
             else:
                 self._paint_link_card(painter)
             return
@@ -3925,7 +3961,7 @@ class NodeItem(QGraphicsObject):
                 painter.drawText(label_rect, Qt.AlignCenter, self.node.label_override)
             return
         if self._flat:
-            self._paint_flat(painter)
+            self._paint_flat(painter, lod)
             return
         if self._folded:
             # canvas preview off: draw the card as a plain icon, chevron and
