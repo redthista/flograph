@@ -21,6 +21,8 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (QInputDialog, QLabel, QMenu, QWidget,
                                QWidgetAction)
 
+from flograph.ui import theme as _theme  # noqa: E402
+
 
 def real_window(widget: QWidget) -> Optional[QWidget]:
     """The real top-level window `widget` is seen in — the canvas view's
@@ -51,7 +53,7 @@ def menu_stylesheet() -> str:
     dark grid whatever the window around it is, and the glyphs are drawn
     for a dark ground (canvas/popup_lift does the same for card lists)."""
     from .. import theme
-    return (f"QMenu {{ background: {theme.NODE_BODY.name()};"
+    return (f"QMenu {{ background: {theme.dark_hex('NODE_BODY')};"
             f" color: #e5e7eb; border: 1px solid #3c3f49; padding: 4px 0;"
             # 20 px: the glyphs' own grid — at the usual 16 they blur
             " icon-size: 20px; }"
@@ -66,7 +68,7 @@ def menu_stylesheet() -> str:
 def new_menu(widget: QWidget, title: str = "") -> QMenu:
     menu = QMenu(title, real_window(widget))
     menu.setToolTipsVisible(True)
-    menu.setStyleSheet(menu_stylesheet())
+    _theme.set_qss(menu, menu_stylesheet())
     return menu
 
 
@@ -77,7 +79,7 @@ def exec_menu(menu: QMenu, widget: QWidget, pos: QPoint) -> None:
 def heading(menu: QMenu, text: str) -> None:
     """A small grey caption over a group of entries."""
     label = QLabel(text.upper())
-    label.setStyleSheet("QLabel { color: #8b909c; font-size: 7.5pt;"
+    _theme.set_qss(label, "QLabel { color: #8b909c; font-size: 7.5pt;"
                         " font-weight: 600; letter-spacing: 1px;"
                         " padding: 6px 12px 2px 12px; }")
     action = QWidgetAction(menu)

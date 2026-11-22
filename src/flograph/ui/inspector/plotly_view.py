@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from flograph.core import html as core_html
 from flograph.core.chart_grid import DEFAULT_DIRECTION
+from flograph.ui import theme as _theme  # noqa: E402
 
 RUN_PROMPT = "Run the graph to see the view here."
 NO_WEBENGINE = ("Qt WebEngine is not available — install the full PySide6 "
@@ -112,7 +113,7 @@ class PlotlyView(QWidget):
         placeholder = QLabel(RUN_PROMPT)
         placeholder.setAlignment(Qt.AlignCenter)
         placeholder.setWordWrap(True)
-        placeholder.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(placeholder, "color: palette(mid);")
         layout.addWidget(placeholder, 1)
         self.placeholder = placeholder
 

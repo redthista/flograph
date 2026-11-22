@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core import FramePort
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: (node_id, node label, port name, "input" | "output") for every port of
 #: every node on the box's canvas — what the dialog offers.
@@ -39,7 +40,7 @@ class FramePortsDialog(QDialog):
             "a declared port is a real wire to the node behind it — the "
             "name only decides what the box calls it.")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(hint, "color: palette(mid);")
         layout.addWidget(hint)
 
         self.table = QTableWidget(len(self._candidates), 3, self)

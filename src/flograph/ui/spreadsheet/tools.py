@@ -28,6 +28,7 @@ from .. import theme
 from .completion import FormulaCompleter
 from .model import SheetModel
 from .view import SpreadsheetView
+from flograph.ui import theme as _theme  # noqa: E402
 
 _BREAK = "\u21b5"    # how the one-line formula bar shows a line break
 
@@ -148,7 +149,7 @@ class FormulaBar(QWidget):
         # of its own the window's palette shows through (light in light mode)
         self.setObjectName("formula_bar")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
+        _theme.set_qss(self, 
             "QWidget#formula_bar { background: #25272e;"
             " border-bottom: 1px solid #14151a; }"
             "QLabel { background: #1f2026; color: #d6d8de;"

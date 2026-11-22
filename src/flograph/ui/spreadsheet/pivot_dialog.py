@@ -19,6 +19,7 @@ from flograph.core.sheet.pivot import (AGGS, ROLES, PivotLayout, describe,
 from flograph.core.sheet.summary import _plain, is_number
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class PivotDialog(QDialog):
@@ -77,11 +78,11 @@ class PivotDialog(QDialog):
 
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.status, "font-weight: 600;")
         layout.addWidget(self.status)
 
         caption = QLabel("Preview")
-        caption.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(caption, "color: #9ca3af;")
         layout.addWidget(caption)
         self.preview = QTableWidget()
         self.preview.verticalHeader().hide()

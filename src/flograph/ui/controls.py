@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
+from flograph.ui import theme as _theme  # noqa: E402
 
 ISO_FORMAT = "yyyy-MM-dd"
 
@@ -147,62 +148,62 @@ def _stylesheet(accent: Optional[QColor] = None) -> str:
     return (
         # by object name, not a bare QWidget rule: that would cascade into
         # every child and repaint the spin box and combo popup too
-        f"QWidget#control_root {{ background: {theme.NODE_BODY.name()}; }}"
-        f"QLabel {{ color: {theme.NODE_TEXT.name()}; font-size: 9pt;"
+        f"QWidget#control_root {{ background: {theme.dark_hex('NODE_BODY')}; }}"
+        f"QLabel {{ color: {theme.dark_hex('NODE_TEXT')}; font-size: 9pt;"
         f" background: transparent; }}"
         # the caption names the control, so it reads as a label rather than
         # as a footnote: full size, a touch of weight, quieter colour
-        f"QLabel#caption {{ color: {theme.NODE_SUBTEXT.name()};"
+        f"QLabel#caption {{ color: {theme.dark_hex('NODE_SUBTEXT')};"
         f" font-size: 9pt; font-weight: 600; }}"
-        f"QLabel#control_help {{ color: {theme.NODE_SUBTEXT.name()};"
+        f"QLabel#control_help {{ color: {theme.dark_hex('NODE_SUBTEXT')};"
         f" font-size: 9pt; }}"
         f"QLabel#control_help:hover {{ color: {on}; }}"
         # Drawn rather than left to the platform: a stock QSlider on a dark
         # card is a grey line with a grey nub, and nothing says how far
         # along it is. The filled part is the value; the knob matches Between.
         f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px;"
-        f" background: {theme.NODE_HEADER.name()}; }}"
+        f" background: {theme.dark_hex('NODE_HEADER')}; }}"
         f"QSlider::sub-page:horizontal {{ height: 4px; border-radius: 2px;"
         f" background: {on}; }}"
         f"QSlider::handle:horizontal {{ width: 13px; height: 13px;"
         f" margin: -5px 0; border-radius: 7px;"
-        f" background: {theme.NODE_TEXT.name()};"
-        f" border: 1px solid {theme.NODE_BORDER.name()}; }}"
+        f" background: {theme.dark_hex('NODE_TEXT')};"
+        f" border: 1px solid {theme.dark_hex('NODE_BORDER')}; }}"
         f"QSlider::handle:horizontal:focus, QSlider::handle:horizontal:hover"
         f" {{ border: 2px solid {on}; }}"
         # a choice shown as buttons: a segmented row, the pick filled in
-        f"QToolButton#choice_button {{ color: {theme.NODE_TEXT.name()};"
-        f" background: {theme.NODE_HEADER.name()};"
-        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f"QToolButton#choice_button {{ color: {theme.dark_hex('NODE_TEXT')};"
+        f" background: {theme.dark_hex('NODE_HEADER')};"
+        f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
         f" border-radius: 3px; padding: 2px 8px; font-size: 9pt; }}"
         f"QToolButton#choice_button:hover {{ border-color: {on}; }}"
         f"QToolButton#choice_button:checked {{ background: {on};"
         f" border-color: {on}; color: {_ink_on(accent)}; }}"
-        f"QRadioButton {{ color: {theme.NODE_TEXT.name()}; font-size: 9pt;"
+        f"QRadioButton {{ color: {theme.dark_hex('NODE_TEXT')}; font-size: 9pt;"
         f" background: transparent; spacing: 6px; }}"
         # drawn for the tick box's reason: the platform's ring vanishes on a
         # dark card, and an empty ring is what says "you could pick this"
         f"QRadioButton::indicator {{ width: 12px; height: 12px;"
-        f" border-radius: 7px; border: 1px solid {theme.NODE_SUBTEXT.name()};"
-        f" background: {theme.NODE_HEADER.name()}; }}"
+        f" border-radius: 7px; border: 1px solid {theme.dark_hex('NODE_SUBTEXT')};"
+        f" background: {theme.dark_hex('NODE_HEADER')}; }}"
         f"QRadioButton::indicator:hover {{ border-color: {on}; }}"
         # same border width as unpicked, or the label jumps sideways
         f"QRadioButton::indicator:checked {{ border-color: {on};"
         f" background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,"
         f" fx:0.5, fy:0.5, stop:0 {on}, stop:0.55 {on},"
-        f" stop:0.65 {theme.NODE_HEADER.name()},"
-        f" stop:1 {theme.NODE_HEADER.name()}); }}"
+        f" stop:0.65 {theme.dark_hex('NODE_HEADER')},"
+        f" stop:1 {theme.dark_hex('NODE_HEADER')}); }}"
         # the range ends sit quietly beside the track; the value under the
         # handle is the number being read, so it stays full contrast
-        f"QLabel#bound {{ color: {theme.NODE_SUBTEXT.name()};"
+        f"QLabel#bound {{ color: {theme.dark_hex('NODE_SUBTEXT')};"
         f" font-size: 8pt; }}"
-        f"QLabel#control_readout {{ color: {theme.NODE_TEXT.name()};"
+        f"QLabel#control_readout {{ color: {theme.dark_hex('NODE_TEXT')};"
         f" font-size: 8.5pt; font-weight: bold; }}"
         f"QWidget#readout_row {{ background: transparent; }}"
         f"QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit,"
-        f" QComboBox {{ background: {theme.NODE_BODY.name()};"
-        f" color: {theme.NODE_TEXT.name()};"
-        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" QComboBox {{ background: {theme.dark_hex('NODE_BODY')};"
+        f" color: {theme.dark_hex('NODE_TEXT')};"
+        f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
         f" border-radius: 3px; padding: 2px 4px; font-size: 9pt; }}"
         # where the keyboard is, in the control's own colour
         f"QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus,"
@@ -211,26 +212,26 @@ def _stylesheet(accent: Optional[QColor] = None) -> str:
         # set on an editor whose value is refused (a required box left
         # empty, text that misses its pattern) — after :focus, so it wins
         f"*[invalid=\"true\"] {{ border: 1px solid {INVALID.name()}; }}"
-        f"QCheckBox {{ color: {theme.NODE_TEXT.name()}; font-size: 9pt;"
+        f"QCheckBox {{ color: {theme.dark_hex('NODE_TEXT')}; font-size: 9pt;"
         f" background: transparent; spacing: 6px; }}"
         # The box is drawn explicitly. Left to the platform style on a dark
         # card it comes out as a bare tick floating in space when checked and
         # nothing at all when unchecked — an empty box is what tells someone
         # there is something here to click.
         f"QCheckBox::indicator {{ width: 14px; height: 14px;"
-        f" border-radius: 3px; border: 1px solid {theme.NODE_SUBTEXT.name()};"
-        f" background: {theme.NODE_HEADER.name()}; }}"
+        f" border-radius: 3px; border: 1px solid {theme.dark_hex('NODE_SUBTEXT')};"
+        f" background: {theme.dark_hex('NODE_HEADER')}; }}"
         f"QCheckBox::indicator:hover {{ border-color: {on}; }}"
         f"QCheckBox::indicator:checked {{ background: {on};"
         f" border-color: {on}; }}"
         f"QCheckBox::indicator:disabled {{ border-color:"
-        f" {theme.NODE_BORDER.name()}; }}"
+        f" {theme.dark_hex('NODE_BORDER')}; }}"
         # Apply / Reset ride the caption row: small, flat until hovered, so
         # a control that has nothing pending looks as it always did
         f"QWidget#caption_row {{ background: transparent; }}"
         f"QToolButton#control_apply, QToolButton#control_reset {{"
-        f" color: {theme.NODE_TEXT.name()}; background: transparent;"
-        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" color: {theme.dark_hex('NODE_TEXT')}; background: transparent;"
+        f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
         f" border-radius: 3px; padding: 0px 5px; font-size: 8pt; }}"
         # always there in "with ✓" mode; lit only while a change waits
         f"QToolButton#control_apply[pending=\"true\"],"
@@ -238,26 +239,26 @@ def _stylesheet(accent: Optional[QColor] = None) -> str:
         f" {{ border-color: {PENDING.name()};"
         f" color: {PENDING.name()}; font-weight: bold; }}"
         f"QToolButton#control_apply:hover, QToolButton#control_reset:hover"
-        f" {{ background: {theme.NODE_HEADER.name()}; }}"
+        f" {{ background: {theme.dark_hex('NODE_HEADER')}; }}"
         # the Input Panel's own Apply / Reset, full size along its bottom
         f"QPushButton#panel_apply, QPushButton#panel_reset {{"
-        f" color: {theme.NODE_TEXT.name()};"
-        f" background: {theme.NODE_HEADER.name()};"
-        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f" color: {theme.dark_hex('NODE_TEXT')};"
+        f" background: {theme.dark_hex('NODE_HEADER')};"
+        f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
         f" border-radius: 4px; padding: 4px 10px; font-size: 9pt; }}"
         f"QPushButton#panel_apply:hover, QPushButton#panel_reset:hover"
         f" {{ border-color: {on}; }}"
         # a slicer field: a tick list on the card's own colours
-        f"QListWidget#control_list {{ background: {theme.NODE_BODY.name()};"
-        f" color: {theme.NODE_TEXT.name()};"
-        f" border: 1px solid {theme.NODE_BORDER.name()};"
+        f"QListWidget#control_list {{ background: {theme.dark_hex('NODE_BODY')};"
+        f" color: {theme.dark_hex('NODE_TEXT')};"
+        f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
         f" border-radius: 3px; font-size: 9pt; outline: none; }}"
         f"QListWidget#control_list::item {{ padding: 1px 2px; }}"
         f"QListWidget#control_list::item:hover"
-        f" {{ background: {theme.NODE_HEADER.name()}; }}"
+        f" {{ background: {theme.dark_hex('NODE_HEADER')}; }}"
         f"QListWidget#control_list::indicator {{ width: 12px; height: 12px;"
-        f" border-radius: 3px; border: 1px solid {theme.NODE_SUBTEXT.name()};"
-        f" background: {theme.NODE_HEADER.name()}; }}"
+        f" border-radius: 3px; border: 1px solid {theme.dark_hex('NODE_SUBTEXT')};"
+        f" background: {theme.dark_hex('NODE_HEADER')}; }}"
         f"QListWidget#control_list::indicator:checked {{ background: {on};"
         f" border-color: {on}; }}"
         f"QLabel#control_pending {{ color: {PENDING.name()};"
@@ -343,7 +344,7 @@ class ControlWidget(QWidget):
         self.value_default = _NO_DEFAULT
         self.setObjectName("control_root")
         self._accent = QColor(CHECK_ON)
-        self.setStyleSheet(_stylesheet(self._accent))
+        _theme.set_qss(self, _stylesheet(self._accent))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 3, 4, 3)
@@ -432,7 +433,7 @@ class ControlWidget(QWidget):
             accent = accent_of(self._params)
             if accent != self._accent:
                 self._accent = accent
-                self.setStyleSheet(_stylesheet(accent))
+                _theme.set_qss(self, _stylesheet(accent))
             self._sync_caption()
             self._apply(shown)
             self._sync_buttons(shown)
@@ -1698,11 +1699,11 @@ class ColourControl(ControlWidget):
 
     @staticmethod
     def _paint(button: QToolButton, colour: str, size=None) -> None:
-        button.setStyleSheet(
+        _theme.set_qss(button, 
             f"QToolButton {{ background: {colour};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
+            f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
             f" border-radius: 3px; }}"
-            f"QToolButton:hover {{ border: 1px solid {theme.NODE_TEXT.name()}; }}")
+            f"QToolButton:hover {{ border: 1px solid {theme.dark_hex('NODE_TEXT')}; }}")
 
     def _apply(self, params: dict) -> None:
         from flograph.core.controls import colour_value, lines_to_values
@@ -1967,7 +1968,7 @@ class PanelControl(ControlWidget):
         self._problem = QLabel("")
         self._problem.setObjectName("control_panel_problem")
         self._problem.setWordWrap(True)
-        self._problem.setStyleSheet(f"color: {INVALID.name()};")
+        _theme.set_qss(self._problem, f"color: {INVALID.name()};")
         self._problem.hide()
         self._layout.addWidget(self._problem)
         # an empty panel says what to do, and offers to do it
@@ -1994,7 +1995,7 @@ class PanelControl(ControlWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._scroll.setStyleSheet(
+        _theme.set_qss(self._scroll, 
             "QScrollArea, QScrollArea > QWidget > QWidget"
             " { background: transparent; }")
         self._layout.addWidget(self._scroll, 1)
@@ -2169,7 +2170,7 @@ class FormControl(ControlWidget):
         self._problem = QLabel("")
         self._problem.setObjectName("control_panel_problem")
         self._problem.setWordWrap(True)
-        self._problem.setStyleSheet(f"color: {INVALID.name()};")
+        _theme.set_qss(self._problem, f"color: {INVALID.name()};")
         self._problem.hide()
         self._layout.addWidget(self._problem)
 
@@ -2184,7 +2185,7 @@ class FormControl(ControlWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._scroll.setStyleSheet(
+        _theme.set_qss(self._scroll, 
             "QScrollArea, QScrollArea > QWidget > QWidget"
             " { background: transparent; }")
         self._layout.addWidget(self._scroll, 1)
@@ -2433,7 +2434,7 @@ class FormControl(ControlWidget):
         label = self._field_labels.get(name)
         field = next((field for field in self._fields if field.name == name), None)
         if label is not None and field is not None:
-            label.setStyleSheet(f"color: {INVALID.name()};" if invalid else "")
+            _theme.set_qss(label, f"color: {INVALID.name()};" if invalid else "")
 
     def _submit(self) -> None:
         import json

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QPushButton, QVBoxLayout)
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class FindDialog(QDialog):
@@ -72,7 +73,7 @@ class FindDialog(QDialog):
         layout.addLayout(buttons)
 
         self.status = QLabel(" ")
-        self.status.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.status, "color: #9ca3af;")
         layout.addWidget(self.status)
 
     def set_replace_mode(self, on: bool) -> None:

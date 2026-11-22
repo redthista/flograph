@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from flograph.core.search import search_nodes
 
 from .. import theme
+from flograph.ui import theme as _theme  # noqa: E402
 
 WIDTH = 260
 #: Hits shown before the list starts scrolling. The list is sized to what it
@@ -76,7 +77,7 @@ class NodeSearchBar(QFrame):
         self._edit.installEventFilter(self)
 
         self._count = QLabel("", self)
-        self._count.setStyleSheet(f"color: {theme.NODE_SUBTEXT.name()};")
+        _theme.set_qss(self._count, f"color: {theme.dark_hex('NODE_SUBTEXT')};")
 
         close_btn = QToolButton(self)
         close_btn.setText("✕")
@@ -108,31 +109,31 @@ class NodeSearchBar(QFrame):
         # furniture (the minimap's neighbours) rather than as a dock widget:
         # left to the desktop palette the list comes out a white slab on a
         # dark graph.
-        self.setStyleSheet(
-            f"NodeSearchBar {{ background: {theme.NODE_BODY.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
+        _theme.set_qss(self, 
+            f"NodeSearchBar {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
             f" border-radius: 4px; }}"
-            f"QLineEdit {{ background: {theme.CANVAS_BG.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
+            f"QLineEdit {{ background: {theme.dark_hex('CANVAS_BG')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
+            f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
             f" border-radius: 3px; padding: 2px 4px; }}"
-            f"QToolButton {{ color: {theme.NODE_SUBTEXT.name()};"
+            f"QToolButton {{ color: {theme.dark_hex('NODE_SUBTEXT')};"
             f" border: none; }}"
-            f"QToolButton:hover {{ color: {theme.NODE_TEXT.name()}; }}")
+            f"QToolButton:hover {{ color: {theme.dark_hex('NODE_TEXT')}; }}")
         theme.style_scroll_area(self._list, self._list_stylesheet(),
                                 theme.CANVAS_BG)
         self.hide()
 
     @staticmethod
     def _list_stylesheet() -> str:
-        return (f"QListWidget {{ background: {theme.CANVAS_BG.name()};"
-                f" color: {theme.NODE_TEXT.name()};"
-                f" border: 1px solid {theme.NODE_BORDER.name()};"
+        return (f"QListWidget {{ background: {theme.dark_hex('CANVAS_BG')};"
+                f" color: {theme.dark_hex('NODE_TEXT')};"
+                f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
                 f" border-radius: 3px; outline: none; }}"
                 f"QListWidget::item {{ padding: 1px 3px; }}"
                 f"QListWidget::item:selected {{"
-                f" background: {theme.SELECTION_OUTLINE.name()};"
-                f" color: {theme.CANVAS_BG.name()}; }}")
+                f" background: {theme.dark_hex('SELECTION_OUTLINE')};"
+                f" color: {theme.dark_hex('CANVAS_BG')}; }}")
 
     # ------------------------------------------------------------- lifecycle
 
@@ -234,7 +235,7 @@ class NodeSearchBar(QFrame):
         else:
             self._count.setText(f"{self._list.currentRow() + 1} of {total}")
         found = total or not self._edit.text().strip()
-        self._edit.setStyleSheet(
+        _theme.set_qss(self._edit, 
             "" if found else f"color: {theme.WIRE_INVALID.name()};")
 
     def _on_current_changed(self, current, _previous) -> None:

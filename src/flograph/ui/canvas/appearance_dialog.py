@@ -40,6 +40,7 @@ from . import marks
 from .node_item import (
     port_labels_on, renders_plain,
 )
+from flograph.ui import theme as _theme  # noqa: E402
 
 MARK_TEXT_MAX = 4  # characters; past that nothing legible fits in 60px
 _SWATCH = 30
@@ -503,7 +504,7 @@ class AppearanceDialog(QDialog):
         # theme colours are QColors and a node's own is a hex string; a
         # stylesheet wants the string form of either
         colour = QColor(own) if own else QColor(theme.NODE_HEADER)
-        self._colour_swatch.setStyleSheet(
+        _theme.set_qss(self._colour_swatch, 
             f"background: {colour.name()}; "
             f"border: 1px solid {QColor(theme.NODE_BORDER).name()};")
         self._colour_reset.setEnabled(bool(own))

@@ -10,6 +10,8 @@ from PySide6.QtGui import (
     QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextDocument,
 )
 
+from flograph.ui import theme
+
 
 def _fmt(color: str, bold: bool = False, italic: bool = False) -> QTextCharFormat:
     fmt = QTextCharFormat()
@@ -21,16 +23,31 @@ def _fmt(color: str, bold: bool = False, italic: bool = False) -> QTextCharForma
     return fmt
 
 
-COLORS = {
-    "keyword": _fmt("#c678dd", bold=True),
-    "builtin": _fmt("#56b6c2"),
-    "self": _fmt("#e06c75", italic=True),
-    "def_name": _fmt("#61afef", bold=True),
-    "decorator": _fmt("#e5c07b"),
-    "string": _fmt("#98c379"),
-    "number": _fmt("#d19a66"),
-    "comment": _fmt("#5c6370", italic=True),
+# name: (bold, italic). The colours are the theme's `[syntax]` section.
+_SYNTAX = {
+    "keyword": (True, False),
+    "builtin": (False, False),
+    "self": (False, True),
+    "def_name": (True, False),
+    "decorator": (False, False),
+    "string": (False, False),
+    "number": (False, False),
+    "comment": (False, True),
 }
+
+# Formats for the current theme. Rebuilt in place by `apply_mode`, and read
+# from here at highlight time (never kept in a rule), so a theme switch only
+# has to re-run the highlighters.
+COLORS: dict[str, QTextCharFormat] = {}
+
+
+def apply_mode() -> None:
+    for name, (bold, italic) in _SYNTAX.items():
+        COLORS[name] = _fmt(theme.ACTIVE.get("syntax", name), bold, italic)
+
+
+apply_mode()
+theme.on_change(apply_mode)
 
 _STATE_NONE = -1
 _STATE_TRIPLE_SINGLE = 1
@@ -42,24 +59,25 @@ class PythonHighlighter(QSyntaxHighlighter):
         super().__init__(document)
         kw = "|".join(keyword.kwlist)
         bi = "|".join(n for n in dir(builtins) if not n.startswith("_"))
-        self._rules: list[tuple[re.Pattern, QTextCharFormat]] = [
-            (re.compile(rf"\b(?:{kw})\b"), COLORS["keyword"]),
-            (re.compile(rf"\b(?:{bi})\b"), COLORS["builtin"]),
-            (re.compile(r"\b(?:self|cls|ctx)\b"), COLORS["self"]),
-            (re.compile(r"\bdef\s+(\w+)|\bclass\s+(\w+)"), COLORS["def_name"]),
-            (re.compile(r"@\w+(?:\.\w+)*"), COLORS["decorator"]),
+        self._rules: list[tuple[re.Pattern, str]] = [
+            (re.compile(rf"\b(?:{kw})\b"), "keyword"),
+            (re.compile(rf"\b(?:{bi})\b"), "builtin"),
+            (re.compile(r"\b(?:self|cls|ctx)\b"), "self"),
+            (re.compile(r"\bdef\s+(\w+)|\bclass\s+(\w+)"), "def_name"),
+            (re.compile(r"@\w+(?:\.\w+)*"), "decorator"),
             (re.compile(r"\b\d+(?:\.\d*)?(?:[eE][+-]?\d+)?\b|\b0[xXbBoO][0-9a-fA-F]+\b"),
-             COLORS["number"]),
+             "number"),
             (re.compile(r"(?:[rbfu]{0,2})'[^'\\\n]*(?:\\.[^'\\\n]*)*'|"
                         r'(?:[rbfu]{0,2})"[^"\\\n]*(?:\\.[^"\\\n]*)*"'),
-             COLORS["string"]),
+             "string"),
         ]
         self._comment = re.compile(r"#[^\n]*")
         self._triple_single = re.compile(r"'''")
         self._triple_double = re.compile(r'"""')
 
     def highlightBlock(self, text: str) -> None:
-        for pattern, fmt in self._rules:
+        for pattern, key in self._rules:
+            fmt = COLORS[key]
             for match in pattern.finditer(text):
                 if match.lastindex:  # def/class: highlight the name group
                     for gi in range(1, (match.lastindex or 0) + 1):

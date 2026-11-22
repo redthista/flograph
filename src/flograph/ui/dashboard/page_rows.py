@@ -311,6 +311,9 @@ class PageBarHost(QWidget):
         layout.setSpacing(0)
         layout.addWidget(bar)
         layout.addWidget(self.row)
+        # the line that tells the tabs from the canvas: see set_rule_edge
+        self._layout = layout
+        self._rule = None
         bar.bar_changed.connect(self.refresh)
         bar.current_page_changed.connect(self._follow)
         self.row.page_clicked.connect(self._row_clicked)
@@ -321,6 +324,21 @@ class PageBarHost(QWidget):
         bar.handover = self.onto_the_row
         self.row.handover = self.onto_the_bar
         self.refresh()
+
+    def set_rule_edge(self, edge: str) -> None:
+        """Draw the divider-coloured 1px line along `edge` ("bottom" when
+        the tabs are at the top of the window, "top" when they are below the
+        canvas). A widget of its own rather than a frame borrowed from the
+        canvas, so it is there whatever Qt decides to draw round things."""
+        from ..dock_edges import PanelRule
+        if self._rule is None:
+            self._rule = PanelRule(self)
+        else:
+            self._layout.removeWidget(self._rule)
+        if edge == "top":
+            self._layout.insertWidget(0, self._rule)
+        else:
+            self._layout.addWidget(self._rule)
 
     # ------------------------------------------------------------- the row
 

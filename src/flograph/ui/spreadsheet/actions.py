@@ -22,7 +22,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 
 from flograph.core.sheet import COLUMN_TYPES
 
-from .icons import sheet_icon
+from .icons import sheet_icon, wear
 
 # What each column type means, for the Type menu's tooltips.
 TYPE_HELP = {
@@ -197,7 +197,7 @@ class SheetActions(QObject):
         action = QAction(text, self)
         action.setObjectName(f"sheet_{name}")
         if icon:
-            action.setIcon(sheet_icon(icon))
+            wear(action, icon)
         sequences = [QKeySequence(k) for k in keys]
         if sequences:
             action.setShortcuts(sequences)

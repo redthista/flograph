@@ -34,10 +34,12 @@ from . import marks
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .popup_lift import stacked_z
 from .stacking import NODE_Z, z_for
+from flograph.ui import theme as _theme  # noqa: E402
 
 NODE_WIDTH = 170.0
 HEADER_H = 26.0
 ROW_H = 20.0
+NODE_RADIUS = 7.0         # corner radius of a node's body; 0 is square
 PAD_BOTTOM = 8.0
 LED_RADIUS = 5.0
 
@@ -68,6 +70,31 @@ COMPACT_PORT_TOP = 10.0        # highest a pin stack may start; see _stack_ports
 COMPACT_MARK_INSET = 16.0      # the mark gets the middle 28 x 28
 COMPACT_IMAGE_INSET = 2.0      # a picture gets nearly the lot: 56 x 56
 COMPACT_TEXT_FONT_SIZE = 13.0  # a mark_text override, drawn in the square
+
+
+
+def apply_geometry() -> None:
+    """Point the node size and corner constants at the active theme's
+    `[style]` (node_corner_radius, node_width, node_header_height,
+    node_row_height, node_compact_size), in place. They are module globals
+    read at paint and layout time, so nothing needs rebinding; what already
+    on the canvas has to be laid out again is `NodeItem.relayout_geometry`,
+    which the main window calls after a theme change."""
+    global NODE_WIDTH, HEADER_H, ROW_H, NODE_RADIUS, COMPACT_W, COMPACT_MIN_H
+    global GEOMETRY_CHANGED
+    before = (NODE_WIDTH, HEADER_H, ROW_H, COMPACT_W)
+    NODE_RADIUS = float(_theme.style("node_corner_radius"))
+    NODE_WIDTH = float(_theme.style("node_width"))
+    HEADER_H = float(_theme.style("node_header_height"))
+    ROW_H = float(_theme.style("node_row_height"))
+    COMPACT_W = COMPACT_MIN_H = float(_theme.style("node_compact_size"))
+    # a colour tweak must not re-lay-out every node: only a size change does
+    GEOMETRY_CHANGED = before != (NODE_WIDTH, HEADER_H, ROW_H, COMPACT_W)
+
+
+GEOMETRY_CHANGED = False
+_theme.on_change(apply_geometry)
+apply_geometry()
 
 # The only QGraphicsItem changes NodeItem.itemChange acts on; see there.
 _HANDLED_ITEM_CHANGES = frozenset({
@@ -981,6 +1008,40 @@ class PortItem(QGraphicsItem):
         self.scene().finish_wire_drag(event.scenePos())
 
 
+class NodeShadow(QGraphicsItem):
+    """The soft shadow under a card — how a light canvas lifts a node off
+    the page, where a dark one gets there from contrast alone. A child
+    stacked behind its node, drawn only in light mode, taking no input."""
+
+    SPREAD = 5
+
+    def __init__(self, parent: "NodeItem") -> None:
+        super().__init__(parent)
+        self.setFlag(QGraphicsItem.ItemStacksBehindParent, True)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setAcceptHoverEvents(False)
+        self.setVisible(bool(theme.style("node_shadow")))
+
+    def boundingRect(self) -> QRectF:
+        item = self.parentItem()
+        pad = self.SPREAD + 3
+        return QRectF(-pad, -pad, item.width + 2 * pad,
+                      item.body_height + 2 * pad + 3)
+
+    def shape(self) -> QPainterPath:
+        return QPainterPath()
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        item = self.parentItem()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        for i in range(self.SPREAD, 0, -1):
+            painter.setBrush(QColor(30, 41, 70, 5 + (self.SPREAD - i) * 3))
+            painter.drawRoundedRect(
+                QRectF(-i, -i + 2, item.width + 2 * i, item.body_height + 2 * i),
+                NODE_RADIUS + i, NODE_RADIUS + i)
+
+
 class DropHintOutline(QGraphicsItem):
     """The dashed ring drawn around a node while it is under a dragged one:
     letting go here will replace it. A child item rather than a pen choice
@@ -1005,7 +1066,7 @@ class DropHintOutline(QGraphicsItem):
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(QRectF(-3.0, -3.0,
                                        item.width + 6.0, item.body_height + 6.0),
-                                7.0, 7.0)
+                                NODE_RADIUS, NODE_RADIUS)
 
 
 class NodeItem(QGraphicsObject):
@@ -1195,6 +1256,7 @@ class NodeItem(QGraphicsObject):
         self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         self.setAcceptHoverEvents(True)  # drives the move/resize cursors
         self.setPos(*node.pos)
+        self._shadow = NodeShadow(self)
 
         # A child item rather than something paint() draws: paint() forks nine
         # ways by card kind, and a padlock has to appear on all nine. A child
@@ -1565,11 +1627,11 @@ class NodeItem(QGraphicsObject):
         if not (self.note or self.report_card) or self._note_editor is not None:
             return
         editor = CardTextEditor(str(self.node.params.get("text", "")), self)
-        editor.setStyleSheet(
+        _theme.set_qss(editor, 
             f"QPlainTextEdit {{"
-            f" background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
-            f" border: 1.4px solid {theme.SELECTION_OUTLINE.name()};"
+            f" background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
+            f" border: 1.4px solid {theme.dark_hex('SELECTION_OUTLINE')};"
             f" border-radius: 8px; padding: 4px; font-size: 9.5pt; }}")
         cursor = editor.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -1796,7 +1858,7 @@ class NodeItem(QGraphicsObject):
         # editable — the way to read a formula without opening the cell
         from ..spreadsheet import FormulaBar
         formula_bar = FormulaBar(grid)
-        formula_bar.setStyleSheet(formula_bar.styleSheet()
+        _theme.set_qss(formula_bar, formula_bar.styleSheet()
                                   + " QLabel, QLineEdit { font-size: 8pt; }")
         layout.addWidget(formula_bar)
         layout.addWidget(grid, 1)
@@ -2037,7 +2099,7 @@ class NodeItem(QGraphicsObject):
 
         placeholder = QLabel("Run the graph to see a figure here.")
         placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(placeholder, "color: #6b7280;")
         layout.addWidget(placeholder, 1)
         self._figure_placeholder = placeholder
 
@@ -2167,9 +2229,9 @@ class NodeItem(QGraphicsObject):
         from PySide6.QtWidgets import QTextBrowser
         view = QTextBrowser()
         view.setOpenExternalLinks(True)
-        view.setStyleSheet(
-            f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
+        _theme.set_qss(view, 
+            f"QTextBrowser {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')}; border: none;"
             f" padding: 4px; }}")
         self._report_view = view
         view.installEventFilter(self)
@@ -2199,7 +2261,7 @@ class NodeItem(QGraphicsObject):
         with deferred(self._report_pictures_ready):
             rendered = render_card(body, scene.graph, cache, self.node.id,
                                    width=int(self.width) - 44,
-                                   header_fill=theme.NODE_HEADER.name()) \
+                                   header_fill=theme.dark_hex('NODE_HEADER')) \
                 if scene is not None else None
         # before the old document goes: a QMovie still writing frames into a
         # deleted document is a crash, not a stale picture
@@ -2215,7 +2277,7 @@ class NodeItem(QGraphicsObject):
         document = rendered.document
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
-            + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
+            + f"\nbody {{ color: {theme.dark_hex('NODE_TEXT')}; }}")
         from ..report.render import show_in
         show_in(self._report_view, document)
         if rendered.animations:
@@ -2357,7 +2419,7 @@ class NodeItem(QGraphicsObject):
 
         placeholder = QLabel("Run the graph to see a table here.")
         placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(placeholder, "color: #6b7280;")
         layout.addWidget(placeholder, 1)
         self._table_viewer_placeholder = placeholder
 
@@ -2631,7 +2693,7 @@ class NodeItem(QGraphicsObject):
                 painter.setPen(QPen(theme.SELECTION_OUTLINE, 2.0))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(
-                    QRectF(0, 0, self.width, self.body_height), 7, 7)
+                    QRectF(0, 0, self.width, self.body_height), NODE_RADIUS, NODE_RADIUS)
 
         top = HEADER_H if header else 2.0
         rect = QRectF(2, top, self.width - 4,
@@ -2644,7 +2706,7 @@ class NodeItem(QGraphicsObject):
         # Keep a Fill/Stretch/Original-size picture inside the card's rounded
         # outline instead of squaring off its bottom corners.
         rounded = QPainterPath()
-        rounded.addRoundedRect(QRectF(0, 0, self.width, self.body_height), 7, 7)
+        rounded.addRoundedRect(QRectF(0, 0, self.width, self.body_height), NODE_RADIUS, NODE_RADIUS)
         painter.setClipPath(rounded)
         painter.setOpacity(0.45 if self._updating else 1.0)
         image.paint(painter, rect, self._image_render_ratio())
@@ -3454,6 +3516,27 @@ class NodeItem(QGraphicsObject):
         if scene is not None:
             scene.node_item_moved(self.node.id)  # wires follow the pins
 
+    def relayout_geometry(self) -> None:
+        """The theme changed a node size (`apply_geometry`): take the new
+        width and port rows. Plain nodes and cards folded to an icon follow
+        the theme's sizes; a card's content has a size of its own and is
+        left as it is, so only its corners (read at paint time) change."""
+        if not GEOMETRY_CHANGED or not (self.plain or self._folded):
+            return
+        width = (COMPACT_W if self._square else NODE_WIDTH)
+        if self._folded:
+            width = COMPACT_W
+        self.prepareGeometryChange()
+        self.width = width
+        self._name_cache = None
+        self._layout_ports()
+        self._layout_flow_ports()
+        self._layout_badges()
+        self.update()
+        scene = self.scene()
+        if scene is not None:
+            scene.node_item_moved(self.node.id)  # wires follow the pins
+
     def _set_folded(self, folded: bool) -> None:
         """Fold a card down to its icon, or open it back to full size — the
         mirror of apply_compact for card kinds. _apply_proxy_visibility has
@@ -3770,7 +3853,18 @@ class NodeItem(QGraphicsObject):
         if self.node.color:
             return theme.tint(theme.NODE_HEADER, self.node.color,
                               theme.TINT_STRONG)
+        if theme.style("one_tone_header"):
+            return theme.NODE_BODY       # one tone: the card is one surface
         return theme.NODE_HEADER
+
+    def _edge_color(self) -> QColor:
+        """The card's outline: its category's colour in the light theme,
+        the plain border otherwise."""
+        if not self.broken and not self.node.color:
+            edge = theme.category_edge(self.node.spec.category)
+            if edge is not None:
+                return edge
+        return theme.NODE_BORDER
 
     def _body_color(self) -> QColor:
         """Effective card-body colour: the user's custom colour tinted over
@@ -3779,16 +3873,28 @@ class NodeItem(QGraphicsObject):
         if self.node.color:
             return theme.tint(theme.NODE_BODY, self.node.color,
                               theme.TINT_SOFT)
+        if (self.compact or self._square) and not self.broken:
+            # a header-less square has nowhere else to carry its category
+            tinted = theme.category_tint(self.node.spec.category, 0.34)
+            if tinted is not None:
+                return tinted
         return theme.NODE_BODY
 
     def _paint_flat(self, painter: QPainter) -> None:
         """Cheap stand-in for the simplified state: one fill, no path/gradient/text —
         the per-node cost that dominates when many nodes are visible at once."""
         rect = QRectF(0, 0, self.width, self.body_height)
+        # on the light canvas a bare white card melts into the page at this
+        # zoom, so it keeps a hairline edge; the dark one never needed it
         painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.5) if self.isSelected()
-                       else Qt.NoPen)
+                       else QPen(self._edge_color(), 1.0)
+                       if theme.style("node_shadow") else Qt.NoPen)
         fill = (theme.NODE_HEADER_BROKEN if self.broken
                 else self._body_color())
+        if theme.style("category_colours") and not self.broken \
+                and not self.node.color:
+            # zoomed out there is no title to read: the colour is the label
+            fill = theme.category_tint(self.node.spec.category, 0.30) or fill
         painter.setBrush(QBrush(fill))
         painter.drawRect(rect)
 
@@ -3804,7 +3910,7 @@ class NodeItem(QGraphicsObject):
         if self.compact:
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                                else theme.NODE_BORDER, 1.5))
+                                else self._edge_color(), 1.5))
             painter.setBrush(QBrush(self._header_color()))
             painter.drawRoundedRect(
                 QRectF(0, 0, self.width, self.body_height), 10, 10)
@@ -3854,7 +3960,7 @@ class NodeItem(QGraphicsObject):
         rect = QRectF(0, 0, self.width, self.body_height)
 
         body = QPainterPath()
-        body.addRoundedRect(rect, 7, 7)
+        body.addRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillPath(body, self._body_color())
         if self.isSelected():
@@ -3862,7 +3968,7 @@ class NodeItem(QGraphicsObject):
         elif self.broken:
             outline = QPen(theme.NODE_BORDER_BROKEN, 1.4)
         else:
-            outline = QPen(theme.NODE_BORDER, 1.2)
+            outline = QPen(self._edge_color(), 1.3)
         painter.setPen(outline)
         painter.drawPath(body)
 
@@ -3986,10 +4092,9 @@ class NodeItem(QGraphicsObject):
         """Rounded header strip: label + status LED. Shared by the default
         node body and the table card, whose widths differ (fixed vs. resizable)."""
         header = QPainterPath()
-        header.addRoundedRect(QRectF(0, 0, width, HEADER_H), 7, 7)
+        header.addRoundedRect(QRectF(0, 0, width, HEADER_H), NODE_RADIUS, NODE_RADIUS)
         header.addRect(QRectF(0, HEADER_H / 2, width, HEADER_H / 2))
         painter.fillPath(header.simplified(), self._header_color())
-
         painter.setPen(QPen(theme.NODE_TEXT))
         font = painter.font()
         font.setPointSizeF(9.0)
@@ -4053,7 +4158,7 @@ class NodeItem(QGraphicsObject):
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(0, 0, self.width, self.body_height)
         body = QPainterPath()
-        body.addRoundedRect(rect, 7, 7)
+        body.addRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.fillPath(body, theme.NODE_HEADER_BROKEN if self.broken
                          else self._body_color())
         if self.isSelected():
@@ -4061,7 +4166,7 @@ class NodeItem(QGraphicsObject):
         elif self.broken:
             outline = QPen(theme.NODE_BORDER_BROKEN, 1.4)
         else:
-            outline = QPen(theme.NODE_BORDER, 1.2)
+            outline = QPen(self._edge_color(), 1.3)
         painter.setPen(outline)
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(body)
@@ -4131,11 +4236,11 @@ class NodeItem(QGraphicsObject):
         rect = QRectF(0, 0, self.width, self.body_height)
         painter.setRenderHint(QPainter.Antialiasing)
         body = QPainterPath()
-        body.addRoundedRect(rect, 7, 7)
+        body.addRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.fillPath(body, self._body_color())
         outline = QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                       else theme.NODE_BORDER,
-                       2.0 if self.isSelected() else 1.2)
+                       else self._edge_color(),
+                       2.0 if self.isSelected() else 1.3)
         painter.setPen(outline)
         painter.drawPath(body)
 
@@ -4216,7 +4321,7 @@ class NodeItem(QGraphicsObject):
                     self._page_links_vertical(),
                     selected=self.isSelected(), tint=self.node.color)
         body = QPainterPath()
-        body.addRoundedRect(rect, 8, 8)
+        body.addRoundedRect(rect, NODE_RADIUS + 1, NODE_RADIUS + 1)
         self._paint_button_edit(painter, body)
 
     def _paint_kpi(self, painter: QPainter) -> None:
@@ -4276,7 +4381,7 @@ class NodeItem(QGraphicsObject):
         rect = QRectF(0, 0, self.width, self.body_height)
         painter.setRenderHint(QPainter.Antialiasing)
         body = QPainterPath()
-        body.addRoundedRect(rect, 7, 7)
+        body.addRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.fillPath(body, self._body_color())
         outline = QPen(theme.SELECTION_OUTLINE if self.isSelected()
                        else theme.NODE_BORDER,
@@ -4303,7 +4408,7 @@ class NodeItem(QGraphicsObject):
         painter.setBrush(QBrush(body))
         painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
                             else theme.GRID_COARSE, 1.4))
-        painter.drawRoundedRect(rect, 8, 8)
+        painter.drawRoundedRect(rect, NODE_RADIUS + 1, NODE_RADIUS + 1)
 
         painter.save()
         painter.translate(NOTE_PAD, NOTE_PAD)

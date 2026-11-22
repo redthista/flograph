@@ -105,6 +105,51 @@ with Freeze or *Run only when asked* (both exist to serve a kept value):
 turning one on clears the other. The saving is in what's held *after* a run; while
 the next node is reading it the table still has to exist.
 
+## Light and dark
+
+**Settings ▸ General ▸ Appearance ▸ Theme** switches the whole window between
+**Dark** (the default), **Light** and **Follow the system**, live. The canvas
+changes with it: in light mode it is a soft neutral grey with white nodes, each
+with a clear grey edge and a soft shadow, so a node stands out from the page
+instead of blending into it, and each panel is its own white card under a dark
+grey title bar. Wire colours, status lights, frames and the minimap are all
+re-tuned for the lighter ground. A colour you pick for a node, frame or page is
+yours and stays as you set it.
+
+### Your own theme
+
+A theme is a small text file. Put a `.toml` file in the `themes` folder of
+your flograph user folder and it appears in the Theme list under its file
+name. It only needs the colours it changes; everything else comes from the
+theme it is `based_on`:
+
+```toml
+[meta]
+label = "Light, warmer"
+based_on = "light"
+
+[canvas]
+CANVAS_BG = "#ece8e1"
+```
+
+The built-in `dark.toml` lists every colour there is to set, grouped into
+sections (`ui`, `chrome`, `canvas`, `status`, `wires`, `editor`, `syntax`, …),
+with a comment on each. A file that can't be read falls back to Dark rather
+than stopping the app. **Tools ▸ Theme Customiser…** edits all of it with
+colour pickers and live preview — see [[Themes]], which also says what every
+setting does and which one wins when two could colour the same thing.
+
+## Panels
+
+The panels round the canvas (the Library on the left, Properties, Code and Log
+on the right, the Inspector along the bottom) are separated from it by a thin
+line. Drag that line to resize a side. Drag it nearly to the edge of the
+window and let go, and that whole side folds away; a thin bar is left at the
+window's edge in its place. Drag the bar back out, or double-click it, to
+bring the side back. Double-clicking the line folds a side away too, and
+**Ctrl+Shift+H** folds away every side at once. A panel's own **×** still
+closes just that panel.
+
 ## Frames
 
 **Ctrl+G** wraps the selection in a comment frame. Drag a frame by its

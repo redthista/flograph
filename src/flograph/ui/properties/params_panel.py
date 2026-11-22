@@ -38,6 +38,7 @@ from ..canvas.node_item import card_kind
 from ..controls import UNCAPPED_TEXT
 from ..number_box import NumberBox
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
+from flograph.ui import theme as _theme  # noqa: E402
 
 # How long typing has to pause before a text param reaches the graph. Long
 # enough that a normal typing rate never commits mid-word, short enough that
@@ -323,7 +324,7 @@ class ParamsPanel(QWidget):
         details.setSpacing(2)
         self._doc_label = QLabel()
         self._doc_label.setWordWrap(True)
-        self._doc_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
+        _theme.set_qss(self._doc_label, "color: palette(mid); font-size: 8pt;")
         self._doc_label.hide()
         details.addWidget(self._doc_label)
 
@@ -332,20 +333,20 @@ class ParamsPanel(QWidget):
         # asking "have I got the new one?", and it should not compete the
         # rest of the time.
         self._version_label = QLabel()
-        self._version_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
+        _theme.set_qss(self._version_label, "color: palette(mid); font-size: 8pt;")
         self._version_label.hide()
         details.addWidget(self._version_label)
         self._details.hide()
         layout.addWidget(self._details)
 
         self._placeholder = QLabel("No node selected")
-        self._placeholder.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._placeholder, "color: palette(mid);")
         layout.addWidget(self._placeholder)
 
         self._locked_label = QLabel(
             "\N{LOCK} Locked — right-click the node and choose Unlock to edit.")
         self._locked_label.setWordWrap(True)
-        self._locked_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
+        _theme.set_qss(self._locked_label, "color: palette(mid); font-size: 8pt;")
         self._locked_label.hide()
         layout.addWidget(self._locked_label)
 
@@ -385,7 +386,7 @@ class ParamsPanel(QWidget):
         layout.addWidget(self._filter_bar)
 
         self._no_match = QLabel()
-        self._no_match.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._no_match, "color: palette(mid);")
         self._no_match.setWordWrap(True)
         self._no_match.hide()
         layout.addWidget(self._no_match)

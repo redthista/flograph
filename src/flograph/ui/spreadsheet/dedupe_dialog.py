@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout,
 from flograph.core.sheet.dedupe import duplicate_rows
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class DedupeDialog(QDialog):
@@ -35,7 +36,7 @@ class DedupeDialog(QDialog):
             hidden = QLabel("A filter is on: only the rows shown are "
                             "compared and removed; hidden rows stay.")
             hidden.setWordWrap(True)
-            hidden.setStyleSheet("color: #fbbf24;")
+            _theme.set_qss(hidden, "color: #fbbf24;")
             layout.addWidget(hidden)
 
         row = QHBoxLayout()
@@ -60,7 +61,7 @@ class DedupeDialog(QDialog):
 
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.status, "font-weight: 600;")
         layout.addWidget(self.status)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok

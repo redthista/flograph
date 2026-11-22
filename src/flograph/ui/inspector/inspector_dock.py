@@ -25,6 +25,7 @@ from flograph.engine import ExecutionEngine, summarize
 
 from .spec_view import is_tabular, spec_view_for
 from .view_for import view_for as _view_for
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Tighter than the app's tabs: these bars are the panel's only chrome and
 #: sit directly over the data, so every pixel they give back is a row of it.
@@ -82,15 +83,15 @@ class InspectorPanel(QWidget):
         self._watched_bar: Optional[QTabBar] = None
 
         self._header = _ElidedLabel("Nothing selected")
-        self._header.setStyleSheet("font-size: 8pt;")
+        _theme.set_qss(self._header, "font-size: 8pt;")
         self._stale = QLabel("STALE — re-run to refresh")
-        self._stale.setStyleSheet(
+        _theme.set_qss(self._stale, 
             "color: #eab308; font-weight: bold; font-size: 8pt;")
         self._stale.hide()
 
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
-        self._tabs.setStyleSheet(COMPACT_TABS)
+        _theme.set_qss(self._tabs, COMPACT_TABS)
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         # The info line is placed by hand over the empty stretch of
@@ -307,7 +308,7 @@ class InspectorPanel(QWidget):
                     if released else "Run the graph to see this output.")
                 placeholder.setWordWrap(True)
                 placeholder.setAlignment(Qt.AlignCenter)
-                placeholder.setStyleSheet("color: palette(mid);")
+                _theme.set_qss(placeholder, "color: palette(mid);")
                 self._tabs.addTab(placeholder, port.name)
             self._place_info()
             return
@@ -330,7 +331,7 @@ class InspectorPanel(QWidget):
                 # table values get a column spec next to the data
                 sub = QTabWidget()
                 sub.setDocumentMode(True)
-                sub.setStyleSheet(COMPACT_TABS)
+                _theme.set_qss(sub, COMPACT_TABS)
                 sub.addTab(_view_for(value, embed_figures=False), "Data")
                 self._add_lazy_spec_tab(sub, self._node_id, port.name)
                 host_layout.addWidget(sub, 1)
@@ -361,7 +362,7 @@ class InspectorPanel(QWidget):
         placeholder = QLabel("Spec loads when this tab is opened —\n"
                               "can be slow for very large tables.")
         placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(placeholder, "color: palette(mid);")
         spec_host = QWidget()
         spec_layout = QVBoxLayout(spec_host)
         spec_layout.setContentsMargins(0, 0, 0, 0)

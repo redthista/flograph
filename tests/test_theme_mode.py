@@ -178,3 +178,180 @@ class TestSettingsDialog:
         combo.setCurrentIndex(1)                  # Light
         assert window.theme_pref == "light"
         assert theme.APP_MODE == "light"
+
+
+# ---------------------------------------------------------------- light canvas
+#
+# The canvas follows the theme too: a light mode with a dark canvas was the
+# half-and-half the first version shipped, and a dark node on a dark canvas
+# is the contrast complaint light mode exists to answer.
+
+def _luminance(color: QColor) -> float:
+    def lin(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return (0.2126 * lin(color.redF()) + 0.7152 * lin(color.greenF())
+            + 0.0722 * lin(color.blueF()))
+
+
+def _contrast(a: QColor, b: QColor) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+class TestLightCanvas:
+    def test_canvas_switches_with_the_theme_and_back(self, qapp):
+        theme.apply_theme(qapp, "dark")
+        dark_bg, dark_body = theme.CANVAS_BG.name(), theme.NODE_BODY.name()
+        theme.apply_theme(qapp, "light")
+        assert theme.CANVAS_BG.name() != dark_bg
+        assert theme.NODE_BODY.name() != dark_body
+        assert theme.CANVAS_BG.lightness() > 180
+        theme.apply_theme(qapp, "dark")
+        assert theme.CANVAS_BG.name() == dark_bg
+        assert theme.NODE_BODY.name() == dark_body
+
+    def test_a_node_stands_out_from_its_canvas(self, qapp):
+        theme.apply_theme(qapp, "light")
+        # a light card is lifted by a shadow and a neutral edge as well as
+        # by value, so the fill gap itself is modest; no category tint (the
+        # purple Transform cards were turned down in testing)
+        assert _contrast(theme.NODE_BODY, theme.CANVAS_BG) >= 1.05
+        assert _contrast(theme.NODE_BORDER, theme.NODE_BODY) >= 1.5
+        assert theme.category_color("io") is None
+        assert theme.style("panel_borders") is True
+        theme.apply_theme(qapp, "dark")
+        assert theme.style("panel_borders") is False
+        theme.apply_theme(qapp, "light")
+        assert theme.NODE_HEADER.name() != theme.NODE_BODY.name()
+        assert _contrast(theme.NODE_TEXT, theme.NODE_BODY) >= 7
+        assert _contrast(theme.NODE_SUBTEXT, theme.NODE_BODY) >= 4.5
+
+    def test_wires_and_status_lights_read_on_the_light_canvas(self, qapp):
+        from flograph.core import PortType
+        from flograph.core.node import NodeStatus
+        theme.apply_theme(qapp, "light")
+        for port_type in PortType:
+            assert _contrast(theme.wire_color(port_type),
+                             theme.CANVAS_BG) >= 2.2, port_type
+        for status in NodeStatus:
+            assert _contrast(theme.status_color(status),
+                             theme.NODE_BODY) >= 2.5, status
+
+    def test_the_dark_canvas_is_exactly_what_it_was(self, qapp):
+        theme.apply_theme(qapp, "light")
+        theme.apply_theme(qapp, "dark")
+        assert theme.CANVAS_BG.name() == "#1b1c20"
+        assert theme.NODE_BODY.name() == "#2a2c33"
+        assert theme.NODE_HEADER.name() == "#363943"
+        assert theme.status_color(
+            __import__("flograph.core.node", fromlist=["NodeStatus"])
+            .NodeStatus.DONE).name() == "#22c55e"
+
+
+class TestSkin:
+    def test_dark_mode_leaves_text_alone(self, qapp):
+        theme.apply_theme(qapp, "dark")
+        qss = "QLabel { color: #e5e7eb; background: #2a2c33; }"
+        assert theme.skin(qss) == qss
+        assert theme.skin_color("#c8cbd2").name() == "#c8cbd2"
+
+    def test_light_mode_translates_neutrals_only(self, qapp):
+        theme.apply_theme(qapp, "light")
+        out = theme.skin("QLabel { color: #e5e7eb; background: #2a2c33;"
+                         " border: 1px solid #22c55e; color2: #ffffff; }")
+        assert "#e5e7eb" not in out and "#2a2c33" not in out
+        # status green and white mean the same in both modes
+        assert "#22c55e" in out and "#ffffff" in out
+
+    def test_set_qss_round_trips_through_a_theme_switch(self, qapp):
+        from PySide6.QtWidgets import QLabel
+        theme.apply_theme(qapp, "dark")
+        label = QLabel("x")
+        qss = "QLabel { color: #e5e7eb; background: #34363f; }"
+        theme.set_qss(label, qss)
+        assert label.styleSheet() == qss
+        theme.apply_theme(qapp, "light")
+        assert label.styleSheet() != qss
+        theme.apply_theme(qapp, "dark")
+        assert label.styleSheet() == qss
+
+    def test_a_grid_built_in_light_returns_to_dark(self, qapp):
+        from PySide6.QtWidgets import QTableView
+        theme.apply_theme(qapp, "light")
+        view = QTableView()
+        theme.style_scroll_area(view, theme.grid_stylesheet())
+        assert theme.NODE_BODY.name() in view.styleSheet()
+        theme.apply_theme(qapp, "dark")
+        assert theme.NODE_BODY.name() in view.styleSheet()   # #2a2c33
+
+    def test_listeners_hear_about_a_switch(self, qapp):
+        heard = []
+        theme.on_change(lambda: heard.append(theme.APP_MODE))
+        try:
+            theme.apply_theme(qapp, "light")
+            theme.apply_theme(qapp, "dark")
+        finally:
+            theme._listeners.pop()
+        assert heard == ["light", "dark"]
+
+    def test_the_skin_covers_every_canvas_colour_it_is_built_from(self, qapp):
+        theme.apply_theme(qapp, "light")
+        for name in ("CANVAS_BG", "NODE_BODY", "NODE_HEADER", "NODE_BORDER",
+                     "NODE_TEXT", "NODE_SUBTEXT"):
+            dark = theme.dark_hex(name)
+            assert theme.skin(dark) == theme.current().get(
+                "canvas", name).lower()
+
+    def test_every_skin_role_resolves_in_every_theme(self, qapp):
+        for name in ("light", "dark"):
+            theme.apply_theme(qapp, name)
+            for section, key in theme._SKIN_ROLES.values():
+                assert QColor(theme.current().get(section, key)).isValid()
+
+    def test_the_skin_is_the_identity_in_dark(self, qapp):
+        theme.apply_theme(qapp, "dark")
+        qss = "background: #1e2024; color: #9aa0ab; border: 1px solid #3a3d47;"
+        assert theme.skin(qss) == qss
+
+
+class TestChromeFollowsTheTheme:
+    def test_title_bar_and_toolbar_colours(self, qapp):
+        theme.apply_theme(qapp, "light")
+        light_bar = theme.chrome("bar_bg")
+        theme.apply_theme(qapp, "dark")
+        assert theme.chrome("bar_bg") != light_bar
+        assert QColor(theme.chrome("bar_bg")).lightness() < 60
+
+    def test_window_restyles_itself_live(self, window, qapp):
+        window.set_theme_pref("light")
+        assert theme.chrome("bar_bg") in window._title_bar.styleSheet()
+        window.set_theme_pref("dark")
+        assert theme.chrome("bar_bg") in window._title_bar.styleSheet()
+
+    def test_toolbar_run_colour_follows_the_theme(self, qapp):
+        # the light theme's title bar is a dark grey band too (user's call,
+        # 2026-11-19), so its Run green is whatever its [chrome] says
+        from flograph.ui import toolbar
+        for name in ("light", "dark"):
+            theme.apply_theme(qapp, name)
+            assert toolbar.RUN.name() == theme.chrome("run")
+
+
+class TestViewThemeMenu:
+    def test_lists_every_pref_and_ticks_the_current_one(self, window):
+        window._fill_theme_menu()
+        actions = [a for a in window._theme_menu.actions() if a.isCheckable()]
+        assert [a.text() for a in actions] == [
+            theme.theme_label(p) for p in theme.theme_prefs()]
+        ticked = [a.text() for a in actions if a.isChecked()]
+        assert ticked == [theme.theme_label(window.theme_pref)]
+
+    def test_choosing_an_entry_switches_the_theme(self, window):
+        window._fill_theme_menu()
+        steel = next(a for a in window._theme_menu.actions()
+                     if a.text() == "Light Steel")
+        steel.trigger()
+        assert window.theme_pref == "light_steel"
+        window._fill_theme_menu()
+        assert [a.text() for a in window._theme_menu.actions()
+                if a.isCheckable() and a.isChecked()] == ["Light Steel"]

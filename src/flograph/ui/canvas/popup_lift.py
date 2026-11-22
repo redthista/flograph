@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
 
 from .. import theme
 from .stacking import POPUP_HOST_Z
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Set on a graphics item while one of its widget's popups is open. An
 #: attribute rather than a subclass hook so a tile and a node — which share
@@ -217,18 +218,18 @@ def _screen_for(point: QPoint) -> QRect:
 def _popup_stylesheet() -> str:
     """A card's chrome, not the desktop's: the list belongs to a control
     drawn on a dark card even though it is a window of its own now."""
-    return (f"QListView {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
+    return (f"QListView {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
+            f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
             f" outline: none; font-size: 9pt; }}"
             f"QListView::item {{ padding: 3px 6px;"
             f" border: none; }}"
             f"QListView::item:hover {{"
-            f" background: {theme.NODE_HEADER.name()}; }}"
+            f" background: {theme.dark_hex('NODE_HEADER')}; }}"
             f"QListView::item:selected {{"
-            f" background: {theme.SELECTION_OUTLINE.name()};"
-            f" color: {theme.NODE_BORDER.name()}; }}"
-            f"QLabel#popup_filter {{ color: {theme.NODE_SUBTEXT.name()};"
+            f" background: {theme.dark_hex('SELECTION_OUTLINE')};"
+            f" color: {theme.dark_hex('NODE_BORDER')}; }}"
+            f"QLabel#popup_filter {{ color: {theme.dark_hex('NODE_SUBTEXT')};"
             f" background: transparent; font-size: 9pt; }}")
 
 
@@ -329,9 +330,9 @@ class CardPopup(DismissedByAClickElsewhere, QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         # by object name: a bare QFrame rule would cascade into the tree and
         # the scroll areas inside, which are QFrames themselves
-        self.setStyleSheet(
-            f"QFrame#card_popup {{ background: {theme.NODE_BODY.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()}; }}")
+        _theme.set_qss(self, 
+            f"QFrame#card_popup {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" border: 1px solid {theme.dark_hex('NODE_BORDER')}; }}")
 
     def open_against(self, widget: QWidget, size: Optional[QSize] = None,
                      ) -> bool:
@@ -380,7 +381,7 @@ class CardPopupList(DismissedByAClickElsewhere, QListView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setUniformItemSizes(True)
         self.setMouseTracking(True)
-        self.setStyleSheet(_popup_stylesheet())
+        _theme.set_qss(self, _popup_stylesheet())
         self._opened = QElapsedTimer()
         self._pressed_inside = False
         # Type to narrow the list. A dropdown of 200 store names is a list
@@ -421,7 +422,7 @@ class CardPopupList(DismissedByAClickElsewhere, QListView):
             # view than it was last time (a frame opened in its own tab, a
             # page moved), and a popup's window has to be the one on screen
             self.setParent(window, Qt.Popup)
-            self.setStyleSheet(_popup_stylesheet())
+            _theme.set_qss(self, _popup_stylesheet())
         self.set_filter("")
         size = self.wanted_size(anchor.width(), rows_at_once)
         self.setGeometry(popup_geometry(anchor, size,

@@ -1,17 +1,18 @@
 """Collapsing a whole side of the canvas: the edge strips.
 
 Docks are plain QDockWidgets again -- collapsing an edge closes them, so
-Qt's own drag/float/tab machinery is untouched and there is no custom
-size arithmetic to test. What needs covering is the strip: which way its
-arrow points, what a click takes down and puts back, and that it stays
-out of the way on pages the panels don't belong to.
+Qt's own drag/float/tab machinery is untouched. An open edge is resized by
+Qt's separator (the border round the panels); letting that border go near
+the window's edge collapses the edge, and a thin bar -- the strip -- is
+then the way back. What needs covering is what a gesture takes down and
+puts back, and that the bar stays out of the way while the edge is open
+and on pages the panels don't belong to.
 
 Only TestResizing shows a real MainWindow, and only because dragging a
 size handle needs geometry an unshown top-level widget never computes --
 see test_gpu_viewport_setting.py's module docstring for why showing them
 is otherwise avoided under this offscreen harness. Everything else
-asserts on logical state (which docks are hidden, which way the arrow
-points). Settings kept off the real store (avoid polluting the
+asserts on logical state (which docks are hidden, whether a bar shows). Settings kept off the real store (avoid polluting the
 developer's actual flograph.conf).
 """
 import pytest
@@ -71,37 +72,33 @@ class TestDockLayout:
 
 
 class TestEdgeStrips:
-    def test_strips_stay_on_screen_while_their_docks_are_open(self, window):
-        """The strip is the collapse control, not just a way back -- it has
-        to be there while the edge is still up."""
-        for strip in window._edge_strips.values():
-            assert strip.isVisibleTo(window) is True
-            assert strip.is_collapsed() is False
+    def test_a_bar_shows_only_while_its_edge_is_collapsed(self, window):
+        """An open edge is resized by its border; the bar is only the way
+        back, so it stays out of the way until there is something to bring
+        back."""
+        strip = window._edge_strips["right"]
+        assert strip.isVisibleTo(window) is False
+        strip.collapse()
+        assert strip.isVisibleTo(window) is True
+        strip.expand()
+        assert strip.isVisibleTo(window) is False
 
-    def test_one_click_collapses_a_whole_tab_group(self, window, qtbot):
+    def test_collapsing_takes_down_a_whole_tab_group(self, window):
         """The complaint that drove this: closing the right-hand side a tab
         at a time is not collapsing it."""
         strip = window._edge_strips["right"]
-        qtbot.mouseClick(strip._button, Qt.LeftButton)
+        strip.toggle()
 
         assert all(dock.isHidden() for dock in _right_docks(window))
         assert strip.is_collapsed() is True
 
-    def test_clicking_again_restores_the_whole_edge(self, window, qtbot):
+    def test_toggling_again_restores_the_whole_edge(self, window):
         strip = window._edge_strips["right"]
-        qtbot.mouseClick(strip._button, Qt.LeftButton)
-        qtbot.mouseClick(strip._button, Qt.LeftButton)
+        strip.toggle()
+        strip.toggle()
 
         assert all(not dock.isHidden() for dock in _right_docks(window))
         assert strip.is_collapsed() is False
-
-    def test_the_arrow_turns_around_when_the_edge_collapses(self, window):
-        strip = window._edge_strips["right"]
-        outward = strip._button.arrowType()
-        strip.collapse()
-        assert strip._button.arrowType() != outward
-        strip.expand()
-        assert strip._button.arrowType() == outward
 
     def test_collapsing_one_edge_leaves_the_others_alone(self, window):
         window._edge_strips["right"].collapse()
@@ -147,54 +144,44 @@ class TestEdgeStrips:
 
 
 class TestDoubleClick:
-    """Double-clicking the strip is the arrow's gesture with a target the
-    width of the whole edge instead of 12px."""
+    """Double-clicking a collapsed edge's bar brings the edge back, for
+    someone who would rather not drag it out."""
 
-    def _double_click(self, app, strip):
-        point = QPoint(5, 60)
+    def _double_click(self, app, strip, button=Qt.LeftButton):
+        point = QPoint(3, 60)
         globally = strip.mapToGlobal(point)
-        for kind, buttons in ((QEvent.MouseButtonPress, Qt.LeftButton),
+        for kind, buttons in ((QEvent.MouseButtonPress, button),
                               (QEvent.MouseButtonRelease, Qt.NoButton),
-                              (QEvent.MouseButtonDblClick, Qt.LeftButton)):
+                              (QEvent.MouseButtonDblClick, button)):
             app.sendEvent(strip, QMouseEvent(
-                kind, point, globally, Qt.LeftButton, buttons, Qt.NoModifier))
+                kind, point, globally, button, buttons, Qt.NoModifier))
         app.processEvents()
-
-    def test_it_collapses_the_edge(self, window):
-        app = QApplication.instance()
-        strip = window._edge_strips["right"]
-
-        self._double_click(app, strip)
-
-        assert strip.is_collapsed() is True
-        assert all(dock.isHidden() for dock in _right_docks(window))
 
     def test_it_brings_the_edge_back(self, window):
         app = QApplication.instance()
         strip = window._edge_strips["right"]
+        strip.collapse()
 
-        self._double_click(app, strip)
         self._double_click(app, strip)
 
         assert strip.is_collapsed() is False
         assert all(not dock.isHidden() for dock in _right_docks(window))
 
-    def test_a_right_click_is_not_a_collapse(self, window):
+    def test_a_right_click_does_not(self, window):
         app = QApplication.instance()
         strip = window._edge_strips["right"]
-        point = QPoint(5, 60)
-        app.sendEvent(strip, QMouseEvent(
-            QEvent.MouseButtonDblClick, point, strip.mapToGlobal(point),
-            Qt.RightButton, Qt.RightButton, Qt.NoModifier))
-        app.processEvents()
+        strip.collapse()
 
-        assert strip.is_collapsed() is False
+        self._double_click(app, strip, Qt.RightButton)
+
+        assert strip.is_collapsed() is True
 
     def test_it_leaves_no_drag_armed_behind_it(self, window):
-        """The press that opens a double-click arms a resize; left set, the
+        """The press that opens a double-click arms a drag; left set, the
         next stray move would drag the edge from a stale origin."""
         app = QApplication.instance()
         strip = window._edge_strips["right"]
+        strip.collapse()
 
         self._double_click(app, strip)
 
@@ -381,58 +368,103 @@ class TestHideAllPanels:
 
 
 class TestResizing:
-    """The strip doubles as the drag handle, so Qt's own dock separators are
-    styled away -- one thin column instead of a strip beside a ~5px
-    separator. Needs a real shown window: an unshown top-level widget never
-    lays out for real, so there are no dock widths to drag."""
+    """Borders and bars under a real shown window: an unshown top-level
+    widget never lays out for real, so there are no dock geometries to
+    find a border by or drag."""
 
-    def _drag(self, app, strip, dx, dy):
-        origin = strip.mapToGlobal(QPoint(5, 60))
-        moved = origin + QPoint(dx, dy)
-        for kind, point, buttons in (
-                (QEvent.MouseButtonPress, origin, Qt.LeftButton),
-                (QEvent.MouseMove, moved, Qt.LeftButton),
-                (QEvent.MouseButtonRelease, moved, Qt.NoButton)):
-            app.sendEvent(strip, QMouseEvent(
-                kind, strip.mapFromGlobal(point), point,
-                Qt.LeftButton, buttons, Qt.NoModifier))
-        app.processEvents()
-
-    def test_dragging_a_strip_resizes_its_edge(self, qtbot, registry):
-        app = QApplication.instance()
+    @pytest.fixture
+    def shown(self, qtbot, registry):
         win = mod.MainWindow(registry)
         win.confirm_close = False
         qtbot.addWidget(win)
         win.resize(1400, 900)
         win.show()
         qtbot.wait(10)
+        return win
 
-        start = win.properties_dock.width()
-        # towards the canvas widens a right-hand edge
-        self._drag(app, win._edge_strips["right"], -100, 0)
+    def _send(self, app, widget, steps):
+        """(kind, local point, buttons) mouse events, in order."""
+        for kind, point, buttons in steps:
+            app.sendEvent(widget, QMouseEvent(
+                kind, point, widget.mapToGlobal(point),
+                Qt.LeftButton, buttons, Qt.NoModifier))
+        app.processEvents()
+
+    def _right_border(self, win):
+        host = win._dock_host
+        x = win.properties_dock.geometry().x() - 1
+        point = QPoint(x, win.properties_dock.geometry().center().y())
+        assert win._edge_strips["right"].isVisibleTo(win) is False
+        return host, point
+
+    def _drag_border(self, app, qtbot, win, to_x):
+        host, point = self._right_border(win)
+        end = QPoint(to_x, point.y())
+        self._send(app, host, (
+            (QEvent.MouseButtonPress, point, Qt.LeftButton),
+            (QEvent.MouseMove, end, Qt.LeftButton),
+            (QEvent.MouseButtonRelease, end, Qt.NoButton)))
         qtbot.wait(10)
-        assert win.properties_dock.width() == start + 100
 
-        self._drag(app, win._edge_strips["right"], 60, 0)
+    def test_letting_a_border_go_near_the_window_edge_collapses(
+            self, shown, qtbot):
+        app = QApplication.instance()
+        host = shown._dock_host
+        self._drag_border(app, qtbot, shown, host.width() - 20)
+
+        assert shown._edge_strips["right"].is_collapsed() is True
+        assert shown._edge_strips["right"].isVisibleTo(shown) is True
+
+    def test_an_ordinary_resize_does_not(self, shown, qtbot):
+        app = QApplication.instance()
+        _host, point = self._right_border(shown)
+        self._drag_border(app, qtbot, shown, point.x() - 80)
+
+        assert shown._edge_strips["right"].is_collapsed() is False
+
+    def test_double_clicking_a_border_collapses_its_edge(self, shown, qtbot):
+        app = QApplication.instance()
+        host, point = self._right_border(shown)
+        self._send(app, host, (
+            (QEvent.MouseButtonPress, point, Qt.LeftButton),
+            (QEvent.MouseButtonRelease, point, Qt.NoButton),
+            (QEvent.MouseButtonDblClick, point, Qt.LeftButton)))
         qtbot.wait(10)
-        assert win.properties_dock.width() == start + 40
 
-        bottom_start = win.inspector_dock.height()
-        self._drag(app, win._edge_strips["bottom"], 0, -70)
-        qtbot.wait(10)
-        assert win.inspector_dock.height() == bottom_start + 70
+        assert shown._edge_strips["right"].is_collapsed() is True
 
-    def test_a_collapsed_edge_has_nothing_to_drag(self, window):
-        """_sizing_dock() returns None with every dock closed, so a press
-        must fall through rather than starting a drag against nothing."""
-        strip = window._edge_strips["right"]
+    def test_dragging_the_bar_out_brings_the_edge_back_at_that_size(
+            self, shown, qtbot):
+        app = QApplication.instance()
+        strip = shown._edge_strips["right"]
         strip.collapse()
-        assert strip._sizing_dock() is None
-        assert strip.cursor().shape() == Qt.ArrowCursor
+        qtbot.wait(10)
+        start = QPoint(3, 60)
+        self._send(app, strip, (
+            (QEvent.MouseButtonPress, start, Qt.LeftButton),
+            (QEvent.MouseMove, start - QPoint(320, 0), Qt.LeftButton),
+            (QEvent.MouseButtonRelease, start - QPoint(320, 0), Qt.NoButton)))
+        qtbot.wait(10)
 
-    def test_an_open_edge_offers_a_resize_cursor(self, window):
-        strip = window._edge_strips["right"]
-        assert strip.cursor().shape() == Qt.SplitHCursor
+        assert strip.is_collapsed() is False
+        assert strip.isVisibleTo(shown) is False
+        assert abs(shown.properties_dock.width() - 320) <= 10
+
+    def test_a_short_drag_leaves_it_collapsed(self, shown, qtbot):
+        app = QApplication.instance()
+        strip = shown._edge_strips["right"]
+        strip.collapse()
+        qtbot.wait(10)
+        start = QPoint(3, 60)
+        self._send(app, strip, (
+            (QEvent.MouseButtonPress, start, Qt.LeftButton),
+            (QEvent.MouseMove, start - QPoint(20, 0), Qt.LeftButton),
+            (QEvent.MouseButtonRelease, start - QPoint(20, 0), Qt.NoButton)))
+
+        assert strip.is_collapsed() is True
+
+    def test_a_bar_offers_a_resize_cursor(self, window):
+        assert window._edge_strips["right"].cursor().shape() == Qt.SplitHCursor
         assert window._edge_strips["bottom"].cursor().shape() == Qt.SplitVCursor
 
 
@@ -561,3 +593,34 @@ class TestResetAndPersistence:
         win2.confirm_close = False
         qtbot.addWidget(win2)
         assert win2.library_dock not in win2._docks_open_on_model_page
+
+
+class TestBarAboveTheWindowGrips:
+    """A collapsed left/right bar sits at the window's edge, where the
+    frameless window lays its resize grips over everything. The bar must be
+    wider than a grip, or the grip takes every press and the panels can't
+    be brought back (a 6px bar under a 6px grip could not be grabbed)."""
+
+    @pytest.fixture
+    def shown(self, qtbot, registry):
+        win = mod.MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        win.resize(1400, 900)
+        win.show()
+        qtbot.wait(10)
+        return win
+
+    @pytest.mark.parametrize("side", ["left", "right"])
+    def test_part_of_the_bar_is_not_under_a_grip(self, qtbot, shown, side):
+        strip = shown._edge_strips[side]
+        strip.collapse()
+        qtbot.waitUntil(strip.isVisible, timeout=1000)
+        # what the window hands a press to, across the bar's width, at
+        # mid-height (clear of the corner grips)
+        mid = strip.height() // 2
+        hits = [shown.childAt(strip.mapTo(shown, QPoint(x, mid)))
+                for x in range(strip.width())]
+        assert strip in hits, "every point of the bar is under a grip"
+        free = sum(1 for w in hits if w is strip)
+        assert free >= 6

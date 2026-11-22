@@ -138,16 +138,16 @@ class SheetEditorDialog(QDialog):
         # window of its own, not a thumbnail on a canvas
         theme.style_scroll_area(
             self.view,
-            f"QTableView {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
+            f"QTableView {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')}; border: none;"
             f" gridline-color: #3a3e47; }}"
-            f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
+            f"QHeaderView::section {{ background: {theme.dark_hex('NODE_HEADER')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
             f" border: 1px solid #3a3e47; padding: 2px 6px; }}"
             f"QTableCornerButton::section {{"
-            f" background: {theme.NODE_HEADER.name()};"
+            f" background: {theme.dark_hex('NODE_HEADER')};"
             f" border: 1px solid #3a3e47; }}"
-            f"QHeaderView {{ background: {theme.NODE_BODY.name()}; }}")
+            f"QHeaderView {{ background: {theme.dark_hex('NODE_BODY')}; }}")
         self.undo_stack = QUndoStack(self)
         self._last_dict = self.model.sheet_dict()
         self._applied_dict = self._last_dict

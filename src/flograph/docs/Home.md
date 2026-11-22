@@ -14,6 +14,8 @@ Documentation** or **F1**.
   your first flow.
 - **[[The Canvas]]** — nodes, wires, ports, frames, panning, the shortcuts
   that matter.
+- **[[Themes]]** — light, dark and your own; the Theme Customiser; what every
+  setting does and which one wins.
 - **[[Nodes and the Library]]** — finding nodes, the standard library,
   optional-extra packages.
 - **[[Writing a Node]]** — the full node contract: `NODE`, params, the `run`

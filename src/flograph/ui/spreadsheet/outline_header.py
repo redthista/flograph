@@ -14,13 +14,16 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QHeaderView, QToolTip
 
 from flograph.core.sheet.outline import button_row, depth, level_of
+from flograph.ui import theme
 
 _LEVEL = 12          # px per level of grouping
 _PAD = 4             # px before the first level
 _BOX = 9             # the −/+ button
-_LINE = QColor("#8b909c")
-_BUTTON_BG = QColor("#2f323b")
-_GUTTER_BG = QColor("#23252c")
+# written in the dark theme's colours; theme.skin_color turns them into the
+# active theme's at paint time
+_LINE = "#8b909c"
+_BUTTON_BG = "#2f323b"
+_GUTTER_BG = "#23252c"
 
 
 class OutlineHeader(QHeaderView):
@@ -87,7 +90,7 @@ class OutlineHeader(QHeaderView):
         painter.restore()
         painter.save()
         painter.fillRect(QRect(rect.left(), rect.top(), self._gutter,
-                               rect.height()), _GUTTER_BG)
+                               rect.height()), theme.skin_color(_GUTTER_BG))
         self._paint_outline(painter, rect, logical)
         painter.restore()
 
@@ -101,7 +104,7 @@ class OutlineHeader(QHeaderView):
         for group in groups:
             x = rect.left() + self._column_x(level_of(groups, group))
             anchor = button_row(group, n_rows)
-            painter.setPen(QPen(_LINE, 1))
+            painter.setPen(QPen(theme.skin_color(_LINE), 1))
             if not group.collapsed and group.covers(row):
                 y0 = top + 3 if row == group.start and anchor > group.end \
                     else top
@@ -120,7 +123,7 @@ class OutlineHeader(QHeaderView):
                         painter.drawLine(x, top, x, box.top())
                     else:
                         painter.drawLine(x, box.bottom(), x, bottom)
-                painter.fillRect(box, _BUTTON_BG)
+                painter.fillRect(box, theme.skin_color(_BUTTON_BG))
                 painter.drawRect(box)
                 painter.setPen(QPen(QColor("#e5e7eb"), 1))
                 c = box.center()

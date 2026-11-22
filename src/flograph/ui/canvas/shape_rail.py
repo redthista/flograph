@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QButtonGroup, QFrame, QToolButton, QVBoxLayout
 
 from .. import theme
 from .shape_item import KIND_LABELS
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Carries the shape kind when a rail button is dragged onto the canvas.
 SHAPE_KIND_MIME = "application/x-flograph-shape-kind"
@@ -112,7 +113,7 @@ class ShapeRail(QFrame):
         self._view = view
         self.setObjectName("shape_rail")
         self.setFrameShape(QFrame.StyledPanel)
-        self.setStyleSheet(
+        _theme.set_qss(self, 
             "#shape_rail { background: rgba(30,32,38,0.92);"
             " border: 1px solid #3b3d46; border-radius: 7px; }"
             " QToolButton { border: none; border-radius: 5px; padding: 3px; }"

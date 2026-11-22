@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QPushButton, QVBoxLayout)
 
 from .menus import exec_menu, heading, new_menu, real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 def open_choice_list(view, index) -> None:
@@ -98,7 +99,7 @@ class DropdownListDialog(QDialog):
 
         self.hint = QLabel()
         self.hint.setWordWrap(True)
-        self.hint.setStyleSheet("color: #9aa0ab;")
+        _theme.set_qss(self.hint, "color: #9aa0ab;")
         self.run_button = QPushButton("Run Helpers")
         self.run_button.setToolTip(
             "Run the helper tables wired into this Table — only those, not "

@@ -33,6 +33,7 @@ from flograph.core.tile_style import (
 )
 
 from ..commands import SetPageLookCommand, SetTileStylesCommand
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Colours that sit well together on a dashboard: dark grounds and light
 #: ones, and a handful of accents. Custom… takes any other.
@@ -321,7 +322,7 @@ class StyleForm(QWidget):
             box_layout.setContentsMargins(0, 0, 0, 0)
             box_layout.setSpacing(3)
             heading = QLabel(group.upper())
-            heading.setStyleSheet("color: palette(mid); font-size: 8pt;"
+            _theme.set_qss(heading, "color: palette(mid); font-size: 8pt;"
                                   " font-weight: 600;")
             box_layout.addWidget(heading)
             form = QFormLayout()
@@ -375,7 +376,7 @@ class Section(QWidget):
         self.toggle.setAutoRaise(True)
         self.toggle.setArrowType(Qt.DownArrow)
         self.toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.toggle.setStyleSheet("QToolButton { font-weight: bold; }")
+        _theme.set_qss(self.toggle, "QToolButton { font-weight: bold; }")
         self.toggle.toggled.connect(self._on_toggled)
         layout.addWidget(self.toggle)
         self.body = QWidget()
@@ -408,7 +409,7 @@ class FormatPane(QWidget):
         outer.setContentsMargins(4, 6, 6, 6)
         outer.setSpacing(4)
         header = QLabel("Format")
-        header.setStyleSheet("font-weight: bold;")
+        _theme.set_qss(header, "font-weight: bold;")
         outer.addWidget(header)
 
         scroll = QScrollArea()
@@ -425,7 +426,7 @@ class FormatPane(QWidget):
         self.tile_section = Section("Selected Visual")
         self.selection_note = QLabel()
         self.selection_note.setWordWrap(True)
-        self.selection_note.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self.selection_note, "color: palette(mid);")
         self.tile_section.body_layout.addWidget(self.selection_note)
         self.tile_form = StyleForm("Page")
         self.tile_form.changed.connect(self._on_tile_field)
@@ -446,7 +447,7 @@ class FormatPane(QWidget):
         page_form.addRow("Background", self.background)
         self.page_section.body_layout.addLayout(page_form)
         caption = QLabel("Every visual on this page:")
-        caption.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(caption, "color: palette(mid);")
         self.page_section.body_layout.addWidget(caption)
         self.page_form = StyleForm("Default", fields=PAGE_FIELDS)
         self.page_form.changed.connect(self._on_page_field)
@@ -522,7 +523,7 @@ class FormatPane(QWidget):
         if page is None:
             return
         self.background.set_value(page.background, None, "Theme")
-        self.page_form.set_values(page.tile_style, CARD_LOOK)
+        self.page_form.set_values(page.tile_style, _theme.card_look())
         self.clear_all_button.setEnabled(
             any(not tile.style.is_empty() for tile in page.tiles.values()))
 
@@ -542,7 +543,7 @@ class FormatPane(QWidget):
         first = targets[0]
         notes_only = all(self._kind(tile) == "note" for tile in targets)
         inherited = resolve(page.tile_style, None,
-                            NOTE_LOOK if notes_only else CARD_LOOK)
+                            _theme.card_look(note=notes_only))
         self.tile_form.set_values(first.style, inherited)
         # a note is its text, with no title bar to format — only the
         # colour its words are drawn in, which the title's text colour is

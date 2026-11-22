@@ -17,6 +17,7 @@ from .dashboard_scene import DashboardScene
 from .dashboard_view import DashboardView
 from .format_pane import FormatPane, GuardedLineEdit
 from .visuals_list import SORT_MODES, VisualsList, kind_glyph, kind_label
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class DashboardPage(QWidget):
@@ -44,7 +45,7 @@ class DashboardPage(QWidget):
         side_layout.setContentsMargins(6, 6, 4, 6)
         side_layout.setSpacing(4)
         header = QLabel("Visuals")
-        header.setStyleSheet("font-weight: bold;")
+        _theme.set_qss(header, "font-weight: bold;")
         side_layout.addWidget(header)
 
         # finding a visual in a long flow: by name, by type, in an order
@@ -84,11 +85,11 @@ class DashboardPage(QWidget):
         side_layout.addWidget(self.visuals, 1)
         self.visuals_empty = QLabel()
         self.visuals_empty.setWordWrap(True)
-        self.visuals_empty.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self.visuals_empty, "color: palette(mid);")
         self.visuals_empty.hide()
         side_layout.addWidget(self.visuals_empty)
         hint = QLabel("Drag a visual onto the page.")
-        hint.setStyleSheet("color: palette(mid); font-size: 8pt;")
+        _theme.set_qss(hint, "color: palette(mid); font-size: 8pt;")
         hint.setWordWrap(True)
         side_layout.addWidget(hint)
         self.visuals.filters_changed.connect(self._on_visual_filters_changed)

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog,
 from flograph.core.sheet import split as splitting
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 _PREVIEW_ROWS = 8
 
@@ -100,7 +101,7 @@ class SplitDialog(QDialog):
         rlay = QVBoxLayout(result)
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.status, "font-weight: 600;")
         rlay.addWidget(self.status)
         self.preview = QTableWidget()
         self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -203,7 +204,7 @@ class SplitDialog(QDialog):
         parts = self.parts()
         if isinstance(parts, str):
             self.status.setText(parts)
-            self.status.setStyleSheet("font-weight: 600; color: #f87171;")
+            _theme.set_qss(self.status, "font-weight: 600; color: #f87171;")
             ok.setEnabled(False)
             self.preview.setRowCount(0)
             self.preview.setColumnCount(0)
@@ -214,7 +215,7 @@ class SplitDialog(QDialog):
         if not self._names_typed:
             self.names.setText(", ".join(names))
         clash = self._clash(names)
-        self.status.setStyleSheet("font-weight: 600;" if not clash
+        _theme.set_qss(self.status, "font-weight: 600;" if not clash
                                   else "font-weight: 600; color: #f87171;")
         if clash:
             self.status.setText(clash)

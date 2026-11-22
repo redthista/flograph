@@ -32,6 +32,8 @@ from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QRegion
 from PySide6.QtWidgets import (QApplication, QHeaderView, QStyle,
                                QToolTip, QWidget)
 
+from flograph.ui import theme
+
 _OUTLINE = QColor("#60a5fa")
 _POINTED = QColor("#4ade80")   # Point mode's box round a pointed range
 _HANDLE = 7          # the square's side, in px
@@ -69,7 +71,7 @@ class _Overlay(QWidget):
             handle = view.fill_handle_grid_rect()
             if handle is not None:
                 painter.setClipping(False)     # it may overhang the edge
-                painter.setPen(QPen(QColor("#1b1c20"), 1))
+                painter.setPen(QPen(theme.skin_color("#1b1c20"), 1))
                 painter.setBrush(_OUTLINE)
                 painter.drawRect(handle)
                 painter.setClipRect(cells)

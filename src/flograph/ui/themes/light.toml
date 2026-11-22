@@ -1,0 +1,191 @@
+# flograph's light theme.
+#
+# The idea: neutral greys, no blue or purple cast. White is where you work
+# (lists, inputs, nodes, the editor, each dock's card); a light grey is the
+# frame around it (the window, dock titles, tabs, the status bar); the
+# title bar and toolbar are a dark grey band across the top; the canvas
+# sits a step darker than the window so a white node is the brightest
+# thing on it. There is one accent colour — blue — for selection, focus
+# and links. Text is near-black on white (~16:1); secondary text stays
+# above 5:1.
+
+[meta]
+label = "Light"
+kind = "light"
+based_on = "dark"
+
+[ui]
+window = "#f3f3f3"
+window_text = "#1f1f1f"
+base = "#ffffff"
+alt_base = "#f7f7f7"
+text = "#1f1f1f"
+button = "#ffffff"
+button_text = "#1f1f1f"
+bright_text = "#cf222e"
+light = "#ffffff"
+midlight = "#f5f5f5"
+dark = "#c6c6c6"
+mid = "#5f5f5f"
+shadow = "#ababab"
+placeholder = "#8a8a8a"
+tooltip_bg = "#2b2b2b"
+tooltip_text = "#ffffff"
+tooltip_border = "#2b2b2b"
+highlight = "#2563eb"
+highlighted_text = "#ffffff"
+link = "#0969da"
+link_visited = "#8250df"
+accent = "#2563eb"
+disabled_text = "#a3a3a3"
+disabled_base = "#f2f2f2"
+disabled_button = "#f2f2f2"
+dock_title = "#f3f3f3"
+tab = "#e8e8e8"
+tab_selected = "#ffffff"
+statusbar = "#d6d6d6"
+line = "#d4d4d4"
+accent_line = "#2563eb"
+menu = "#ffffff"
+menu_border = "#cfcfcf"
+input_border = "#a8a8a8"
+input_focus = "#2563eb"
+scrollbar = "#c2c2c2"
+scrollbar_hover = "#a3a3a3"
+panel = "#ffffff"
+panel_border = "#c9c9c9"
+panel_title = "#d3d3d3"
+divider = "#9a9a9a"
+
+# The title bar and toolbar: a dark grey band, whatever the rest does.
+[chrome]
+bar_bg = "#2d2d2d"
+bar_border = "#1f1f1f"
+fg = "#d6d6d6"
+fg_strong = "#f5f5f5"
+fg_dim = "#9e9e9e"
+fg_disabled = "#686868"
+hover = "#3d3d3d"
+pressed = "#474747"
+outline = "#4a4a4a"
+sep = "#444444"
+panel = "#353535"
+panel_line = "#4a4a4a"
+star_off = "#8a8a8a"
+track = "#1f1f1f"
+unselected = "#5a5a5a"
+frozen = "#5b8def"
+run = "#22c55e"
+stop = "#ef4444"
+reset = "#eab308"
+close_hover = "#e5484d"
+
+[canvas]
+CANVAS_BG = "#e9e9e9"
+GRID_FINE = "#e0e0e0"
+GRID_COARSE = "#d3d3d3"
+NODE_BODY = "#ffffff"
+NODE_HEADER = "#f3f3f3"
+NODE_HEADER_BROKEN = "#ffe4e2"
+NODE_BORDER = "#969696"
+NODE_BORDER_BROKEN = "#cf222e"
+NODE_TEXT = "#1f1f1f"
+NODE_SUBTEXT = "#5a5a5a"
+SELECTION_OUTLINE = "#2563eb"
+PIN_STALE = "#b07c00"
+PIN_HELD = "#0891b2"
+BYPASS = "#bf3fd0"
+MEM_CACHE = "#2563eb"
+MEM_APP = "#86a8e8"
+MEM_OTHER = "#c6c6c6"
+FRAME_TITLE = "#333333"
+BUTTON_ACCENT = "#6d5ce8"
+WIRE_VALID = "#1a7f37"
+WIRE_INVALID = "#cf222e"
+WIRE_PENDING = "#2563eb"
+
+[status]
+idle = "#8f8f8f"
+queued = "#bf8700"
+running = "#2563eb"
+done = "#1f9d48"
+error = "#cf222e"
+
+# The dark theme's hues, darkened until each reads on a pale canvas.
+[wires]
+any = "#555555"
+dataframe = "#0d8077"
+series = "#0f9488"
+number = "#15803d"
+string = "#b45309"
+bool = "#c2410c"
+object = "#6b6b6b"
+figure = "#7c3aed"
+flow = "#4d4d4d"
+
+[frame]
+FRAME_FILL = 0.14
+FRAME_TITLE_BAR = 0.22
+FRAME_FOLDED = 0.22
+FRAME_CHIP = 0.20
+FRAME_CHIP_HOVER = 0.40
+
+[surface]
+base = "#ffffff"
+base_alt = "#f7f7f7"
+panel = "#f3f3f3"
+raised = "#efefef"
+hover = "#e8e8e8"
+pressed = "#dddddd"
+line = "#e2e2e2"
+border = "#d1d1d1"
+border_strong = "#b0b0b0"
+deep = "#d1d1d1"
+shadow = "#ababab"
+text_strong = "#1f1f1f"
+text = "#333333"
+text_soft = "#474747"
+text_dim = "#666666"
+text_disabled = "#a3a3a3"
+selection = "#cfe0ff"
+selection_soft = "#e4edff"
+error_bg = "#ffebe9"
+ok_bg = "#dcf5e3"
+warn_bg = "#fff4c2"
+accent_text = "#0969da"
+error_text = "#cf222e"
+warn_text = "#9a6700"
+ok_text = "#1a7f37"
+
+[editor]
+GUTTER_BG = "#f7f7f7"
+GUTTER_FG = "#a3a3a3"
+GUTTER_FG_CURRENT = "#474747"
+CURRENT_LINE_BG = "#f4f4f4"
+EDITOR_BG = "#ffffff"
+EDITOR_FG = "#1f1f1f"
+SELECTION_BG = "#cfe0ff"
+ERROR_LINE_BG = "#ffebe9"
+MATCH_BG = "#fff1b8"
+CURRENT_MATCH_BG = "#f7d36b"
+ERROR_DOT = "#cf222e"
+
+# GitHub-light flavoured.
+[syntax]
+keyword = "#cf222e"
+builtin = "#0550ae"
+self = "#953800"
+def_name = "#8250df"
+decorator = "#6639ba"
+string = "#0a3069"
+number = "#0550ae"
+comment = "#6e7781"
+
+[style]
+node_shadow = true
+category_colours = false
+one_tone_header = true
+card_shadow = "soft"
+soft_done = true
+flat_controls = true
+panel_borders = true

@@ -251,7 +251,7 @@ class ShapeItem(QGraphicsObject):
         if self.shape_model.kind not in LINE_KINDS:
             painter.drawRect(QRectF(0, 0, self._w, self._h))
         painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.0))
-        painter.setBrush(QBrush(QColor("#1b1c20")))
+        painter.setBrush(QBrush(theme.CANVAS_BG))
         for p in self._handle_points():
             painter.drawRect(QRectF(p.x() - HANDLE, p.y() - HANDLE,
                                     2 * HANDLE, 2 * HANDLE))

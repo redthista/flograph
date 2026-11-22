@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from .. import theme
 from ..properties.colour_row import ColourRow
+from flograph.ui import theme as _theme  # noqa: E402
 
 AUTOMATIC = "Automatic"
 
@@ -39,7 +40,7 @@ class GroupDialog(QDialog):
                       "coloured page. The pages keep their own colours "
                       "either way.")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(hint, "color: palette(mid);")
         layout.addWidget(hint)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)

@@ -20,6 +20,7 @@ from flograph.core.sheet import names as nm
 from flograph.core.sheet.formula import cell_name
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class NameBox(QComboBox):
@@ -183,11 +184,11 @@ class NameManager(QDialog):
         why, target = self._problem()
         self.save_btn.setEnabled(why is None)
         if why:
-            self.status.setStyleSheet("color: #f87171;")
+            _theme.set_qss(self.status, "color: #f87171;")
             self.status.setText(why if self.name.text() else
                                 "Type a name, then the cells it stands for.")
         else:
-            self.status.setStyleSheet("color: #9ca3af;")
+            _theme.set_qss(self.status, "color: #9ca3af;")
             self.status.setText(f"{self.name.text().strip()} will stand for "
                                 f"{nm.plain(target)}.")
 

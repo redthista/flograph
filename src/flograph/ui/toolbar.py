@@ -17,9 +17,23 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
 from . import theme
 
+# Module state, like the canvas colours: `apply_mode` re-points them, so
+# read them as `toolbar.RUN` when drawing, never copy them at import.
 RUN = QColor("#22c55e")
 STOP = QColor("#ef4444")
 RESET = QColor("#eab308")
+
+
+def apply_mode() -> None:
+    """Green / red / amber, in the lightness the current theme can read."""
+    global RUN, STOP, RESET
+    RUN = QColor(theme.chrome("run"))
+    STOP = QColor(theme.chrome("stop"))
+    RESET = QColor(theme.chrome("reset"))
+    _GLYPHS["run_all"] = (_play, RUN)
+    _GLYPHS["run_selected"] = (_play_boxed, RUN)
+    _GLYPHS["cancel"] = (_stop, STOP)
+    _GLYPHS["reset_caches"] = (_reset, RESET)
 
 _ICON_PT = 18  # logical size the glyphs are drawn at; the toolbar shows them at 16
 
@@ -113,11 +127,13 @@ def toolbar_icon(kind: str) -> QIcon:
     return icon
 
 
-_STYLESHEET = f"""
+def _stylesheet() -> str:
+    c = theme.chrome
+    return f"""
 QToolBar#toolbar_main {{
-    background: {theme.CANVAS_BG.darker(108).name()};
+    background: {c('bar_bg')};
     border: none;
-    border-bottom: 1px solid #14151a;
+    border-bottom: 1px solid {c('bar_border')};
     padding: 1px 3px;
     spacing: 1px;
 }}
@@ -126,23 +142,23 @@ QToolBar#toolbar_main QToolButton {{
     border: 1px solid transparent;
     border-radius: 4px;
     padding: 3px 6px;
-    color: #d6d8de;
+    color: {c('fg')};
     font-size: 9pt;
 }}
 QToolBar#toolbar_main QToolButton:hover {{
-    background: #2f313a;
-    border-color: #3c3f49;
-    color: #f3f4f6;
+    background: {c('hover')};
+    border-color: {c('outline')};
+    color: {c('fg_strong')};
 }}
 QToolBar#toolbar_main QToolButton:pressed {{
-    background: #3a3d47;
+    background: {c('pressed')};
 }}
 QToolBar#toolbar_main QToolButton:disabled {{
-    color: #5f636d;
+    color: {c('fg_disabled')};
 }}
 QToolBar#toolbar_main QToolButton::menu-indicator {{ image: none; }}
 QToolBar#toolbar_main::separator {{
-    background: #2c2d34;
+    background: {c('sep')};
     width: 1px;
     margin: 3px 5px;
 }}
@@ -157,4 +173,10 @@ def style_toolbar(toolbar) -> None:
     toolbar.setIconSize(QSize(16, 16))
     toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
     toolbar.setContentsMargins(0, 0, 0, 0)
-    toolbar.setStyleSheet(_STYLESHEET)
+    toolbar.setStyleSheet(_stylesheet())
+
+
+# first in the listener order (this module is imported before any window
+# exists), so the colours are right by the time a widget redraws from them
+apply_mode()
+theme.on_change(apply_mode)

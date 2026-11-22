@@ -22,6 +22,7 @@ from flograph.core.sheet.numfmt import (DATE_PATTERNS, NEGATIVES, clean,
                                         format_value_as)
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 CATEGORIES = (
     ("general", "General",
@@ -75,7 +76,7 @@ class FormatCellsDialog(QDialog):
         sample_row = QHBoxLayout(sample_box)
         sample_row.addWidget(QLabel("Sample:"))
         self.sample = QLabel()
-        self.sample.setStyleSheet("font-size: 12pt; font-weight: 600;")
+        _theme.set_qss(self.sample, "font-size: 12pt; font-weight: 600;")
         sample_row.addWidget(self.sample, 1)
         right.addWidget(sample_box)
 
@@ -90,7 +91,7 @@ class FormatCellsDialog(QDialog):
         right.addWidget(self.options, 1)
         self.help = QLabel()
         self.help.setWordWrap(True)
-        self.help.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.help, "color: #9ca3af;")
         right.addWidget(self.help)
         body.addLayout(right, 1)
         layout.addLayout(body, 1)
@@ -238,7 +239,7 @@ class FormatCellsDialog(QDialog):
         shown = format_value_as(value, fmt) if fmt else None
         text, red = shown if shown else (str(value), False)
         self.sample.setText(text)
-        self.sample.setStyleSheet(
+        _theme.set_qss(self.sample, 
             "font-size: 12pt; font-weight: 600;"
             + (f" color: {QColor('#f87171').name()};" if red else ""))
 

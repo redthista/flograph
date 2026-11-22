@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core.page_setup import FIELDS, PAGE_SIZES, PageSetup
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Written under the header and footer grids. The fields are the only part
 #: of this dialog nobody could guess, so they are spelled out rather than
@@ -131,7 +132,7 @@ class PageSetupDialog(QDialog):
                       "is not numbered. It is not part of the markdown, so "
                       "turning it off leaves what you wrote alone.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(note, "color: palette(mid);")
         form.addRow(note)
 
         self._cover_toggled(self._setup.cover)
@@ -164,7 +165,7 @@ class PageSetupDialog(QDialog):
 
         help_label = QLabel(_FIELD_HELP)
         help_label.setWordWrap(True)
-        help_label.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(help_label, "color: palette(mid);")
         layout.addWidget(help_label)
 
         self.first_page_check = QCheckBox(
@@ -192,7 +193,7 @@ class PageSetupDialog(QDialog):
         if not hasattr(self, "_summary_label"):
             self._summary_label = QLabel("")
             self._summary_label.setAlignment(Qt.AlignRight)
-            self._summary_label.setStyleSheet("color: palette(mid);")
+            _theme.set_qss(self._summary_label, "color: palette(mid);")
         return self._summary_label
 
     def _changed(self, *_args) -> None:

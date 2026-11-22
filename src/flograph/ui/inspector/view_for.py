@@ -15,6 +15,7 @@ from ..data_table import DataTableView
 from .figure_view import FigureView
 from .object_view import ObjectView
 from .pandas_model import PandasModel, styled_model
+from flograph.ui import theme as _theme  # noqa: E402
 
 FIGURE_ELSEWHERE_MSG = (
     "This node has a canvas card (or dashboard tile) already showing its "
@@ -61,7 +62,7 @@ def view_for(value: Any, embed_figures: bool = True,
             label = QLabel(FIGURE_ELSEWHERE_MSG)
             label.setWordWrap(True)
             label.setAlignment(Qt.AlignCenter)
-            label.setStyleSheet("color: palette(mid); padding: 16px;")
+            _theme.set_qss(label, "color: palette(mid); padding: 16px;")
             return label
         view = FigureView()
         view.set_figure(value)
@@ -71,7 +72,7 @@ def view_for(value: Any, embed_figures: bool = True,
             label = QLabel(FIGURE_ELSEWHERE_MSG)
             label.setWordWrap(True)
             label.setAlignment(Qt.AlignCenter)
-            label.setStyleSheet("color: palette(mid); padding: 16px;")
+            _theme.set_qss(label, "color: palette(mid); padding: 16px;")
             return label
         from .plotly_view import HtmlView
         view = HtmlView()

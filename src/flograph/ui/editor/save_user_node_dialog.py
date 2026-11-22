@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core.user_nodes import slugify, type_id_for
+from flograph.ui import theme as _theme  # noqa: E402
 
 _NO_GROUP = "(no group)"
 
@@ -30,7 +31,7 @@ class SaveUserNodeDialog(QDialog):
             self._group.addItem(g)
         self._group.setCurrentIndex(0)
         self._preview = QLabel()
-        self._preview.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._preview, "color: palette(mid);")
 
         form = QFormLayout()
         form.addRow("Name", self._name)

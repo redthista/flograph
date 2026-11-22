@@ -42,6 +42,7 @@ from flograph.core.slicer import (SlicerOptions, TreeNode, dump_paths,
 from . import theme
 from .canvas import popup_lift
 from .flow_layout import FlowLayout
+from flograph.ui import theme as _theme  # noqa: E402
 
 # How many rows to *build at once*. Not a cap on the slicer: the full value
 # list is held in the model and every value is reachable through the search
@@ -590,14 +591,14 @@ class SlicerTreeWidget(QTreeWidget):
         self._styled_for = accent
         highlight = accent_colour(accent)
         highlight.setAlpha(60)
-        self.setStyleSheet(
-            f"QTreeWidget {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
+        _theme.set_qss(self, 
+            f"QTreeWidget {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')}; border: none;"
             f" font-size: 9pt; }}"
             f"QTreeWidget::item {{ padding: 1px 2px; }}"
             f"QTreeWidget::item:selected {{ background: rgba("
             f"{highlight.red()}, {highlight.green()}, {highlight.blue()},"
-            f" {highlight.alpha()}); color: {theme.NODE_TEXT.name()}; }}")
+            f" {highlight.alpha()}); color: {theme.dark_hex('NODE_TEXT')}; }}")
 
     # ---- building
 
@@ -779,11 +780,11 @@ class _CardsView(QScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setStyleSheet(
-            f"QScrollArea {{ background: {theme.NODE_BODY.name()};"
+        _theme.set_qss(self, 
+            f"QScrollArea {{ background: {theme.dark_hex('NODE_BODY')};"
             f" border: none; }}")
         self._host = QWidget()
-        self._host.setStyleSheet(f"background: {theme.NODE_BODY.name()};")
+        _theme.set_qss(self._host, f"background: {theme.dark_hex('NODE_BODY')};")
         self._column = QVBoxLayout(self._host)
         self._column.setContentsMargins(0, 0, 0, 0)
         self._column.setSpacing(2)
@@ -814,7 +815,7 @@ class _CardsView(QScrollArea):
             # change has to reach each of them; the rows themselves are
             # unchanged, so this is not a reason to rebuild
             for button in self._buttons.values():
-                button.setStyleSheet(self._style)
+                _theme.set_qss(button, self._style)
         if signature == self._built and self._buttons:
             self.refresh_states()
             return
@@ -830,8 +831,8 @@ class _CardsView(QScrollArea):
         built = self._render(self._model.visible(), 0, RENDER_BUDGET)
         if built < 0:
             note = QLabel("… more values — search to narrow the list")
-            note.setStyleSheet(
-                f"color: {theme.NODE_SUBTEXT.name()}; font-size: 8pt;")
+            _theme.set_qss(note, 
+                f"color: {theme.dark_hex('NODE_SUBTEXT')}; font-size: 8pt;")
             self._column.addWidget(note)
         self._column.addStretch(1)
 
@@ -877,7 +878,7 @@ class _CardsView(QScrollArea):
         if isinstance(node, MissingNode):
             button.setProperty("slicerMissing", True)
             button.setToolTip(MISSING_TIP)
-        button.setStyleSheet(self._style)
+        _theme.set_qss(button, self._style)
         button.clicked.connect(lambda _c=False, p=node.path: self._pick(p))
         self._buttons[node.path] = button
         return button
@@ -921,9 +922,9 @@ def card_style(accent: str = "") -> str:
     colour = accent_colour(accent)
     return f"""
 QToolButton {{
-    background: {theme.NODE_HEADER.name()};
-    color: {theme.NODE_TEXT.name()};
-    border: 1px solid {theme.NODE_BORDER.name()};
+    background: {theme.dark_hex('NODE_HEADER')};
+    color: {theme.dark_hex('NODE_TEXT')};
+    border: 1px solid {theme.dark_hex('NODE_BORDER')};
     border-radius: 4px; padding: 3px 8px; font-size: 8pt;
 }}
 QToolButton:hover {{ border-color: {colour.name()}; }}
@@ -934,17 +935,17 @@ QToolButton[slicerState="on"] {{
 }}
 QToolButton[slicerState="partial"] {{
     border: 1px solid {colour.name()};
-    color: {theme.NODE_TEXT.name()};
+    color: {theme.dark_hex('NODE_TEXT')};
 }}
 QToolButton[slicerBranch="true"] {{ font-weight: 600; }}
 QToolButton[slicerMissing="true"] {{
     background: transparent;
     border: 1px dashed {colour.name()};
-    color: {theme.NODE_SUBTEXT.name()};
+    color: {theme.dark_hex('NODE_SUBTEXT')};
     font-style: italic;
 }}
 QToolButton[slicerMissing="true"][slicerState="off"] {{
-    border-color: {theme.NODE_BORDER.name()};
+    border-color: {theme.dark_hex('NODE_BORDER')};
 }}
 """
 
@@ -1038,10 +1039,10 @@ class _DropdownView(QWidget):
         self._styled_for = self._model.accent
         colour = accent_colour(self._model.accent)
         border = (colour.name() if self._model.accent
-                  else theme.NODE_BORDER.name())
-        self._button.setStyleSheet(
-            f"QToolButton {{ background: {theme.NODE_HEADER.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
+                  else theme.dark_hex('NODE_BORDER'))
+        _theme.set_qss(self._button, 
+            f"QToolButton {{ background: {theme.dark_hex('NODE_HEADER')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
             f" border: 1px solid {border};"
             f" border-radius: 3px; font-size: 9pt; text-align: left;"
             # room on the right for the chevron _ChevronButton draws
@@ -1150,15 +1151,15 @@ class SlicerToolbar(QWidget):
             return
         self._styled_for = self._model.accent
         colour = accent_colour(self._model.accent)
-        self.setStyleSheet(
-            f"QLineEdit {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
+        _theme.set_qss(self, 
+            f"QLineEdit {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
+            f" border: 1px solid {theme.dark_hex('NODE_BORDER')};"
             f" border-radius: 3px; padding: 1px 3px; font-size: 8pt; }}"
             f"QLineEdit:focus {{ border-color: {colour.name()}; }}"
             f"QToolButton {{ font-size: 8pt; padding: 1px 4px; }}"
             f"QToolButton:hover {{ color: {colour.name()}; }}"
-            f"QLabel {{ color: {theme.NODE_SUBTEXT.name()}; font-size: 8pt; }}")
+            f"QLabel {{ color: {theme.dark_hex('NODE_SUBTEXT')}; font-size: 8pt; }}")
 
     def refresh_chrome(self) -> bool:
         """Show or hide the search box and the All / None / count group, and
@@ -1333,8 +1334,8 @@ class SlicerPanel(QWidget):
         # a dropdown is one button with empty card below it, and an unpainted
         # widget there borrows the OS palette and reads as a light hole
         self.setAutoFillBackground(True)
-        self.setStyleSheet(
-            f"SlicerPanel {{ background: {theme.NODE_BODY.name()}; }}")
+        _theme.set_qss(self, 
+            f"SlicerPanel {{ background: {theme.dark_hex('NODE_BODY')}; }}")
 
         column = QVBoxLayout(self)
         column.setContentsMargins(2, 2, 2, 2)
@@ -1344,7 +1345,7 @@ class SlicerPanel(QWidget):
         self._placeholder = QLabel("Run the graph to load slicer values.")
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setWordWrap(True)
-        self._placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(self._placeholder, "color: #6b7280;")
         column.addWidget(self._placeholder, 1)
 
         self.toolbar = SlicerToolbar(self.model)

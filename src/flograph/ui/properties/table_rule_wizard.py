@@ -31,6 +31,7 @@ from flograph.core.table_format import (
     scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
+from flograph.ui import theme as _theme  # noqa: E402
 
 _SINGLE = QAbstractItemView.SelectionMode.SingleSelection
 _MULTI = QAbstractItemView.SelectionMode.MultiSelection
@@ -542,7 +543,7 @@ class RuleBuilder(QDialog):
         mono.setStyleHint(QFont.Monospace)
         mono.setFamily("monospace")
         self._preview.setFont(with_emoji(mono))
-        self._preview.setStyleSheet("padding: 6px; "
+        _theme.set_qss(self._preview, "padding: 6px; "
                                     "border: 1px solid palette(mid);")
         outer.addWidget(self._preview)
 

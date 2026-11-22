@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 
 from ..paths import user_data_dir
 from . import theme
+from flograph.ui import theme as _theme  # noqa: E402
 
 # Windows only: keep the probe's console window from flashing up.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -673,7 +674,7 @@ class ShortcutDialog(QDialog):
         # selectable: the resolved command is worth copying out when a
         # shortcut has to be recreated by hand elsewhere
         self.summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.summary.setStyleSheet(f"color: {theme.NODE_SUBTEXT.name()};")
+        _theme.set_qss(self.summary, f"color: {theme.dark_hex('NODE_SUBTEXT')};")
 
         form = QFormLayout()
         form.addRow("Name", self.name_edit)

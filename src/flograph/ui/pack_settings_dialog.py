@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from flograph.core import packs
 
 from .number_box import NumberBox
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class PackSettingsDialog(QDialog):
@@ -53,7 +54,7 @@ class PackSettingsDialog(QDialog):
                 note.setWordWrap(True)
                 note.setTextFormat(Qt.PlainText)
                 note.setObjectName("pack_setting_help")
-                note.setStyleSheet("color: palette(placeholder-text);")
+                _theme.set_qss(note, "color: palette(placeholder-text);")
                 column.addWidget(note)
                 self._notes.append(note)
             form.addRow(setting.label, field)

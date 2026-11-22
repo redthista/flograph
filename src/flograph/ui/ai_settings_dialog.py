@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from flograph import ai
 from flograph.llm import keys, profiles, wire
 from flograph.llm.profiles import Profile, ProfileSet
+from flograph.ui import theme as _theme  # noqa: E402
 
 _ORG = "flograph"
 _APP = "flograph"
@@ -225,7 +226,7 @@ class AiSettingsDialog(QDialog):
         self._api_key.setEchoMode(QLineEdit.Password)
         self._key_where = QLabel()
         self._key_where.setWordWrap(True)
-        self._key_where.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._key_where, "color: palette(mid);")
 
         self._verify_ssl = QCheckBox("Verify SSL certificates")
         self._verify_ssl.setToolTip(

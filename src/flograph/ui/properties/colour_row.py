@@ -12,6 +12,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog, QHBoxLayout, QPushButton, QWidget
 
 from .. import theme
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: what the picker opens on when there is no colour yet
 DEFAULT_PICK = "#e5e7eb"
@@ -52,11 +53,11 @@ class ColourRow(QWidget):
         border = QColor(theme.NODE_BORDER).name()
         if value:
             self._swatch.setText("")
-            self._swatch.setStyleSheet(
+            _theme.set_qss(self._swatch, 
                 f"background: {value}; border: 1px solid {border};")
         else:
             self._swatch.setText(none_label)
-            self._swatch.setStyleSheet(
+            _theme.set_qss(self._swatch, 
                 f"color: palette(mid); border: 1px solid {border};")
         if self._clear is not None:
             self._clear.setEnabled(bool(value))

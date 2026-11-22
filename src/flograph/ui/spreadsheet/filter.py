@@ -22,6 +22,7 @@ from ..canvas.popup_lift import (DismissedByAClickElsewhere, _screen_for,
                                  popup_geometry)
 from .icons import sheet_icon
 from .menus import global_pos, real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 BLANK = "(Blanks)"
 _SELECT_ALL = "(Select All)"
@@ -39,8 +40,8 @@ class FilterPopup(DismissedByAClickElsewhere, QFrame):
         super().__init__()
         self.setObjectName("sheet_filter")
         self.setWindowFlags(Qt.Popup)
-        self.setStyleSheet(
-            f"QFrame#sheet_filter {{ background: {theme.NODE_BODY.name()};"
+        _theme.set_qss(self, 
+            f"QFrame#sheet_filter {{ background: {theme.dark_hex('NODE_BODY')};"
             f" border: 1px solid #3c3f49; }}"
             f"QLabel {{ color: #9ca3af; font-size: 8pt; }}"
             f"QListWidget {{ background: #202127; color: #e5e7eb;"

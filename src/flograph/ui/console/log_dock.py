@@ -5,13 +5,14 @@ from __future__ import annotations
 import html
 import time
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import (
-    QHBoxLayout, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QPlainTextEdit, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph
 from flograph.engine import ExecutionEngine, NodeError
+from flograph.ui import theme
 
 MAX_BLOCKS = 5000
 
@@ -35,16 +36,25 @@ class LogConsole(QWidget):
         font.setPointSizeF(9.0)
         self._text.setFont(font)
 
-        clear_btn = QPushButton("Clear")
+        # the log runs the full height; Clear is a small icon in a narrow
+        # column to its right rather than a row of its own above it
+        clear_btn = QToolButton()
+        clear_btn.setIcon(QIcon.fromTheme(
+            "edit-clear-all",
+            self.style().standardIcon(QStyle.SP_LineEditClearButton)))
+        clear_btn.setToolTip("Clear the log")
+        clear_btn.setAutoRaise(True)
         clear_btn.clicked.connect(self._text.clear)
-        top = QHBoxLayout()
-        top.addStretch(1)
-        top.addWidget(clear_btn)
+        side = QVBoxLayout()
+        side.setContentsMargins(0, 0, 0, 0)
+        side.addWidget(clear_btn)
+        side.addStretch(1)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 6)
-        layout.addLayout(top)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
         layout.addWidget(self._text, 1)
+        layout.addLayout(side)
 
         engine.node_log.connect(self._on_log)
         engine.node_failed.connect(self._on_failed)
@@ -62,10 +72,10 @@ class LogConsole(QWidget):
     def _on_log(self, node_id: str, line: str, stream: str) -> None:
         color = _STREAM_COLORS.get(stream, "#d1d5db")
         stamp = time.strftime("%H:%M:%S")
-        self._text.appendHtml(
+        self._text.appendHtml(theme.skin(
             f'<span style="color:#4b5563">[{stamp}]</span> '
             f'<span style="color:#9ca3af">[{html.escape(self._node_label(node_id))}]</span> '
-            f'<span style="color:{color}">{html.escape(line)}</span>')
+            f'<span style="color:{color}">{html.escape(line)}</span>'))
 
     def _on_failed(self, node_id: str, error: NodeError) -> None:
         self._on_log(node_id, error.message, "error")
@@ -75,6 +85,6 @@ class LogConsole(QWidget):
 
     def _append_raw(self, text: str, color: str) -> None:
         stamp = time.strftime("%H:%M:%S")
-        self._text.appendHtml(
+        self._text.appendHtml(theme.skin(
             f'<span style="color:#4b5563">[{stamp}]</span> '
-            f'<span style="color:{color}">— {html.escape(text)} —</span>')
+            f'<span style="color:{color}">— {html.escape(text)} —</span>'))

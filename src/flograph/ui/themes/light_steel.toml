@@ -1,0 +1,111 @@
+# Light Steel — Light, repainted in a cool steel palette.
+#
+#   Bright Snow #f8f9fa   Platinum #e9ecef   Alabaster #dee2e6
+#   Pale Slate #ced4da / #adb5bd   Slate Grey #6c757d
+#   Iron Grey #495057   Gunmetal #343a40   Shadow Grey #212529
+#
+# Only the greys change; the blue accent, status and wire hues stay Light's
+# (the palette has no accent colour).
+
+[meta]
+label = "Light Steel"
+kind = "light"
+based_on = "light"
+
+[ui]
+window = "#e9ecef"
+window_text = "#212529"
+base = "#f8f9fa"
+alt_base = "#f1f3f5"
+text = "#212529"
+button = "#f8f9fa"
+button_text = "#212529"
+light = "#f8f9fa"
+midlight = "#e9ecef"
+dark = "#ced4da"
+mid = "#495057"
+shadow = "#adb5bd"
+placeholder = "#6c757d"
+tooltip_bg = "#343a40"
+tooltip_border = "#343a40"
+tooltip_text = "#f8f9fa"
+disabled_text = "#98a1a9"
+disabled_base = "#e9ecef"
+disabled_button = "#e9ecef"
+dock_title = "#dee2e6"
+tab = "#dee2e6"
+tab_selected = "#f8f9fa"
+statusbar = "#ced4da"
+line = "#ced4da"
+menu = "#f8f9fa"
+menu_border = "#ced4da"
+input_border = "#9ea6ae"
+scrollbar = "#adb5bd"
+scrollbar_hover = "#6c757d"
+panel = "#f8f9fa"
+panel_border = "#ced4da"
+panel_title = "#ced4da"
+divider = "#adb5bd"
+
+[chrome]
+bar_bg = "#343a40"
+bar_border = "#212529"
+fg = "#dee2e6"
+fg_strong = "#f8f9fa"
+fg_dim = "#adb5bd"
+fg_disabled = "#6c757d"
+hover = "#495057"
+pressed = "#5a636b"
+outline = "#495057"
+sep = "#495057"
+panel = "#3d444b"
+panel_line = "#495057"
+star_off = "#adb5bd"
+track = "#212529"
+unselected = "#6c757d"
+
+[wires]
+# Light's teal series colour is just under 3:1 on this canvas.
+series = "#0c8378"
+
+[canvas]
+CANVAS_BG = "#dee2e6"
+GRID_FINE = "#d5dade"
+GRID_COARSE = "#ced4da"
+NODE_BODY = "#f8f9fa"
+NODE_HEADER = "#e9ecef"
+NODE_BORDER = "#6c757d"
+NODE_TEXT = "#212529"
+NODE_SUBTEXT = "#495057"
+FRAME_TITLE = "#343a40"
+MEM_OTHER = "#ced4da"
+
+[surface]
+base = "#f8f9fa"
+base_alt = "#f1f3f5"
+panel = "#e9ecef"
+raised = "#e9ecef"
+hover = "#dee2e6"
+pressed = "#ced4da"
+line = "#dee2e6"
+border = "#ced4da"
+border_strong = "#adb5bd"
+deep = "#ced4da"
+shadow = "#adb5bd"
+text_strong = "#212529"
+text = "#343a40"
+text_soft = "#495057"
+text_dim = "#5c636a"
+text_disabled = "#adb5bd"
+
+[editor]
+GUTTER_BG = "#f1f3f5"
+GUTTER_FG = "#adb5bd"
+GUTTER_FG_CURRENT = "#495057"
+CURRENT_LINE_BG = "#f1f3f5"
+EDITOR_BG = "#f8f9fa"
+EDITOR_FG = "#212529"
+
+# Slate Grey is just under 4.5:1 on Bright Snow, so comments use a deeper slate.
+[syntax]
+comment = "#5c636a"

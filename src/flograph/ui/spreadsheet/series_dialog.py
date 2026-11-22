@@ -18,6 +18,7 @@ from flograph.core.sheet import series
 from flograph.core.sheet.schema import is_formula
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 _KIND_HELP = {
     "linear": "Each value is the one before plus the step: 1, 3, 5, 7 …",
@@ -76,7 +77,7 @@ class SeriesDialog(QDialog):
 
         self.help = QLabel()
         self.help.setWordWrap(True)
-        self.help.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.help, "color: #9ca3af;")
         layout.addWidget(self.help)
 
         form = QFormLayout()
@@ -89,7 +90,7 @@ class SeriesDialog(QDialog):
 
         self.preview = QLabel()
         self.preview.setWordWrap(True)
-        self.preview.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.preview, "font-weight: 600;")
         layout.addWidget(self.preview)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok
@@ -165,11 +166,11 @@ class SeriesDialog(QDialog):
         ok = self.buttons.button(QDialogButtonBox.Ok)
         plan = self.plan()
         if isinstance(plan, str):
-            self.preview.setStyleSheet("font-weight: 600; color: #f87171;")
+            _theme.set_qss(self.preview, "font-weight: 600; color: #f87171;")
             self.preview.setText(plan)
             ok.setEnabled(False)
         else:
-            self.preview.setStyleSheet("font-weight: 600;")
+            _theme.set_qss(self.preview, "font-weight: 600;")
             origin, values = plan[0]
             first = self.first_value(*origin) if c["kind"] != "autofill" \
                 else self._model.cell_source(*origin)

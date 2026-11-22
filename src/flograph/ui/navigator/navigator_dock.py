@@ -37,6 +37,7 @@ from flograph.core import Graph
 from flograph.engine import ExecutionEngine
 
 from ..resource_monitor import format_seconds
+from flograph.ui import theme as _theme  # noqa: E402
 
 _ROLE = Qt.UserRole  # (kind, id) on column 0
 
@@ -92,7 +93,7 @@ class NavigatorPanel(QWidget):
 
         self._placeholder = QLabel("Nothing on the canvas yet.")
         self._placeholder.setAlignment(Qt.AlignCenter)
-        self._placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(self._placeholder, "color: #6b7280;")
 
         self._stack = QStackedWidget()
         self._stack.addWidget(self._tree)         # 0

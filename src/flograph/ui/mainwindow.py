@@ -11,14 +11,14 @@ from PySide6.QtCore import (
     QEventLoop, QPoint, QPointF, QRectF, QSettings, Qt, QThreadPool, QTimer, QUrl,
 )
 from PySide6.QtGui import (
-    QAction, QColor, QDesktopServices, QKeySequence, QUndoStack,
+    QAction, QActionGroup, QColor, QDesktopServices, QKeySequence, QUndoStack,
 )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QDockWidget, QFileDialog,
+    QApplication, QColorDialog, QDockWidget, QFileDialog, QGraphicsItem,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QProgressBar, QProgressDialog,
-    QSizePolicy, QStackedWidget, QTextEdit,
+    QSizePolicy, QStackedWidget, QTabWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -140,6 +140,10 @@ class MainWindow(QMainWindow):
         self._dock_host = DockHost(self, on_reveal=self._reveal_dock)
         self._dock_host.setDockOptions(
             QMainWindow.AnimatedDocks | QMainWindow.AllowTabbedDocks)
+        # a tabbed group of panels shows its tabs along the top, where they
+        # read as the group's header, rather than Qt's default underneath
+        self._dock_host.setTabPosition(Qt.AllDockWidgetAreas,
+                                       QTabWidget.North)
         self._dock_host.setCentralWidget(self._canvas_stack)
         self._dashboard_pages: dict[str, DashboardPage] = {}
         self._restoring_pages = False
@@ -205,6 +209,9 @@ class MainWindow(QMainWindow):
         if app is not None:
             app.styleHints().colorSchemeChanged.connect(
                 self._on_system_color_scheme_changed)
+        _themed = self._on_app_theme_changed
+        theme.on_change(_themed)
+        self.destroyed.connect(lambda *_: theme.off_change(_themed))
         # Our own title bar instead of the OS one. Read here, applied in
         # _build_actions (menus fold into a hamburger, run actions and the
         # window buttons go on the bar); a change needs a restart. The flag
@@ -596,7 +603,7 @@ class MainWindow(QMainWindow):
         tabified dock cannot be shrunk narrower than its own tab bar, which
         is what made an earlier custom-rail attempt bottom out at a ~26px
         strip of rotated labels. Closed is 0px and needs no custom layout
-        code at all. dock_edges' strips are the per-edge collapse control;
+        code at all. dock_edges collapses an edge whose border is dragged away;
         a dock's own X still closes just that one panel.
         """
         host = self._dock_host
@@ -749,6 +756,11 @@ class MainWindow(QMainWindow):
         self._docks_open_on_model_page = [
             dock for dock in self._model_docks
             if dock not in self._docks_closed_by_default]
+        # a theme with [style] panel_borders paints each dock's content as a
+        # card from the app stylesheet; a QWidget subclass draws a styled
+        # background only when asked to, or the Inspector stays bare
+        for dock in self._model_docks:
+            dock.widget().setAttribute(Qt.WA_StyledBackground, True)
 
         # the edge strips go inside the dock ring, so takeCentralWidget()
         # first: setCentralWidget() deletes whatever it replaces, and the
@@ -808,6 +820,10 @@ class MainWindow(QMainWindow):
                   else [self._dock_host, self.page_bar_host])
         for widget in ordered:
             layout.addWidget(widget, 1 if widget is self._dock_host else 0)
+        # the 1px line between the tabs and the canvas, on the tabs' own
+        # side of them
+        self.page_bar_host.set_rule_edge("bottom" if position == "top"
+                                         else "top")
         self.setCentralWidget(container)
         if old_container is not None:
             old_container.deleteLater()
@@ -939,6 +955,8 @@ class MainWindow(QMainWindow):
         self.action_flo = act("&Flo Assistant", QKeySequence("Ctrl+Shift+A"),
                               self.toggle_flo)
         self.action_secrets = act("Sec&rets…", None, self._show_secrets)
+        self.action_theme_editor = act("&Theme Customiser…", None,
+                                       self._show_theme_editor)
 
         file_menu = self._menu_root.addMenu("&File")
         for action in (self.action_new, self.action_open, self.action_save,
@@ -990,6 +1008,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.action_flo)
         tools_menu.addAction(self.action_ai_settings)
         tools_menu.addAction(self.action_secrets)
+        tools_menu.addAction(self.action_theme_editor)
 
         section["name"] = "View"
         view_menu = self._menu_root.addMenu("&View")
@@ -998,7 +1017,7 @@ class MainWindow(QMainWindow):
             self.toggle_all_panels)
         view_menu.addAction(self.action_toggle_panels)
         # the label has to say which way the toggle goes, and the panels can
-        # be collapsed from their own edge arrows without this ever firing
+        # be collapsed by dragging their own edge away without this ever firing
         view_menu.aboutToShow.connect(self._sync_toggle_panels_action)
         if self._custom_frame:
             self.action_titlebar_shortcuts = QAction(
@@ -1009,6 +1028,8 @@ class MainWindow(QMainWindow):
             self.action_titlebar_shortcuts.toggled.connect(
                 self._set_titlebar_shortcuts)
             view_menu.addAction(self.action_titlebar_shortcuts)
+        self._theme_menu = view_menu.addMenu("&Theme")
+        self._theme_menu.aboutToShow.connect(self._fill_theme_menu)
         view_menu.addSeparator()
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
@@ -1237,22 +1258,77 @@ class MainWindow(QMainWindow):
         self.settings.setValue("canvas/compact_nodes", enabled)
         self.scene.set_compact_nodes(enabled)
 
+    def _fill_theme_menu(self) -> None:
+        """View ▸ Theme: one tick-one-of list. Rebuilt each time it opens,
+        because a theme file dropped into the user folder should be there
+        without a restart."""
+        menu = self._theme_menu
+        menu.clear()
+        for old in menu.findChildren(QActionGroup):
+            old.deleteLater()
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for pref in theme.theme_prefs():
+            action = menu.addAction(theme.theme_label(pref))
+            action.setCheckable(True)
+            action.setChecked(pref == self.theme_pref)
+            group.addAction(action)
+            action.triggered.connect(
+                lambda _checked=False, p=pref: self.set_theme_pref(p))
+        menu.addSeparator()
+        menu.addAction(self.action_theme_editor)
+
     def set_theme_pref(self, pref: str) -> None:
         """Switch the chrome between light, dark and following the OS.
 
         Live: the app palette and stylesheet are re-applied and Qt
-        re-polishes every open widget. The canvas stays dark regardless.
+        re-polishes every open widget, canvas included. `pref` is "system"
+        or the name of any theme `theme.theme_prefs()` lists.
         """
-        if pref not in theme.THEME_PREFS:
+        if pref not in theme.theme_prefs():
             return
         self.theme_pref = pref
         self.settings.setValue("appearance/theme", pref)
         app = QApplication.instance()
         if app is not None:
             theme.apply_theme(app, pref)
-        label = {"system": "following the system",
-                 "light": "light", "dark": "dark"}[pref]
+        label = ("following the system" if pref == "system"
+                 else theme.theme_label(pref))
         self.show_status(f"Theme: {label}.", 3000)
+
+    def _on_app_theme_changed(self) -> None:
+        """The palette and the canvas colours have just been swapped. What
+        paints from them at paint time needs only a repaint; what was drawn
+        once into a pixmap (the toolbar glyphs) has to be drawn again."""
+        for action, kind in (
+                (self.action_run, "run_all"),
+                (self.action_run_selected, "run_selected"),
+                (self.action_cancel, "cancel"),
+                (self.action_reset_caches, "reset_caches"),
+                (self.action_reset_selected_caches, "reset_caches")):
+            action.setIcon(toolbar_style.toolbar_icon(kind))
+        toolbar = self.findChild(QToolBar, "toolbar_main")
+        if toolbar is not None:
+            toolbar.setStyleSheet(toolbar_style._stylesheet())
+        self._repaint_tinted()
+        for view in [self.view] + [p.view for p in self._canvas_pages()]:
+            for item in view.scene().items():
+                restyle = getattr(item, "restyle", None)
+                if callable(restyle):
+                    restyle()           # a tile re-resolves its look
+                relayout = getattr(item, "relayout_geometry", None)
+                if callable(relayout):
+                    relayout()          # a node takes the theme's sizes
+                shadow = getattr(item, "_shadow", None)
+                if shadow is not None:
+                    shadow.setVisible(bool(theme.style("node_shadow")))
+                mode = item.cacheMode()
+                if mode != QGraphicsItem.NoCache:
+                    # a cached item is a picture of the old colours:
+                    # update() alone repaints from it
+                    item.setCacheMode(QGraphicsItem.NoCache)
+                    item.setCacheMode(mode)
+            view.scene().update()
 
     def _on_system_color_scheme_changed(self, _scheme=None) -> None:
         """The OS flipped light/dark. Only act if we are meant to follow it."""
@@ -4066,6 +4142,17 @@ class MainWindow(QMainWindow):
         dock.show()
         dock.raise_()
         self.flo_panel.focus_input()
+
+    def _show_theme_editor(self) -> None:
+        editor = getattr(self, "_theme_editor", None)
+        if editor is None or not editor.isVisible():
+            # a fresh one each time it is closed, so it starts from the
+            # theme in force now rather than the one it was built with
+            from .theme_editor import ThemeCustomiser
+            self._theme_editor = ThemeCustomiser(self)
+        self._theme_editor.show()
+        self._theme_editor.raise_()
+        self._theme_editor.activateWindow()
 
     def _show_secrets(self) -> None:
         from .env_dialog import EnvDialog

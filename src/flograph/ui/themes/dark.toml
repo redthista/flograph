@@ -1,0 +1,208 @@
+# flograph's dark theme — and the reference every other theme inherits
+# from. Every key a theme can set is set here, so this file is also the list
+# of what there is to change. See themes/__init__.py for the format.
+
+[meta]
+label = "Dark"
+kind = "dark"
+
+# ---------------------------------------------------------------- ui
+# The window palette: docks, panels, lists, inputs, menus, dialogs.
+[ui]
+window = "#24262b"            # panel / dock background
+window_text = "#e5e7eb"
+base = "#1e2024"              # lists, trees, text boxes
+alt_base = "#202226"          # alternate rows
+text = "#e5e7eb"
+button = "#24262b"
+button_text = "#e5e7eb"
+bright_text = "#f87171"
+light = "#3a3d47"             # Fusion bevels
+midlight = "#2f323b"
+dark = "#141517"
+mid = "#8b929e"               # also the dim "secondary text" colour
+shadow = "#0c0d0f"
+placeholder = "#7f8694"
+tooltip_bg = "#1e2024"
+tooltip_text = "#e5e7eb"
+tooltip_border = "#3a3d46"
+highlight = "#3b82f6"         # selected row
+highlighted_text = "#ffffff"
+link = "#60a5fa"
+link_visited = "#a78bfa"
+accent = "#60a5fa"
+disabled_text = "#6b7280"
+disabled_base = "#1b1d21"
+disabled_button = "#24262b"
+dock_title = "#2a2c33"
+tab = "#24262b"
+tab_selected = "#33363e"
+statusbar = "#202226"
+line = "#24262b"              # hairlines between areas
+accent_line = "#60a5fa"       # the selected tab's underline
+menu = "#24262b"              # popup menus
+menu_border = "#3a3d47"
+input_border = "#3a3d47"      # text boxes, combos, spin boxes
+input_focus = "#60a5fa"
+scrollbar = "#4b4e58"         # the handle
+scrollbar_hover = "#5b5f68"
+panel = "#24262b"             # a dock's card, when [style] panel_borders
+panel_border = "#3a3d47"      # its outline, likewise
+panel_title = "#2a2c33"       # its title bar, likewise
+divider = "#3a3d47"           # the full-width line above the bottom docks
+
+# ---------------------------------------------------------------- chrome
+# The custom title bar and the toolbar.
+[chrome]
+bar_bg = "#17181c"
+bar_border = "#14151a"
+fg = "#c8cbd2"
+fg_strong = "#f3f4f6"
+fg_dim = "#8b8f99"
+fg_disabled = "#5f636d"
+hover = "#34363f"
+pressed = "#3d404a"
+outline = "#3c3f49"
+sep = "#2c2d34"
+panel = "#2b2d36"
+panel_line = "#3a3d47"
+star_off = "#7f838d"
+track = "#1c1d23"
+unselected = "#4b5563"
+frozen = "#5b8def"
+run = "#22c55e"
+stop = "#ef4444"
+reset = "#eab308"
+close_hover = "#e5484d"
+
+# ---------------------------------------------------------------- canvas
+[canvas]
+CANVAS_BG = "#1b1c20"
+GRID_FINE = "#232429"
+GRID_COARSE = "#2c2d34"
+NODE_BODY = "#2a2c33"
+NODE_HEADER = "#363943"
+NODE_HEADER_BROKEN = "#4c2626"
+NODE_BORDER = "#17181c"
+NODE_BORDER_BROKEN = "#7f1d1d"
+NODE_TEXT = "#e5e7eb"
+NODE_SUBTEXT = "#9ca3af"
+SELECTION_OUTLINE = "#60a5fa"
+PIN_STALE = "#eab308"         # frozen, but its inputs moved since
+PIN_HELD = "#22d3ee"          # frozen and still true
+BYPASS = "#e879f9"
+MEM_CACHE = "#60a5fa"         # status-bar memory bar, brightest first
+MEM_APP = "#3b6299"
+MEM_OTHER = "#4b4e58"
+FRAME_TITLE = "#d1d5db"
+BUTTON_ACCENT = "#7c6cf6"
+WIRE_VALID = "#4ade80"        # a wire being drawn that will connect
+WIRE_INVALID = "#ef4444"
+WIRE_PENDING = "#93c5fd"
+
+[status]
+idle = "#6b7280"
+queued = "#eab308"
+running = "#3b82f6"
+done = "#22c55e"
+error = "#ef4444"
+
+[wires]
+any = "#e8e8e8"
+dataframe = "#2dd4bf"
+series = "#7dd3c8"
+number = "#4ade80"
+string = "#fbbf24"
+bool = "#f87171"
+object = "#9ca3af"
+figure = "#c084fc"
+flow = "#94a3b8"
+
+# How much of a frame's own colour shows over the canvas (0..1).
+[frame]
+FRAME_FILL = 0.18
+FRAME_TITLE_BAR = 0.45
+FRAME_FOLDED = 0.45
+FRAME_CHIP = 0.40
+FRAME_CHIP_HOVER = 0.65
+
+# ---------------------------------------------------------------- surface
+# Many widgets were styled with dark hex colours written straight into
+# their stylesheets. Each of those colours belongs to one of these roles,
+# and in any theme but this one it is replaced by the theme's value for
+# the role (theme.skin). The dark theme leaves them exactly as written.
+[surface]
+base = "#1e2024"              # input / list / card face
+base_alt = "#202226"          # a slightly sunk strip: gutters, footers
+panel = "#24262c"             # panel behind controls
+raised = "#2f323b"            # a header, a raised bar
+hover = "#34363f"
+pressed = "#3d404a"
+line = "#3a3d47"              # soft divider
+border = "#3c3f49"            # control outline
+border_strong = "#4b5563"
+deep = "#14151a"              # the darkest wells
+shadow = "#0c0d0f"
+text_strong = "#f3f4f6"
+text = "#d6d8de"
+text_soft = "#aeb2bc"
+text_dim = "#8b909c"
+text_disabled = "#5f636d"
+selection = "#264f78"
+selection_soft = "#2b3550"
+error_bg = "#4b1d24"
+ok_bg = "#3b4a2a"
+warn_bg = "#6b5a1a"
+accent_text = "#93c5fd"
+error_text = "#f87171"
+warn_text = "#fbbf24"
+ok_text = "#86efac"
+
+# ---------------------------------------------------------------- editor
+[editor]
+GUTTER_BG = "#202226"
+GUTTER_FG = "#5c6370"
+GUTTER_FG_CURRENT = "#9ca3af"
+CURRENT_LINE_BG = "#24262d"
+EDITOR_BG = "#1b1c20"
+EDITOR_FG = "#d7dae0"
+SELECTION_BG = "#264f78"
+ERROR_LINE_BG = "#4b1d24"
+MATCH_BG = "#3b4a2a"          # every find hit
+CURRENT_MATCH_BG = "#6b5a1a"  # the one you are on
+ERROR_DOT = "#ef4444"
+
+[syntax]
+keyword = "#c678dd"
+builtin = "#56b6c2"
+self = "#e06c75"
+def_name = "#61afef"
+decorator = "#e5c07b"
+string = "#98c379"
+number = "#d19a66"
+comment = "#5c6370"
+
+# ---------------------------------------------------------------- style
+[style]
+node_shadow = false           # a soft shadow lifts each node off the canvas
+category_colours = false      # tint nodes by category (io, transform, ...)
+one_tone_header = false       # node header the same colour as its body
+card_shadow = "dark"          # dashboard tile shadow: "dark" | "soft"
+soft_done = false             # minimap: paler green for finished nodes
+flat_controls = false         # draw inputs, menus and scroll bars flat,
+                              # with hairline borders, from [ui]
+panel_borders = false         # each dock a bordered card, with a gutter
+                              # between docks ([ui] panel, panel_border)
+divider_width = 1             # px: the line round the panels, which is
+                              # also what you drag to resize or fold them
+
+focus_width = 2               # px: keyboard-focus outline on text inputs
+                              # (flat_controls themes; ui input_focus)
+
+# Node shape and size. Every canvas node follows these live.
+node_corner_radius = 7        # px: 0 = square corners; a big number (up to
+                              # half the node's shortest side) = a pill
+node_width = 170              # px: an ordinary (wide) node's width
+node_header_height = 26       # px: the title strip of a wide node
+node_row_height = 20          # px: one row of ports on a wide node
+node_compact_size = 60        # px: the side of a compact (square) node

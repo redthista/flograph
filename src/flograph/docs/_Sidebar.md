@@ -2,6 +2,7 @@
 - **Basics**
   - [[Getting Started]]
   - [[The Canvas]]
+  - [[Themes]]
   - [[Keyboard Shortcuts]]
 - **Building flows**
   - [[Nodes and the Library]]

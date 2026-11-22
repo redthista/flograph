@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core import Tile
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: How long the cursor has to rest on a row before the preview is built.
 #: Long enough that running down the list with the mouse renders nothing.
@@ -183,7 +184,7 @@ class VisualPreviewPopup(QFrame):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setFrameShape(QFrame.NoFrame)
-        self.setStyleSheet(
+        _theme.set_qss(self, 
             "VisualPreviewPopup { background: #1e2024;"
             " border: 1px solid #3a3d46; border-radius: 4px; }"
             "QLabel { color: #e5e7eb; background: transparent; }")

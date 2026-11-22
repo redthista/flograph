@@ -42,8 +42,17 @@ BAR_HEIGHT = 34
 RESIZE_MARGIN = 6
 _ICON_PT = 16
 
-_FG = QColor("#c8cbd2")
-_CLOSE_HOVER = QColor("#e5484d")
+# Bar glyph colour in the *current* theme — read when an icon is drawn, so
+# a live theme switch only has to redraw them (TitleBar.restyle).
+def _fg() -> QColor:
+    return QColor(theme.chrome("fg"))
+
+
+# The app icon is a fixed picture: it must look the same in the taskbar
+# whichever theme the window is in, so it never reads theme state.
+_ICON_FG = QColor("#c8cbd2")
+_ICON_TILE = QColor("#1f2024")
+_ICON_TILE_EDGE = QColor("#2c2d34")
 
 
 # --------------------------------------------------------------- glyphs
@@ -110,7 +119,7 @@ def _restore(p: QPainter, r: QRectF, color: QColor) -> None:
     back = QRectF(r.center().x() - s * 0.35, r.center().y() - s * 0.65, s, s)
     front = QRectF(r.center().x() - s * 0.65, r.center().y() - s * 0.35, s, s)
     p.drawRect(back)
-    p.fillRect(front, theme.NODE_HEADER)
+    p.fillRect(front, QColor(theme.chrome("bar_bg")))
     p.drawRect(front)
 
 
@@ -293,8 +302,9 @@ _UNSAVED = theme.BUTTON_ACCENT
 _SWITCHER_GAP = 5
 
 
-def frame_icon(kind: str, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
-    return _glyph_icon(_GLYPHS[kind], color, pt)
+def frame_icon(kind: str, color: QColor | None = None,
+               pt: int = _ICON_PT) -> QIcon:
+    return _glyph_icon(_GLYPHS[kind], color or _fg(), pt)
 
 
 def _glyph_icon(fn, color: QColor, pt: int) -> QIcon:
@@ -311,7 +321,8 @@ def _glyph_icon(fn, color: QColor, pt: int) -> QIcon:
     return icon
 
 
-def spinner_icon(angle: int, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
+def spinner_icon(angle: int, color: QColor | None = None,
+                 pt: int = _ICON_PT) -> QIcon:
     """A busy spinner frame: a three-quarter arc turned by `angle` degrees.
     Not in _GLYPHS — it takes an angle, and is redrawn every tick."""
     def draw(p: QPainter, r: QRectF, c: QColor) -> None:
@@ -321,7 +332,7 @@ def spinner_icon(angle: int, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
         arc = r.adjusted(w * 0.2, w * 0.2, -w * 0.2, -w * 0.2)
         # Qt arcs are in 1/16 degree, counter-clockwise; turn clockwise
         p.drawArc(arc, (90 - angle) * 16, -270 * 16)
-    return _glyph_icon(draw, color, pt)
+    return _glyph_icon(draw, color or _fg(), pt)
 
 
 def paint_app_mark(p: QPainter, r: QRectF) -> None:
@@ -336,11 +347,11 @@ def paint_app_mark(p: QPainter, r: QRectF) -> None:
     tile.addRoundedRect(r.adjusted(side * 0.06, side * 0.06,
                                    -side * 0.06, -side * 0.06),
                         side * 0.18, side * 0.18)
-    p.fillPath(tile, theme.CANVAS_BG.lighter(115))
-    p.setPen(_pen(theme.GRID_COARSE, side * 0.012))
+    p.fillPath(tile, _ICON_TILE)
+    p.setPen(_pen(_ICON_TILE_EDGE, side * 0.012))
     p.drawPath(tile)
     _logo(p, r.adjusted(side * 0.18, side * 0.18,
-                        -side * 0.18, -side * 0.18), _FG)
+                        -side * 0.18, -side * 0.18), _ICON_FG)
 
 
 def app_icon() -> QIcon:
@@ -413,15 +424,17 @@ def project_display_name(path) -> str:
 
 # --------------------------------------------------------------- widgets
 
-_BTN_QSS = f"""
+def _btn_qss() -> str:
+    c = theme.chrome
+    return f"""
 QToolButton {{
     background: transparent; border: 1px solid transparent;
-    border-radius: 4px; padding: 3px 6px; color: {_FG.name()};
+    border-radius: 4px; padding: 3px 6px; color: {c('fg')};
     font-size: 9pt;
 }}
-QToolButton:hover {{ background: #34363f; color: #f3f4f6; }}
-QToolButton:pressed {{ background: #3d404a; }}
-QToolButton:disabled {{ color: #5f636d; }}
+QToolButton:hover {{ background: {c('hover')}; color: {c('fg_strong')}; }}
+QToolButton:pressed {{ background: {c('pressed')}; }}
+QToolButton:disabled {{ color: {c('fg_disabled')}; }}
 QToolButton::menu-indicator {{ image: none; }}
 """
 
@@ -444,7 +457,7 @@ class _ProgressButton(QToolButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._fraction: float | None = None
-        self._fill = _FG
+        self._fill = _fg()
 
     def progress(self) -> float | None:
         return self._fraction
@@ -480,26 +493,31 @@ class _ProgressButton(QToolButton):
         p.end()
 
 
-_WINBTN_QSS = f"""
+def _winbtn_qss() -> str:
+    c = theme.chrome
+    return f"""
 QToolButton {{ background: transparent; border: none; border-radius: 0;
                padding: 0; }}
-QToolButton:hover {{ background: #34363f; }}
-QToolButton:pressed {{ background: #3d404a; }}
-QToolButton#close_btn:hover {{ background: {_CLOSE_HOVER.name()}; }}
+QToolButton:hover {{ background: {c('hover')}; }}
+QToolButton:pressed {{ background: {c('pressed')}; }}
+QToolButton#close_btn:hover {{ background: {c('close_hover')}; }}
 """
 
 
-_RECENT_QSS = """
+def _recent_qss() -> str:
+    # A row sits in a menu or on the start screen, never on the title bar,
+    # so it takes the window's surface colours, not [chrome]'s: a theme with
+    # a dark title bar over a light window would otherwise write white names
+    # on a white page. Dark-reference hexes, skinned by set_qss.
+    return """
 QWidget#recent_row { background: transparent; }
 QWidget#recent_row:hover { background: #34363f; }
-QLabel#recent_name { color: #e5e7eb; }
+QLabel#recent_name { color: #f3f4f6; }
 QLabel#recent_path { color: #8b8f99; }
 QToolButton#star_btn { background: transparent; border: none;
                        border-radius: 4px; padding: 3px; }
 QToolButton#star_btn:hover { background: #3d404a; }
 """
-
-_STAR_OFF = QColor("#7f838d")
 
 
 class _ElidedLabel(QLabel):
@@ -557,7 +575,7 @@ class _RecentRow(QWidget):
         super().__init__(parent)
         self.setObjectName("recent_row")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(_RECENT_QSS)
+        theme.set_qss(self, _recent_qss())
         self.setCursor(Qt.PointingHandCursor)
         self._path = path
         self._on_open = on_open
@@ -614,7 +632,7 @@ class _RecentRow(QWidget):
     def _sync_star(self) -> None:
         self._star_btn.setIcon(frame_icon(
             "star_filled" if self._fav else "star",
-            theme.BUTTON_ACCENT if self._fav else _STAR_OFF))
+            theme.BUTTON_ACCENT if self._fav else QColor(theme.chrome("star_off"))))
         self._star_btn.setToolTip(
             "Remove from favourites" if self._fav else "Add to favourites")
 
@@ -639,23 +657,26 @@ def _smaller(font: QFont) -> QFont:
 
 # The node-state palette, borrowed from the canvas' status colours so the
 # little bar reads the same way a node does.
-_STATE_COLOURS = {
-    "cached": QColor(toolbar_style.RUN),      # green — has a fresh result
-    "clean": QColor("#4b5563"),               # grey  — fine, nothing cached
-    "stale": QColor(toolbar_style.RESET),     # amber — needs a re-run
-    "frozen": QColor("#5b8def"),              # blue  — pinned, won't re-run
-}
+def _state_colours() -> dict:
+    return {
+        "cached": QColor(theme.chrome("run")),     # green — has a fresh result
+        "clean": QColor(theme.chrome("unselected")),  # grey — fine, nothing cached
+        "stale": QColor(theme.chrome("reset")),    # amber — needs a re-run
+        "frozen": QColor(theme.chrome("frozen")),  # blue  — pinned, won't re-run
+    }
 
-_PANEL_QSS = """
-QWidget#project_panel { background: #2b2d36; border-radius: 8px; }
-QLabel#pp_name { color: #f3f4f6; font-size: 11pt; font-weight: 600; }
-QLabel#pp_folder { color: #8b8f99; }
-QLabel#pp_stat { color: #c7cad2; }
-QLabel#pp_meta { color: #8b8f99; }
-QToolButton#pp_act { background: transparent; border: 1px solid #3a3d47;
-                     border-radius: 6px; padding: 6px; }
-QToolButton#pp_act:hover { background: #3a3d47; }
-QToolButton#pp_act:pressed { background: #43464f; }
+def _panel_qss() -> str:
+    c = theme.chrome
+    return f"""
+QWidget#project_panel {{ background: {c('panel')}; border-radius: 8px; }}
+QLabel#pp_name {{ color: {c('fg_strong')}; font-size: 11pt; font-weight: 600; }}
+QLabel#pp_folder {{ color: {c('fg_dim')}; }}
+QLabel#pp_stat {{ color: {c('fg')}; }}
+QLabel#pp_meta {{ color: {c('fg_dim')}; }}
+QToolButton#pp_act {{ background: transparent; border: 1px solid {c('panel_line')};
+                     border-radius: 6px; padding: 6px; }}
+QToolButton#pp_act:hover {{ background: {c('panel_line')}; }}
+QToolButton#pp_act:pressed {{ background: {c('pressed')}; }}
 """
 
 _PANEL_WIDTH = 322
@@ -735,7 +756,7 @@ class _FlowMeter(QWidget):
         radius = r.height() / 2
         track = QPainterPath()
         track.addRoundedRect(r, radius, radius)
-        p.fillPath(track, QColor("#1c1d23"))
+        p.fillPath(track, QColor(theme.chrome("track")))
         total = sum(self._stats.get(k, 0) for k in self._ORDER)
         if total <= 0:
             return
@@ -746,7 +767,7 @@ class _FlowMeter(QWidget):
             if not value:
                 continue
             seg = r.width() * value / total
-            p.fillRect(QRectF(x, 0, seg + 0.6, r.height()), _STATE_COLOURS[key])
+            p.fillRect(QRectF(x, 0, seg + 0.6, r.height()), _state_colours()[key])
             x += seg
 
 
@@ -760,7 +781,7 @@ class _ProjectPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("project_panel")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(_PANEL_QSS)
+        self.setStyleSheet(_panel_qss())
         # No fixed width: QMenu stretches an action widget to the menu's own
         # width, which the recent-workflow rows below make wider than this
         # card's natural size — so it should follow, not sit short of the edge.
@@ -860,7 +881,7 @@ class _ProjectPanel(QWidget):
     @staticmethod
     def _state_line(s: dict) -> str:
         def chip(key: str, label: str) -> str:
-            return (f"<span style='color:{_STATE_COLOURS[key].name()}'>●</span> "
+            return (f"<span style='color:{_state_colours()[key].name()}'>●</span> "
                     f"{s[key]} {label}")
         bits = [chip("cached", "cached")]
         if s["stale"]:
@@ -897,15 +918,14 @@ class TitleBar(QWidget):
         self.setObjectName("title_bar")
         self.setFixedHeight(BAR_HEIGHT)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            f"QWidget#title_bar {{ background: {theme.CANVAS_BG.darker(108).name()};"
-            f" border-bottom: 1px solid #14151a; }}" + _BTN_QSS)
+        self._apply_bar_style()
+        theme.on_change(self._on_theme_changed)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(6, 0, 0, 0)
         row.setSpacing(2)
 
-        logo = QLabel()
+        logo = self._logo = QLabel()
         logo.setPixmap(frame_icon("logo", pt=32).pixmap(18, 18))
         logo.setContentsMargins(2, 0, 4, 0)
         logo.setToolTip("flograph")
@@ -1029,7 +1049,7 @@ class TitleBar(QWidget):
         row.addSpacing(6)
 
         self._win_btns = QWidget()
-        self._win_btns.setStyleSheet(_WINBTN_QSS)
+        self._win_btns.setStyleSheet(_winbtn_qss())
         wb = QHBoxLayout(self._win_btns)
         wb.setContentsMargins(0, 0, 0, 0)
         wb.setSpacing(0)
@@ -1043,6 +1063,33 @@ class TitleBar(QWidget):
         row.addWidget(self._win_btns)
 
         self._sync_max_button()
+
+    # -- theme ---------------------------------------------------------
+
+    def _apply_bar_style(self) -> None:
+        self.setStyleSheet(
+            f"QWidget#title_bar {{ background: {theme.chrome('bar_bg')};"
+            f" border-bottom: 1px solid {theme.chrome('bar_border')}; }}"
+            + _btn_qss())
+
+    def _on_theme_changed(self) -> None:
+        """Redraw everything the bar paints itself: the stylesheet, and the
+        glyphs, which are pixmaps drawn in one colour at creation."""
+        self._apply_bar_style()
+        self._win_btns.setStyleSheet(_winbtn_qss())
+        self._logo.setPixmap(frame_icon("logo", pt=32).pixmap(18, 18))
+        self._menu_btn.setIcon(frame_icon("hamburger"))
+        self._clear_cache_btn.setIcon(
+            frame_icon("clear_cache", QColor(toolbar_style.RESET)))
+        self._run_sel_btn.setIcon(toolbar_style.toolbar_icon("run_selected"))
+        self._reset_btn.setIcon(toolbar_style.toolbar_icon("reset_caches"))
+        self._flo_btn.setIcon(frame_icon("sparkle", theme.BUTTON_ACCENT))
+        self._btn_min.setIcon(frame_icon("min"))
+        self._btn_close.setIcon(frame_icon("close"))
+        self._sync_max_button()
+        self._set_running(self._running)
+        self._run_btn.set_progress(self._run_progress, toolbar_style.RUN)
+        self.refresh_title()
 
     # -- window buttons ------------------------------------------------
 
