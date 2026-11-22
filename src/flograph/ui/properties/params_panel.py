@@ -339,9 +339,16 @@ class ParamsPanel(QWidget):
         self._details.hide()
         layout.addWidget(self._details)
 
-        self._placeholder = QLabel("No node selected")
+        # nothing selected: a short, calm line saying how to get settings
+        # here, at the top where the eye lands, not a label adrift mid-panel
+        self._placeholder = QLabel(
+            "<b>No node selected</b><br>Click a node on the canvas to see "
+            "and change its settings here.")
+        self._placeholder.setWordWrap(True)
+        self._placeholder.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self._placeholder.setContentsMargins(4, 8, 4, 0)
         _theme.set_qss(self._placeholder, "color: palette(mid);")
-        layout.addWidget(self._placeholder)
+        layout.addWidget(self._placeholder, 0, Qt.AlignTop)
 
         self._locked_label = QLabel(
             "\N{LOCK} Locked — right-click the node and choose Unlock to edit.")
