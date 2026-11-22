@@ -20,9 +20,6 @@ from .node_item import (COMPACT_MIN_H, COMPACT_NAME_FONT_SIZE, COMPACT_NAME_GAP,
 from .stacking import COLLAPSED_FRAME_Z, FRAME_Z, z_for
 
 TITLE_H = 24.0
-#: below this zoom a frame's title is drawn at a fixed screen size
-FAR_TITLE_LOD = 0.55
-FAR_TITLE_PX = 13.0
 #: How far back a disabled frame's own chrome is faded. The same value the
 #: nodes use, so the block dims as one.
 DISABLED_FRAME_OPACITY = 0.35
@@ -372,25 +369,6 @@ class FrameItem(QGraphicsObject):
 
     # ------------------------------------------------------------- painting
 
-    def _paint_far_title(self, painter: QPainter, lod: float,
-                         w: float, h: float) -> None:
-        """Zoomed out, the title at a fixed size on screen, so a whole flow
-        seen at once still names its sections. Capped to a strip of the
-        frame, so a small frame is not all title."""
-        px = min(FAR_TITLE_PX / lod, max(TITLE_H, 0.2 * h) * 0.8)
-        band = QRectF(6.0 / lod, 0, w - 12.0 / lod, px * 1.35)
-        painter.save()
-        painter.setRenderHint(QPainter.TextAntialiasing)
-        font = painter.font()
-        font.setBold(False)
-        font.setWeight(QFont.DemiBold)
-        font.setPixelSize(max(1, round(px)))
-        painter.setFont(font)
-        text = painter.fontMetrics().elidedText(
-            self.frame.title, Qt.ElideRight, int(band.width()))
-        painter.drawText(band, Qt.AlignVCenter | Qt.AlignLeft, text)
-        painter.restore()
-
     def paint(self, painter: QPainter, option, widget=None) -> None:
         # A disabled frame is faded like the nodes it is disabling — the
         # same signal, so a block that is out of the runs reads as one thing
@@ -430,13 +408,9 @@ class FrameItem(QGraphicsObject):
         marker = self._marker_rect()
         text_left = (marker.right() if not marker.isEmpty()
                      else self._toggle_rect().right()) + 6
-        lod = option.levelOfDetailFromTransform(painter.worldTransform())
-        if 0 < lod < FAR_TITLE_LOD and self.frame.title:
-            self._paint_far_title(painter, lod, w, h)
-        else:
-            painter.drawText(QRectF(text_left, 0,
-                                    w - text_left - RUN_BTN - 10, TITLE_H),
-                             Qt.AlignVCenter | Qt.AlignLeft, self.frame.title)
+        painter.drawText(QRectF(text_left, 0,
+                                w - text_left - RUN_BTN - 10, TITLE_H),
+                         Qt.AlignVCenter | Qt.AlignLeft, self.frame.title)
 
         btn = self._run_button_rect()
         chip = QColor(color)

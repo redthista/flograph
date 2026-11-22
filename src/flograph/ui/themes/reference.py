@@ -157,7 +157,7 @@ syntax.comment: Comments in Python code, rule boxes and theme text.
 style.node_shadow: true = a soft drop shadow lifts each node off the canvas.
 style.category_colours: true = a node's outline (and a thin tint) takes its category's colour; the categories' colours are fixed by flograph. Does not change the header: see one_tone_header and canvas.NODE_HEADER.
 style.one_tone_header: true = a node's header is the same colour as its body (NODE_BODY) instead of NODE_HEADER. A node with its own colour, and a broken node, ignore this.
-style.card_shadow: Dashboard tile shadow: "dark" (a heavy shadow, for dark themes) or "soft" (a pale one).
+style.card_shadow: How a dashboard tile's shadow is drawn, when its Format turns one on: "dark" (a heavy shadow, for dark themes) or "soft" (a pale one). No tile has a shadow by default.
 style.soft_done: true = the minimap draws finished nodes in a paler green.
 style.flat_controls: true = inputs, menus and scroll bars are drawn flat with hairline borders from ui (line, menu, menu_border, input_border, input_focus, scrollbar); false = Qt's own bevelled look.
 style.panel_borders: true = each dock is a bordered card (ui.panel, panel_border, panel_title) with a gutter of window colour between docks.

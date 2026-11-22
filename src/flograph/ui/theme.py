@@ -297,8 +297,7 @@ def card_look(note: bool = False):
     return replace(
         CARD_LOOK, frame_color=NODE_BORDER.name(),
         background=NODE_BODY.name(), title_color=NODE_TEXT.name(),
-        title_background=NODE_HEADER.name(),
-        shadow=CARD_LOOK.shadow or style("card_shadow") == "soft")
+        title_background=NODE_HEADER.name())
 
 
 # A node's category as a colour: the one splash of identity a card has when

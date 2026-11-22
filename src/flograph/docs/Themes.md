@@ -330,7 +330,7 @@ On/off and size choices about how things are drawn.
 | `node_shadow` | `False` | true = a soft drop shadow lifts each node off the canvas. |
 | `category_colours` | `False` | true = a node's outline (and a thin tint) takes its category's colour; the categories' colours are fixed by flograph. Does not change the header: see one_tone_header and canvas.NODE_HEADER. |
 | `one_tone_header` | `False` | true = a node's header is the same colour as its body (NODE_BODY) instead of NODE_HEADER. A node with its own colour, and a broken node, ignore this. |
-| `card_shadow` | `dark` | Dashboard tile shadow: "dark" (a heavy shadow, for dark themes) or "soft" (a pale one). |
+| `card_shadow` | `dark` | How a dashboard tile's shadow is drawn, when its Format turns one on: "dark" (a heavy shadow, for dark themes) or "soft" (a pale one). No tile has a shadow by default. |
 | `soft_done` | `False` | true = the minimap draws finished nodes in a paler green. |
 | `flat_controls` | `False` | true = inputs, menus and scroll bars are drawn flat with hairline borders from ui (line, menu, menu_border, input_border, input_focus, scrollbar); false = Qt's own bevelled look. |
 | `panel_borders` | `False` | true = each dock is a bordered card (ui.panel, panel_border, panel_title) with a gutter of window colour between docks. |

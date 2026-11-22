@@ -182,7 +182,7 @@ number = "#0550ae"
 comment = "#6e7781"
 
 [style]
-node_shadow = true
+node_shadow = false
 category_colours = false
 one_tone_header = true
 card_shadow = "soft"

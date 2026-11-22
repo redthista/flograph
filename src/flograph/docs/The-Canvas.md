@@ -49,11 +49,6 @@ thicker — while every other wire steps back, so what feeds it and what it
 feeds can be read at a glance. With nothing selected, wires are drawn
 quietly, so the nodes read first.
 
-Zoom far out and nodes are drawn as plain blocks to keep a big flow fast;
-cards large enough to read still show their name in a header strip, and
-frames show their titles at a readable size, so the whole flow still says
-what each part is.
-
 ## Nodes
 
 A node that is only a step in the pipeline draws as a fixed **60×60 square** —
@@ -121,9 +116,10 @@ the next node is reading it the table still has to exist.
 **Dark** (the default), **Light**, **Dark Slate**, **Light Steel** and
 **Follow the system**, live, without re-running anything. The canvas changes
 with it: in Light it is a cool slate grey with white nodes, each with a clear
-edge and a soft shadow, so a node stands out from the page instead of blending
-into it, and each panel is its own white card under a light title bar. Dark
-Slate is the same design in navy. A chart still on Plotly's own default look
+edge, so a node stands out from the page instead of blending into it, and
+each panel is its own white card under a light title bar. No theme draws
+drop shadows; a dashboard tile gets one only when its Format turns Shadow
+on. Dark Slate is the same design in navy. A chart still on Plotly's own default look
 is drawn dark on a dark theme's cards; a chart you styled keeps its look. Wire colours, status lights, frames and the minimap are all
 re-tuned for the lighter ground. A colour you pick for a node, frame or page is
 yours and stays as you set it.
