@@ -231,6 +231,41 @@ def _outline_square(painter: QPainter, rect: QRectF, color: QColor) -> None:
     _stroke(painter, rect, color, path)
 
 
+def _spark(painter: QPainter, rect: QRectF, color: QColor) -> None:
+    """AI: a four-point sparkle, with a small one beside it."""
+    big = QPainterPath(_u(rect, 0.42, 0.14))
+    for x, y in ((0.50, 0.40), (0.76, 0.48), (0.50, 0.56), (0.42, 0.84),
+                 (0.34, 0.56), (0.08, 0.48), (0.34, 0.40)):
+        big.lineTo(_u(rect, x, y))
+    big.closeSubpath()
+    _fill(painter, color, big)
+    small = QPainterPath(_u(rect, 0.78, 0.12))
+    for x, y in ((0.81, 0.22), (0.90, 0.25), (0.81, 0.28), (0.78, 0.38),
+                 (0.75, 0.28), (0.66, 0.25), (0.75, 0.22)):
+        small.lineTo(_u(rect, x, y))
+    small.closeSubpath()
+    _fill(painter, color, small)
+
+
+def _play(painter: QPainter, rect: QRectF, color: QColor) -> None:
+    """Automation: a play triangle -- something that runs by itself."""
+    path = _poly(rect, (0.30, 0.20), (0.80, 0.50), (0.30, 0.80))
+    path.closeSubpath()
+    _stroke(painter, rect, color, path)
+
+
+def _scatter(painter: QPainter, rect: QRectF, color: QColor) -> None:
+    """ML: points with the line a model fits through them."""
+    for x, y in ((0.22, 0.56), (0.34, 0.78), (0.48, 0.42), (0.60, 0.66),
+                 (0.74, 0.28), (0.82, 0.50)):
+        dot = QPainterPath()
+        dot.addEllipse(_u(rect, x, y), rect.width() * 0.055,
+                       rect.height() * 0.055)
+        _fill(painter, color, dot)
+    _stroke(painter, rect, color, _poly(rect, (0.14, 0.80), (0.86, 0.24)),
+            scale=0.7)
+
+
 _PAINTERS: dict[str, Callable[[QPainter, QRectF, QColor], None]] = {
     "page": _page,
     "page_out": _page_out,
@@ -248,6 +283,9 @@ _PAINTERS: dict[str, Callable[[QPainter, QRectF, QColor], None]] = {
     "dot": _dot,
     "brackets": _brackets,
     "outline_square": _outline_square,
+    "spark": _spark,
+    "play": _play,
+    "scatter": _scatter,
 }
 
 # Picker order — grouped by what they mean, not alphabetically, so the grid
@@ -255,7 +293,8 @@ _PAINTERS: dict[str, Callable[[QPainter, QRectF, QColor], None]] = {
 MARK_NAMES: tuple[str, ...] = (
     "page", "page_out", "page_in", "grid", "cylinder", "dot",
     "arrows", "funnel", "overlap", "collapse", "sort_bars", "reshape",
-    "slider", "bars", "brackets", "outline_square",
+    "slider", "bars", "brackets", "spark", "play", "scatter",
+    "outline_square",
 )
 
 MARK_LABELS: dict[str, str] = {
@@ -274,6 +313,9 @@ MARK_LABELS: dict[str, str] = {
     "slider": "Input",
     "bars": "Chart",
     "brackets": "Script",
+    "spark": "AI",
+    "play": "Automation",
+    "scatter": "Model",
     "outline_square": "Blank",
 }
 
@@ -287,6 +329,10 @@ CATEGORY_MARKS: dict[str, str] = {
     "viz": "bars",
     "util": "dot",
     "scripting": "brackets",
+    "connect": "cylinder",
+    "ai": "spark",
+    "automation": "play",
+    "ml": "scatter",
 }
 
 FALLBACK_MARK = "outline_square"

@@ -1,10 +1,11 @@
 """Node discovery UI: the Tab search popup and the persistent library tree."""
 from __future__ import annotations
 
+import weakref
 from typing import Callable, Optional
 
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QKeyEvent
+from PySide6.QtGui import QColor, QFont, QIcon, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QToolButton, QTreeWidget, QTreeWidgetItem,
@@ -38,26 +39,61 @@ EXTRA_ROLE = Qt.UserRole + 3
 # canvas, so a node is recognised in the list by the shape you will then look
 # for in the graph.
 MARK_ICON_SIZE = 16
-_icon_cache: dict[tuple[str, float], QIcon] = {}
+_icon_cache: dict[tuple[str, float, str], QIcon] = {}
+
+
+def _mark_icon(name: str, color: QColor) -> QIcon:
+    """A mark as an icon, cached per (mark, dpr, colour). The colour is in
+    the key because themes switch live: a cache keyed on the mark alone
+    kept the first theme's colour for the rest of the session."""
+    screen = QApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen is not None else 1.0
+    key = (name, ratio, color.name())
+    icon = _icon_cache.get(key)
+    if icon is None:
+        icon = marks.mark_icon(name, MARK_ICON_SIZE, color, ratio)
+        _icon_cache[key] = icon
+    return icon
 
 
 def spec_icon(spec: NodeSpec) -> QIcon:
-    """The category mark for a library row, cached per (mark, dpr).
+    """The category mark for a library row.
 
     Cached because reload() rebuilds every row on every favourites change and
     there are only ever a handful of distinct marks — rasterising the same
     seven paths a hundred times would be pure waste.
     """
-    name = marks.mark_for_category(spec.category)
-    screen = QApplication.primaryScreen()
-    ratio = screen.devicePixelRatio() if screen is not None else 1.0
-    key = (name, ratio)
-    icon = _icon_cache.get(key)
-    if icon is None:
-        icon = marks.mark_icon(name, MARK_ICON_SIZE,
-                               QColor(theme.NODE_SUBTEXT), ratio)
-        _icon_cache[key] = icon
-    return icon
+    return _mark_icon(marks.mark_for_category(spec.category),
+                      QColor(theme.NODE_SUBTEXT))
+
+
+def category_icon(category: str) -> QIcon:
+    """A category heading's mark, in the accent colour: the heading says
+    which mark the rows under it wear."""
+    return _mark_icon(marks.mark_for_category(category),
+                      theme.color("ui", "accent"))
+
+
+#: every live library tree, so a theme switch can recolour their marks
+_TREES: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def _recolour_trees() -> None:
+    for tree in list(_TREES):
+        try:
+            tree.recolour()
+        except RuntimeError:            # its C++ side is already gone
+            pass
+
+
+theme.on_change(_recolour_trees)
+
+#: Rows a little roomier than Qt's default and a soft hover, in palette
+#: roles so every theme (and a switch between them) gets them for free.
+_TREE_QSS = """
+    QTreeView::item { padding: 2px 0; }
+    QTreeView::item:hover:!selected { background: palette(midlight); }
+"""
 
 
 class NodePalettePopup(QFrame):
@@ -241,6 +277,8 @@ class LibraryTree(QTreeWidget):
         # be an icon-less section header — which would then clip every mark
         # below it. Naming the size takes the guess out of it.
         self.setIconSize(QSize(MARK_ICON_SIZE, MARK_ICON_SIZE))
+        self.setStyleSheet(_TREE_QSS)
+        _TREES.add(self)
         self.setDragEnabled(True)
         self.itemActivated.connect(self._on_activated)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -278,6 +316,8 @@ class LibraryTree(QTreeWidget):
 
         for category in sorted(builtin):
             top = self._section(category)
+            top.setIcon(0, category_icon(category))
+            top.setData(0, SECTION_ROLE, category)
             for spec in builtin[category]:
                 top.addChild(self._node_item(spec, favorite=True))
             top.setExpanded(True)
@@ -369,8 +409,32 @@ class LibraryTree(QTreeWidget):
                 parent.addChild(child)
         top.setExpanded(True)
 
+    def recolour(self) -> None:
+        """The theme changed: repaint the marks in its colours, without
+        rebuilding the rows (and losing what is expanded and selected)."""
+        def walk(item: QTreeWidgetItem) -> None:
+            type_id = item.data(0, TYPE_ID_ROLE)
+            if type_id:
+                try:
+                    spec = self._registry.get(type_id)
+                except KeyError:        # removed since the rows were built
+                    spec = None
+                if spec is not None:
+                    item.setIcon(0, spec_icon(spec))
+            elif item.parent() is None and isinstance(
+                    item.data(0, SECTION_ROLE), str) \
+                    and not item.icon(0).isNull():
+                item.setIcon(0, category_icon(item.data(0, SECTION_ROLE)))
+            for i in range(item.childCount()):
+                walk(item.child(i))
+        for i in range(self.topLevelItemCount()):
+            walk(self.topLevelItem(i))
+
     def _section(self, title: str, marker: str = "") -> QTreeWidgetItem:
         top = QTreeWidgetItem([f"{marker} {title}" if marker else title])
+        font = top.font(0)
+        font.setWeight(QFont.DemiBold)
+        top.setFont(0, font)
         top.setFlags(top.flags() & ~Qt.ItemIsDragEnabled)
         self.addTopLevelItem(top)
         return top
