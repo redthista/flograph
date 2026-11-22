@@ -1206,7 +1206,12 @@ class TestListFiles:
 
             def check_cancelled(self):
                 self.calls += 1
-                if self.calls > 12:
+                # The probe walks 8 folders, one check each; the next check
+                # is the first one past it (the serial walk's 9th folder, or
+                # the pool loop's first pass). Any later and a 4-thread pool
+                # on a busy machine can finish the 81 folders first, so the
+                # cancel never lands (seen at 16 parallel test workers).
+                if self.calls > 8:
                     raise Boom()
 
         with pytest.raises(Boom):

@@ -162,6 +162,37 @@ def interpreter() -> str:
     return sys.executable
 
 
+#: testd's exit code when it cannot reach or start its service
+TESTD_UNREACHABLE = 3
+
+
+def via_testd(known, extra: "list[str]") -> "int | None":
+    """Hand the run to the machine's test service when it is installed.
+
+    testd runs every session's tests from one queue and one memory budget,
+    recycles worker processes between batches of files (so memory does not
+    pile up across the heavy modules, which is what held xdist here to ~6
+    workers) and learns each file's time for the ETA. Settings for this
+    suite are `[tool.testd]` in pyproject.toml. None means "not available,
+    run locally": no `testd` on PATH, or its service could not be reached.
+    """
+    testd = shutil.which("testd")
+    if testd is None:
+        return None
+    profile = "fastest" if (known.full or known.no_nice) else "auto"
+    requester = os.environ.get("TESTD_REQUESTER") or "flograph run_tests"
+    command = [testd, "run", "--profile", profile, "--as", requester,
+               "--", *extra]
+    print(f"[run_tests] via testd ({profile}); --local runs here instead",
+          file=sys.stderr)
+    root = Path(__file__).resolve().parent.parent
+    result = subprocess.call(command, cwd=root)
+    if result == TESTD_UNREACHABLE:
+        print("[run_tests] testd unavailable; running locally", file=sys.stderr)
+        return None
+    return result
+
+
 def main(argv: "list[str] | None" = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run pytest with a worker count chosen from current load "
@@ -179,7 +210,16 @@ def main(argv: "list[str] | None" = None) -> int:
                              "measured peak; the memory ceiling stays")
     parser.add_argument("--explain", action="store_true",
                         help="print the decision and exit")
+    parser.add_argument("--local", action="store_true",
+                        help="run here with xdist even when the testd "
+                             "service is installed")
     known, extra = parser.parse_known_args(argv)
+
+    if not (known.local or known.explain or known.workers is not None
+            or os.environ.get("FLOGRAPH_NO_TESTD")):
+        delegated = via_testd(known, extra)
+        if delegated is not None:
+            return delegated
 
     cores = os.cpu_count() or 1
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0

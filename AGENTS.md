@@ -25,6 +25,11 @@ already been listed; an author email in git history is public forever.
 # Install editable + dev deps
 uv pip install -p .venv/bin/python -e ".[dev]"
 
+# All tests: scripts/run_tests.py hands the run to the machine's test service
+# (testd, [tool.testd] in pyproject.toml) when it is installed; --local runs
+# here with xdist. Never bare pytest on a shared machine.
+scripts/run_tests.py --full
+
 # All tests (offscreen required — no display)
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/ -q
 

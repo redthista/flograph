@@ -85,3 +85,15 @@ testpaths = ["tests"]
 # share a module-scoped Qt fixture and isolate QSettings per file, so a whole
 # module must stay on one worker. Left off by default: a focused single-file
 # run pays ~0.7s per worker to spawn, and the inner dev loop wants that back.
+
+[tool.testd]
+# How the local test service (testd) runs this suite: see scripts/run_tests.py.
+name = "flograph"
+python = ".venv/bin/python"
+env = { QT_QPA_PLATFORM = "offscreen" }
+args = ["-p", "no:cacheprovider"]
+# a worker's first guess before testd has measured each file, and the size
+# past which it starts the next batch in a fresh process (memory piles up
+# across heavy files in one pytest process)
+worker_mb = 800
+recycle_mb = 1500

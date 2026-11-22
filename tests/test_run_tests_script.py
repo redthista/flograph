@@ -158,3 +158,47 @@ class TestMemory:
         command = script.memory_scope(script.GIB)
         assert f'MemoryMax={script.GIB}' in command
         assert 'MemorySwapMax=0' in command
+
+
+class TestViaTestd:
+    """The hand-off to the machine's test service, and the fall-back to
+    running here when it is not installed or cannot be reached."""
+
+    def known(self, script, *argv):
+        import argparse
+        known = argparse.Namespace(full=False, no_nice=False)
+        for flag in argv:
+            setattr(known, flag, True)
+        return known
+
+    def test_no_testd_runs_locally(self, script, monkeypatch):
+        monkeypatch.setattr(script.shutil, 'which', lambda _: None)
+        assert script.via_testd(self.known(script), []) is None
+
+    def test_it_passes_the_arguments_and_returns_the_result(self, script, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(script.shutil, 'which', lambda _: '/bin/testd')
+
+        def call(command, cwd=None):
+            seen['command'] = command
+            return 1
+        monkeypatch.setattr(script.subprocess, 'call', call)
+        assert script.via_testd(self.known(script), ['tests/test_x.py', '-k', 'y']) == 1
+        command = seen['command']
+        assert command[:2] == ['/bin/testd', 'run']
+        assert command[command.index('--profile') + 1] == 'auto'
+        assert command[command.index('--') + 1:] == ['tests/test_x.py', '-k', 'y']
+
+    def test_full_asks_for_the_fastest_profile(self, script, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(script.shutil, 'which', lambda _: '/bin/testd')
+        monkeypatch.setattr(script.subprocess, 'call',
+                            lambda command, cwd=None: seen.setdefault('c', command) and 0)
+        script.via_testd(self.known(script, 'full'), [])
+        assert seen['c'][seen['c'].index('--profile') + 1] == 'fastest'
+
+    def test_an_unreachable_service_falls_back(self, script, monkeypatch):
+        monkeypatch.setattr(script.shutil, 'which', lambda _: '/bin/testd')
+        monkeypatch.setattr(script.subprocess, 'call',
+                            lambda *a, **k: script.TESTD_UNREACHABLE)
+        assert script.via_testd(self.known(script), []) is None
