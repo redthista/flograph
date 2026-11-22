@@ -664,6 +664,8 @@ class MainWindow(QMainWindow):
         host.addDockWidget(Qt.RightDockWidgetArea, self.editor_dock)
 
         self.log_console = LogConsole(self.graph, self.engine)
+        # a node's name in the log is a link to the node
+        self.log_console.node_requested.connect(self._go_to_node)
         self.log_dock = QDockWidget("Log", host)
         self.log_dock.setObjectName("dock_log")
         self.log_dock.setWidget(self.log_console)
