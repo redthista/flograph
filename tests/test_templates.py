@@ -77,13 +77,13 @@ class TestBundledExamples:
             "36_table_totals.flograph",
             "37_input_panel.flograph",
             "38_machine_learning.flograph",
-            "38_run_flow_child.flograph",
-            "39_run_flow_parent.flograph",
             "39_status_cards.flograph",
             "40_table_helpers.flograph",
             "41_file_operations.flograph",
             "42_managed_folder.flograph",
             "43_draft_emails.flograph",
+            "44_run_flow_child.flograph",
+            "45_run_flow_parent.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
@@ -136,12 +136,13 @@ class TestBundledExamples:
         "37_input_panel.flograph",
         # 38 fits real models: it needs scikit-learn (the `ml` extra)
         "38_machine_learning.flograph",
-        "38_run_flow_child.flograph",
         "39_status_cards.flograph",
         "40_table_helpers.flograph",
         "42_managed_folder.flograph",
         # 43's Draft Emails is on Preview only, so running it opens nothing
         "43_draft_emails.flograph",
+        # 44 is the Run Flow child; it returns a constant
+        "44_run_flow_child.flograph",
         # 13, 18, 19, 21 and 41 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
@@ -174,11 +175,11 @@ class TestBundledExamples:
 
     def test_run_flow_tutorial_parent_returns_child_value(
             self, qtbot, window):
-        window._open_example(template_path("39_run_flow_parent.flograph"))
+        window._open_example(template_path("45_run_flow_parent.flograph"))
         node = next(n for n in window.graph.nodes.values()
                     if n.type_id == "flograph.scripting.run_flow")
         window.graph.set_param(
-            node.id, "project", str(template_path("38_run_flow_child.flograph")))
+            node.id, "project", str(template_path("44_run_flow_child.flograph")))
 
         assert wait_run(qtbot, window.engine)
         assert window.engine.cache.outputs_for(node.id)["value"] == 42

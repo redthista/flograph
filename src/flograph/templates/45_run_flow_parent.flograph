@@ -46,7 +46,7 @@
           70
         ],
         "params": {
-          "text": "# Run another flow\n\nIn **Run Flow**, browse to `38_run_flow_child.flograph` in the examples folder, then run this flow. The child runs in its own process; its named `answer` value returns on the `value` output.\n\nThe first run executes the child. Save the child after a run to let Run Flow reuse its current saved result; turn on **Always run child** for a fresh run. Set **Variables** to `answer=73` to override the child's Number control. Set a timeout to stop a long child run.",
+          "text": "# Run another flow\n\nIn **Run Flow**, browse to `44_run_flow_child.flograph` in the examples folder, then run this flow. The child runs in its own process; its named `answer` value returns on the `value` output.\n\nThe first run executes the child. Save the child after a run to let Run Flow reuse its current saved result; turn on **Always run child** for a fresh run. Set **Variables** to `answer=73` to override the child's Number control. Set a timeout to stop a long child run.",
           "width": 460,
           "height": 0
         },
