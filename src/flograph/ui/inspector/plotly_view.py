@@ -284,6 +284,16 @@ class PlotlyView(QWidget):
             self.placeholder.setText(NO_WEBENGINE)
             self.placeholder.show()
             return
+        # the page's own colour before (and around) what it draws: the card's
+        # for a chart re-dressed for a dark theme, so it does not flash
+        # white while loading; Chromium's white for everything else, which
+        # is what HTML that sets no background was written against
+        page = getattr(view, "page", None)
+        if callable(page):
+            from PySide6.QtGui import QColor
+            page().setBackgroundColor(
+                _theme.color("canvas", "NODE_BODY") if self._themed
+                else QColor("white"))
         path = _plotly_html_path(self._token)
         path.write_text(html, encoding="utf-8")
         self._path = path
