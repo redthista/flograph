@@ -185,13 +185,16 @@ def _sheet_header_class():
             painter.setRenderHint(QPainter.Antialiasing, True)
             filtered = self._view.is_column_filtered(section)
             if filtered or self._hover == section:
-                fill = QColor("#60a5fa") if filtered else QColor("#4b4f5c")
+                # the theme's accent while filtered, its strong border on
+                # hover -- fixed dark-theme hex was lost on a light grid
+                fill = QColor(theme.color("ui", "accent") if filtered
+                              else theme.color("surface", "border_strong"))
                 fill.setAlpha(90 if filtered else 160)
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(fill)
                 painter.drawRoundedRect(button, 3, 3)
-            pen = QPen(QColor("#93c5fd") if filtered else QColor("#9ca3af"),
-                       1.4)
+            pen = QPen(theme.color("surface", "accent_text") if filtered
+                       else theme.color("ui", "mid"), 1.4)
             pen.setCapStyle(Qt.RoundCap)
             painter.setPen(pen)
             cx, cy = button.center().x(), button.center().y()
@@ -984,6 +987,18 @@ class SpreadsheetView(QTableView):
         """
         if autosize_default_enabled():
             self._autofit_timer.start()
+
+    def changeEvent(self, event) -> None:
+        """A new style or font changes what a fit measures -- the header's
+        padding arrives with its stylesheet, often after the first fit ran,
+        and a theme switch restyles it again -- so re-fit, settled."""
+        super().changeEvent(event)
+        if event.type() in (QEvent.StyleChange, QEvent.FontChange):
+            self._maybe_autofit()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._maybe_autofit()
 
     def _run_autofit(self) -> None:
         if autosize_default_enabled() and self.sheet_model() is not None:
