@@ -7137,6 +7137,10 @@ class MainWindow(QMainWindow):
             path += ".flograph"
         self._project_path = path
         self.resource_monitor.set_disk_watch_path(path)
+        # flograph issue #110: the title bar's name only refreshed on a
+        # clean-state change, so a save that started (or stayed) clean —
+        # or one still writing in the background — kept "untitled" showing.
+        self._update_title()
         # carry the cached results across from the old file rather than
         # re-pickling them (or dropping the ones not in memory)
         return self._save(carry_from=old_path)

@@ -228,6 +228,20 @@ def test_switcher_drops_the_flograph_extension(frame_window, tmp_path):
     assert tb._project_btn.text() == "sales"
 
 
+def test_save_as_of_a_new_clean_project_renames_the_switcher(
+        frame_window, tmp_path, monkeypatch):
+    # flograph issue #110: the name only refreshed on a clean-state change,
+    # and saving a project that was already clean is no change at all
+    from flograph.ui import mainwindow as mod
+    tb = frame_window._title_bar
+    assert frame_window.undo_stack.isClean()
+    monkeypatch.setattr(mod.QFileDialog, "getSaveFileName", staticmethod(
+        lambda *a, **k: (str(tmp_path / "sales.flograph"), "")))
+    assert frame_window._save_as() is True
+    assert tb._project_btn.text() == "sales"
+    assert frame_window.windowTitle().startswith("sales.flograph")
+
+
 def test_switcher_carries_an_initials_tile(frame_window, tmp_path):
     tb = frame_window._title_bar
     frame_window._project_path = str(tmp_path / "sales.flograph")
