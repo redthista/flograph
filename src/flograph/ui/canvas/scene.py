@@ -136,6 +136,17 @@ class ContentFittedSceneRect:
             self._rect_timer.stop()
         self._fit_scene_rect()
 
+    def reach_rect(self, rect: QRectF) -> None:
+        """Stretch the span to cover `rect` right now — a pan is about to
+        look there and the view cannot scroll outside the span. A no-op
+        while the span is world-sized. The next refit keeps it, through the
+        view's parked_rect (flograph issue #111)."""
+        if not self._rect_fitted or rect.isNull():
+            return
+        span = self.sceneRect()
+        if not span.contains(rect):
+            self.setSceneRect(span.united(rect))
+
     def _shown_bounds(self) -> QRectF:
         """What the canvas covers. Every item normally; on a project with
         more than one canvas (G12) only what the showing one draws, or the
@@ -186,6 +197,13 @@ class ContentFittedSceneRect:
                 continue
             centre = view.viewport_centre()
             target = target.united(QRectF(centre, centre))
+            # and wherever a pan took it — the whole view, not just its
+            # centre, or a pan past the margin is clamped back by half a
+            # viewport (flograph issue #111). A recorded rect, never the
+            # live one: see parked_rect.
+            parked = getattr(view, "parked_rect", None)
+            if callable(parked) and not parked().isNull():
+                target = target.united(parked())
         if target != self.sceneRect():
             # setSceneRect itself emits changed for the redrawn regions;
             # the equality check above is what stops that re-queueing us

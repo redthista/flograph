@@ -261,6 +261,9 @@ class ZoomPanGraphicsView(QGraphicsView):
         self._pan_button = Qt.MiddleButton
         self._pan_travel = 0.0
         self._space_held = False
+        # Where a deliberate pan last took the view, in scene units — see
+        # parked_rect. Null until the first pan.
+        self._parked = QRectF()
         self.centerOn(0, 0)
 
         # figure cards re-render at the new resolution once zooming pauses —
@@ -462,6 +465,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         for item in items:
             rect = rect.united(item.sceneBoundingRect())
         rect.adjust(-60, -60, 60, 60)
+        self._parked = QRectF()   # a fit replaces the last pan's spot
         self.fitInView(rect, Qt.KeepAspectRatio)
         if self.zoom > 1.5:  # don't over-zoom on a single item
             factor = 1.5 / self.zoom
@@ -512,6 +516,13 @@ class ZoomPanGraphicsView(QGraphicsView):
         if event.button() == Qt.MiddleButton and not self.navigation_locked:
             self._start_pan(event)
             return
+        if (event.button() == Qt.LeftButton and self._space_held
+                and self._press_lands_on_canvas(event.position().toPoint())):
+            # Space-drag pans by hand rather than through Qt's
+            # ScrollHandDrag, which moves the scroll bars and so stops at
+            # the span's edge (flograph issue #111)
+            self._start_pan(event)
+            return
         if event.button() == Qt.LeftButton and self._left_drag_pans(event):
             self._start_pan(event)
             return
@@ -538,7 +549,7 @@ class ZoomPanGraphicsView(QGraphicsView):
             delta = event.position() - self._pan_last
             self._pan_last = event.position()
             self._pan_travel += abs(delta.x()) + abs(delta.y())
-            self.translate(delta.x() / self.zoom, delta.y() / self.zoom)
+            self._pan_view(delta.x(), delta.y())
             event.accept()
             return
         # before the base class: the mode has to be right for the selection
@@ -556,7 +567,10 @@ class ZoomPanGraphicsView(QGraphicsView):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._panning and event.button() == self._pan_button:
             self._panning = False
-            self.unsetCursor()
+            if self._space_held:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.unsetCursor()
             if (event.button() == Qt.LeftButton
                     and self._pan_travel <= PAN_CLICK_SLOP):
                 # a click, not a pan. The press was swallowed before the base
@@ -586,7 +600,37 @@ class ZoomPanGraphicsView(QGraphicsView):
     def scroll_by(self, dx: float, dy: float) -> None:
         """Pan by viewport pixels — the same motion as a middle-drag pan,
         without needing a mouse move to carry it (edge-scroll ticks)."""
-        self.translate(dx / self.zoom, dy / self.zoom)
+        self._pan_view(dx, dy)
+
+    def parked_rect(self) -> QRectF:
+        """Where the user last panned this view to, as a scene rect — null
+        if they never have.
+
+        The content-fitted span keeps it reachable (see
+        ContentFittedSceneRect._fit_scene_rect). It is set only by a
+        deliberate pan, never by reading the live viewport inside a refit,
+        so it cannot feed back into the span the way the visible rect did
+        (the creep that docstring describes)."""
+        return QRectF(self._parked)
+
+    def _pan_view(self, dx: float, dy: float) -> None:
+        """Pan by viewport pixels, stretching the scrollable span first so
+        the move is never clamped at the edge of the flow.
+
+        flograph issue #111: with the scroll bars on, the span is fitted to
+        the flow plus a margin and the view cannot scroll outside it, so a
+        drag ran into a wall a margin past the last node. A pan is the user
+        saying where to look, so the span follows the pan — the bars are
+        the pan's servant, not its fence — and shrinks back as the view
+        returns to the flow."""
+        sx, sy = dx / self.zoom, dy / self.zoom
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        # translate(+x) slides the scene right, i.e. the view looks left
+        self._parked = visible.translated(-sx, -sy)
+        scene = self.scene()
+        if hasattr(scene, "reach_rect"):
+            scene.reach_rect(self._parked)
+        self.translate(sx, sy)
 
     def center_on_scene(self, pos) -> None:
         """Centre the view on a point or an item (centreOn accepts both),
@@ -612,6 +656,8 @@ class ZoomPanGraphicsView(QGraphicsView):
                 grown = span.united(QRectF(
                     target.x() - pad, target.y() - pad, 2 * pad, 2 * pad))
                 scene.setSceneRect(grown)
+        # a jump replaces wherever the last pan parked the view
+        self._parked = QRectF()
         self.centerOn(pos)
         # refit right away rather than after the debounce: the fit keeps
         # whatever the views are looking at, and we are looking somewhere

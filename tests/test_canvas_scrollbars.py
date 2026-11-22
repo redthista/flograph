@@ -319,3 +319,51 @@ class TestTheSpanDoesNotDriftTheView:
         scene.flush_rect_fit()
         assert scene.sceneRect().contains(parked)
         assert view.mapToScene(view.viewport().rect().center()) == parked
+
+
+class TestPanIsNotWalledIn:
+    """flograph issue #111: with the bars on, the span is fitted to the
+    flow, and a pan used to stop dead a margin past the last node. A pan
+    says where to look; the span follows it."""
+
+    def _bars_on(self, qtbot, registry):
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        v = NodeGraphView(scene)
+        v.resize(600, 400)
+        qtbot.addWidget(v)
+        v.set_scrollbars_enabled(True)
+        graph.add_node(registry.instantiate(JOIN, pos=(0, 0)))
+        scene.flush_rect_fit()
+        return scene, v
+
+    def test_a_pan_goes_past_the_margin(self, qtbot, registry):
+        scene, v = self._bars_on(qtbot, registry)
+        start = v.viewport_centre()
+        steps = int(3 * SCENE_MARGIN / 50)
+        for _ in range(steps):
+            v.scroll_by(50, 0)      # look left, 50 px at a time
+        moved = start.x() - v.viewport_centre().x()
+        assert moved == pytest.approx(steps * 50 / v.zoom, abs=2)
+
+    def test_a_refit_does_not_pull_the_view_back(self, qtbot, registry):
+        scene, v = self._bars_on(qtbot, registry)
+        for _ in range(int(3 * SCENE_MARGIN / 50)):
+            v.scroll_by(50, 0)
+        where = v.viewport_centre()
+        scene.flush_rect_fit()
+        scene._fit_scene_rect()
+        assert v.viewport_centre().x() == pytest.approx(where.x(), abs=1)
+
+    def test_panning_back_shrinks_the_span_again(self, qtbot, registry):
+        scene, v = self._bars_on(qtbot, registry)
+        fitted = scene.sceneRect().width()
+        steps = int(3 * SCENE_MARGIN / 50)
+        for _ in range(steps):
+            v.scroll_by(50, 0)
+        assert scene.sceneRect().width() > fitted
+        for _ in range(steps):
+            v.scroll_by(-50, 0)
+        scene.flush_rect_fit()
+        scene._fit_scene_rect()
+        assert scene.sceneRect().width() == pytest.approx(fitted, abs=2)

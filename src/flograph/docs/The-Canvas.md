@@ -25,6 +25,11 @@ title bar does — only the canvas between them moves.
 A **minimap** (toggle in Settings ▸ Canvas) and a status-bar resource
 monitor keep the scale of a large graph legible.
 
+**Scroll bars** (also in Settings ▸ Canvas) span the flow plus a margin, so
+a bar pixel moves about a canvas pixel. They never fence a pan in: drag, or
+scroll with the wheel, as far past the flow as you like and the bars grow to
+follow, then shrink back as you return.
+
 ## Adding and connecting nodes
 
 | Action | How |

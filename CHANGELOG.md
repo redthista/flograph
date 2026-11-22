@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Scroll bars no longer wall in a pan** | With scroll bars on, a pan stopped dead a margin past the last node. Every pan — middle-drag, left-drag, Space+drag, the wheel, edge scroll — now stretches the bars' span to reach wherever it goes, and the span shrinks back as the view returns to the flow (#111). |
 | Fix | **Action buttons move with their frame** | Dragging a frame as part of a selection left the Action Buttons inside it behind, since a button is fixed in place so a click fires it. An open frame now carries its buttons along, in the same undo step; a button selected on its own still stays put (#113). |
 | Fix | **Properties search clears on another node** | The Properties search box used to carry over to the next node picked, hiding its settings behind a search typed for the last one. Picking another node now clears it; showing the same node again keeps it (#112). |
 | Fix | **Save As names the project at once** | Saving a new project that had nothing unsaved left the title bar's project button saying "untitled" until the file was opened again; it now shows the new name straight away (#110). |
