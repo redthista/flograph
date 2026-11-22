@@ -13,7 +13,7 @@ INTRO = """\
 # Themes
 
 A theme is a small text file of colours and a few drawing choices. flograph
-ships **Dark**, **Light** and **Light Steel**; you can make your own, either
+ships **Dark**, **Light**, **Dark Slate** and **Light Steel**; you can make your own, either
 by hand or with the **Theme Customiser**, and switch between them from
 **View ▸ Theme** or **Settings ▸ General ▸ Appearance**.
 
@@ -88,6 +88,28 @@ incompatible port is dashed as well as red; a node's state shows in a light
 *and* in its position in the run. Status lights by themselves are still colour
 only (red/green): if that matters to you, the Preview and the contrast checks
 help you pick a pair that differs in lightness as well as hue.
+
+## The redesign's palette
+
+**Light** and **Dark Slate** follow the palette of the 2026 UI redesign
+(`docs/design/ui-ux-redesign-2026/`). **Dark** is the original dark theme,
+unchanged, and remains the default. The redesign names its colours by role;
+this is where each role lives in a theme file:
+
+| Redesign colour | Theme keys | Light | Dark Slate |
+| --- | --- | --- | --- |
+| App background | `ui.window`, `ui.dock_title`, `chrome.bar_bg` | `#f4f6fa` | `#202a39` / `#141922` |
+| Canvas | `canvas.CANVAS_BG` | `#e3e8ef` | `#111821` |
+| Panel | `ui.panel`, `ui.base`, `surface.base` | `#ffffff` | `#202a39` / `#1a2230` |
+| Node / card | `canvas.NODE_BODY`, `canvas.NODE_HEADER` | `#ffffff` | `#273344` |
+| Border | `ui.line`, `ui.panel_border`, `surface.border` | `#d8e0ea` | `#364559` |
+| Primary text | `ui.text`, `ui.window_text`, `canvas.NODE_TEXT` | `#1d2939` | `#e6edf7` |
+| Secondary text | `ui.mid`, `canvas.NODE_SUBTEXT`, `surface.text_dim` | `#5b6b7d` | `#a7b7cb` |
+| Accent | `ui.accent`, `ui.highlight`, `canvas.SELECTION_OUTLINE` | `#2869e8` | `#7aa9ff` |
+| Default wires | `wires.dataframe`, `wires.series` | `#4f8696` | `#60899a` |
+
+Light's canvas is a shade darker than the redesign's `#eef2f7`, which was too
+close to white for a white node to stand off it.
 
 ## Every setting
 

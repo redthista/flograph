@@ -4,7 +4,7 @@ A theme is a TOML file of named colours, grouped into sections, plus a few
 on/off style choices. Nothing here knows about Qt: `flograph.ui.theme` turns
 the active theme into a palette, a stylesheet and the canvas colours.
 
-Three themes ship, `dark.toml`, `light.toml` and `light_steel.toml`, next to this file. `dark` is
+Four themes ship next to this file: `dark.toml`, `light.toml`, `dark_slate.toml` and `light_steel.toml`. `dark` is
 the reference: it defines every key, and every other theme inherits from it
 — directly, or through `based_on` — so a theme only lists what it changes::
 
@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 HERE = Path(__file__).parent
-BUILTIN = ("light", "dark", "light_steel")      # the order Settings lists them in
+BUILTIN = ("light", "dark", "dark_slate", "light_steel")      # the order Settings lists them in
 REFERENCE = "dark"
 
 SECTIONS = ("ui", "chrome", "canvas", "status", "wires", "frame",

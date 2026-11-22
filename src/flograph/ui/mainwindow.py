@@ -464,7 +464,10 @@ class MainWindow(QMainWindow):
         self._status_timer.timeout.connect(self._status_label.clear)
         self._update_title()
         # captured before any saved layout is applied, so "reset window
-        # layout" has a real default to go back to rather than a guess
+        # layout" has a real default to go back to rather than a guess --
+        # after the tab groups have shed their repeated title bars, which
+        # would otherwise land a moment later and differ from the snapshot
+        self._dock_host.sync_titles()
         self._default_dock_state = self._dock_host.saveState()
         self._restore_window_state()
         # before the open docks are noted below: a Flo dock the last session
@@ -751,6 +754,10 @@ class MainWindow(QMainWindow):
         # default working set
         self._docks_closed_by_default = [self.navigator_dock,
                                          self.selection_dock, self.flo_dock]
+        # a tab group is named by its tabs; drop the title bar Qt would
+        # repeat under them (see DockHost.sync_titles)
+        for dock in self._model_docks:
+            host.watch(dock)
         # which of them to restore on the way back from a dashboard page --
         # switching pages must not reopen what someone deliberately closed
         self._docks_open_on_model_page = [
