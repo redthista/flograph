@@ -63,6 +63,28 @@ class _ElidedLabel(QLabel):
         painter.end()
 
 
+def idle_text(record) -> str:
+    """The Inspector's words while nothing is selected: how to use it, and
+    the last run as the engine recorded it (engine.runstats.RunRecord)."""
+    lines = ["Select a node to preview its output here."]
+    if record is not None:
+        import time as _time
+        ran = len(getattr(record, "nodes", ()) or ())
+        failed = sum(1 for n in record.nodes if n.outcome == "failed")
+        when = _time.strftime("%H:%M", _time.localtime(record.when))
+        took = f"{record.wall_time:.1f} s"
+        if record.cancelled:
+            verdict = "stopped before it finished"
+        elif failed:
+            verdict = (f"<b>{failed} node{'s' if failed != 1 else ''} "
+                       f"failed</b> — see the Log")
+        else:
+            verdict = "no errors"
+        lines.append(f"Last run at {when}: {ran} node"
+                     f"{'s' if ran != 1 else ''} in {took}, {verdict}.")
+    return "<br>".join(lines)
+
+
 class InspectorPanel(QWidget):
     #: Kept clear between the last tab and the start of the info line.
     INFO_GAP = 12
@@ -82,7 +104,7 @@ class InspectorPanel(QWidget):
         self._meta: dict[str, str] = {}
         self._watched_bar: Optional[QTabBar] = None
 
-        self._header = _ElidedLabel("Nothing selected")
+        self._header = _ElidedLabel("")
         _theme.set_qss(self._header, "font-size: 8pt;")
         self._stale = QLabel("STALE — re-run to refresh")
         _theme.set_qss(self._stale, 
@@ -114,11 +136,26 @@ class InspectorPanel(QWidget):
         self._strip = QWidget()
         self._strip.setFixedHeight(self._info.sizeHint().height() + 3)
 
+        # Shown instead of the empty tabs while nothing is selected: what to
+        # do, and how the last run went -- a compact summary rather than a
+        # panel-sized blank. Only what the engine recorded; nothing is
+        # inferred or simulated.
+        self._idle = QLabel()
+        self._idle.setWordWrap(True)
+        self._idle.setTextFormat(Qt.RichText)
+        self._idle.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self._idle.setContentsMargins(8, 6, 8, 6)
+        _theme.set_qss(self._idle, "color: palette(mid);")
+        self._last_run = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._strip)
+        layout.addWidget(self._idle, 1)
         layout.addWidget(self._tabs, 1)
+        engine.run_recorded.connect(self._on_run_recorded)
+        self._show_idle(True)
 
         engine.node_succeeded.connect(self._on_node_ran)
         engine.node_failed.connect(self._on_node_ran)
@@ -253,6 +290,19 @@ class InspectorPanel(QWidget):
 
     # -------------------------------------------------------------- refresh
 
+    # ----------------------------------------------------------------- idle
+
+    def _on_run_recorded(self, record) -> None:
+        self._last_run = record
+        if self._idle.isVisible() or self._node_id is None:
+            self._idle.setText(idle_text(record))
+
+    def _show_idle(self, idle: bool) -> None:
+        if idle:
+            self._idle.setText(idle_text(self._last_run))
+        self._idle.setVisible(idle)
+        self._tabs.setVisible(not idle)
+
     def _clear_tabs(self) -> None:
         """Drop every page, deleting the widgets rather than just removing the
         tabs.
@@ -276,10 +326,13 @@ class InspectorPanel(QWidget):
         self._meta = {}
         self._label = self._timing = ""
         if self._node_id is None or self._node_id not in self._graph.nodes:
-            self._header.setText("Nothing selected")
+            # the idle text below says it, with what to do about it
+            self._header.setText("")
             self._stale.hide()
+            self._show_idle(True)
             self._place_info()
             return
+        self._show_idle(False)
         node = self._graph.node(self._node_id)
         entry = self._engine.cache.get(self._node_id)
         self._stale.setVisible(node.dirty and entry is not None)

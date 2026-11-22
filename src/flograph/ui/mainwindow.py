@@ -740,7 +740,9 @@ class MainWindow(QMainWindow):
         self.inspector_dock.setObjectName("dock_inspector")
         self.inspector_dock.setWidget(self.inspector_panel)
         host.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
-        host.resizeDocks([self.inspector_dock], [260], Qt.Vertical)
+        # enough for a data preview; when idle it says so in two lines, so
+        # the canvas above gets the room rather than a blank panel
+        host.resizeDocks([self.inspector_dock], [200], Qt.Vertical)
 
         # every dock that belongs to the model canvas alone, in the order a
         # reset should put them back
