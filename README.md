@@ -425,7 +425,9 @@ document, in a real browser, refreshed in place when the flow re-runs.
 As-of Stamp.
 
 **Automation** — Notify, Shell Command, Wait for File, File Operations
-(copy, move, rename, zip or delete, with a dry run).
+(copy, move, rename, zip or delete, with a dry run), and **Draft Emails**:
+one new email per table row in the default email app (Outlook on most Windows
+PCs), ready to read and send; flograph sends nothing itself.
 
 **Scripting** — Python Script, **Run Flow** and **Flow Output** for running a
 child project and returning a named value, plus Node Template and Control

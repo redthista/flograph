@@ -102,7 +102,10 @@ worst rows — see [[Conditional-Formatting]].
 Variables, As-of Stamp.
 
 **Automation** — Notify, Shell Command, Wait for File, File Operations
-(copy, move, rename, zip or delete; **Dry run** to check first).
+(copy, move, rename, zip or delete; **Dry run** to check first), and
+**Draft Emails**, which opens one new email per row of a table (to, cc, bcc,
+subject, body) in your default email app for you to read and send — see
+example 43.
 
 **Scripting** — Python Script, **Run Flow** and **Flow Output** for running a
 child project and returning a named value, plus Node Template and Control

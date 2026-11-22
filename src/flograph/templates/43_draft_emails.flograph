@@ -1,0 +1,140 @@
+{
+ "flograph_version": "0.1.31",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "t43_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     -380
+    ],
+    "params": {
+     "text": "# Draft Emails\nOne email per row, opened in your **default email app** (Outlook on most Windows PCs) for you to read and send. flograph sends nothing itself.\n\n**Customers** is the data; **Write the emails** fills a subject and body template from each row; **Draft Emails** opens one draft per row. It is set to **Preview only** here, so opening this example opens nothing: switch *When it runs* to **Open the drafts** and run it.",
+     "width": 1300,
+     "height": 200
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t43_customers",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"name\", \"type\": \"text\"}, {\"name\": \"email\", \"type\": \"text\"}, {\"name\": \"cc\", \"type\": \"text\"}, {\"name\": \"invoice\", \"type\": \"text\"}, {\"name\": \"amount_due\", \"type\": \"number\"}, {\"name\": \"due_date\", \"type\": \"date\"}], \"rows\": [[\"Alice\", \"alice@example.com\", \"\", \"INV-1001\", 120, \"2026-12-01\"], [\"Bob\", \"bob@example.com\", \"accounts@example.com\", \"INV-1002\", 75.5, \"2026-12-05\"], [\"Carol\", \"carol@example.com; carol.home@example.com\", \"\", \"INV-1003\", 310, \"2026-12-10\"]]}",
+     "width": 560,
+     "height": 240
+    },
+    "code": null,
+    "label": "Customers"
+   },
+   {
+    "id": "t43_write",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     800,
+     60
+    ],
+    "params": {},
+    "code": "\"\"\"Write the emails\n\nOne email per customer: fills the Subject and Body templates from each row.\nAny column can go in braces, e.g. {name} or {amount_due}. The cc column is\npassed straight through.\n\"\"\"\nNODE = {\n    \"label\": \"Write the emails\",\n    \"category\": \"Scripting\",\n    \"version\": \"1.0\",\n    \"inputs\": [(\"customers\", \"dataframe\")],\n    \"outputs\": [(\"emails\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"subject\", \"type\": \"string\", \"label\": \"Subject\",\n     \"default\": \"Reminder: invoice {invoice} is due {due_date}\"},\n    {\"name\": \"body\", \"type\": \"text\", \"label\": \"Body\",\n     \"default\": \"Hi {name},\\n\\nJust a reminder that invoice {invoice} for \"\n                \"\\u00a3{amount_due:.2f} is due on {due_date}.\\n\\n\"\n                \"Thanks,\\nAccounts\"},\n]\n\n\ndef run(ctx, customers):\n    import pandas as pd\n\n    rows = []\n    for record in customers.to_dict(\"records\"):\n        values = {k: (\"\" if pd.isna(v) else v) for k, v in record.items()}\n        if hasattr(values.get(\"due_date\"), \"strftime\"):\n            values[\"due_date\"] = values[\"due_date\"].strftime(\"%d %b %Y\")\n        rows.append({\n            \"to\": values.get(\"email\", \"\"),\n            \"cc\": values.get(\"cc\", \"\"),\n            \"subject\": ctx.params[\"subject\"].format_map(values),\n            \"body\": ctx.params[\"body\"].format_map(values),\n        })\n    ctx.log(f\"wrote {len(rows)} email(s)\")\n    return {\"emails\": pd.DataFrame(rows, columns=[\"to\", \"cc\", \"subject\", \"body\"])}\n",
+    "label": null
+   },
+   {
+    "id": "t43_drafts",
+    "type": "flograph.automation.draft_emails",
+    "pos": [
+     1100,
+     60
+    ],
+    "params": {
+     "mode": "Preview only"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "t43_show",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1400,
+     -60
+    ],
+    "params": {
+     "width": 560,
+     "height": 300
+    },
+    "code": null,
+    "label": "Drafts"
+   },
+   {
+    "id": "t43_how",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     360
+    ],
+    "params": {
+     "text": "Draft Emails reads columns named **to**, **cc**, **bcc**, **subject** and **body**. Several addresses in one cell go in with `;` or `,` (Carol's row). **Most emails** (20) stops a big table opening a window per row. Edit the templates in *Write the emails*: any column in braces, like `{invoice}`.\n\n`mailto:` can't attach files.",
+     "width": 1300,
+     "height": 120
+    },
+    "code": null,
+    "label": null
+   }
+  ],
+  "connections": [
+   {
+    "id": "c43_1",
+    "src": [
+     "t43_customers",
+     "table"
+    ],
+    "dst": [
+     "t43_write",
+     "customers"
+    ]
+   },
+   {
+    "id": "c43_2",
+    "src": [
+     "t43_write",
+     "emails"
+    ],
+    "dst": [
+     "t43_drafts",
+     "table"
+    ]
+   },
+   {
+    "id": "c43_3",
+    "src": [
+     "t43_drafts",
+     "drafts"
+    ],
+    "dst": [
+     "t43_show",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "t43_f",
+    "title": "Customers → drafts",
+    "rect": [
+     -40,
+     -130,
+     2040,
+     660
+    ],
+    "color": "#2f4a3f"
+   }
+  ],
+  "pages": []
+ }
+}
