@@ -404,6 +404,9 @@ class SheetModel(QAbstractTableModel):
         moved on to.
         """
         parsed = parse_sheet(sheet)
+        # the helper tables on offer aren't part of the sheet's saved
+        # form, so a newly wired helper changes nothing the check below sees
+        self._sheet.helpers = [dict(h) for h in parsed.helpers]
         if sheet_to_dict(parsed) == sheet_to_dict(self._sheet):
             return
         # folds are view state: a group over the same rows stays folded
@@ -1183,16 +1186,35 @@ class SheetModel(QAbstractTableModel):
             return
         self._structural(lambda sheet: sheet.move_columns(indices, to))
 
-    def set_column_choices(self, col: int, choices, strict: bool) -> None:
-        """Give a column a dropdown list (empty to remove it)."""
+    def column_choice_source(self, col: int) -> Optional[dict]:
+        """Where a column's dropdown list is read from — {"input", "column"}
+        of a helper table — or None for a typed list."""
+        if 0 <= col < self._sheet.n_cols:
+            source = self._sheet.columns[col].choices_from
+            return dict(source) if source else None
+        return None
+
+    def helper_tables(self) -> list[dict]:
+        """The helper tables wired into the node: [{"input", "label",
+        "columns"}], in port order. Empty for a grid with none."""
+        return [dict(h) for h in self._sheet.helpers]
+
+    def set_column_choices(self, col: int, choices, strict: bool,
+                           source: Optional[dict] = None) -> None:
+        """Give a column a dropdown list (empty to remove it). With
+        `source`, the list is read from that helper table's column, and
+        `choices` are the values it holds now."""
         if self._read_only or not 0 <= col < self._sheet.n_cols:
             return
+        from flograph.core.sheet.choice_sources import clean_source
         choices = [str(c).strip() for c in choices if str(c).strip()]
-        strict = bool(strict) and bool(choices)
+        source = clean_source(source)
+        strict = bool(strict) and bool(choices or source)
 
         def mutate(sheet: Sheet) -> None:
             sheet.columns[col].choices = choices
             sheet.columns[col].strict = strict
+            sheet.columns[col].choices_from = source
 
         self._structural(mutate)
 

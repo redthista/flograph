@@ -1845,6 +1845,7 @@ class MainWindow(QMainWindow):
         self.scene.page_link_clicked.connect(self._follow_page_link)
         self.scene.slicer_changed.connect(self._on_slicer_changed)
         self.scene.sheet_submitted.connect(self._on_dashboard_sheet_edited)
+        self.scene.helpers_run_requested.connect(self.engine.run_targets)
         self.scene.control_changed.connect(self._on_control_changed)
         self.scene.panel_setup_requested.connect(self._set_up_panel)
         self.scene.view_changed.connect(self._on_view_changed)
@@ -2040,14 +2041,43 @@ class MainWindow(QMainWindow):
         input-owned columns refreshed, the user's own columns (formula
         sources intact) carried over."""
         node = self.graph.nodes.get(node_id)
-        if node is None or card_kind(node) != "grid":
+        if node is None:
+            return
+        if card_kind(node) != "grid":
+            self._refresh_helper_readers(node_id)
             return
         if not node.canvas_preview_enabled:
             return
         item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        # a table with helper tables wired in re-reads its dropdown lists
+        # from them (flograph issue #108) — linked or not, so this goes
+        # through the card's own source, which merges and reads helpers
+        from flograph.engine.introspect import table_helpers
+        if table_helpers(self.graph, self.engine.cache, node_id)[1]:
+            item.refresh_table_link()
+            return
         merged = self._merged_linked_sheet(node_id)
-        if item is not None and merged is not None:
+        if merged is not None:
             item.show_linked_sheet(merged)
+
+    def _refresh_helper_readers(self, node_id: str) -> None:
+        """A node feeding a Table's helper port finished: the Table's
+        dropdown lists read from it straight away, without waiting for the
+        Table itself to run (flograph issue #108). Display only — the
+        lists are re-read from the cache, nothing is written to the node."""
+        from flograph.core.sheet.choice_sources import helper_ports
+        for conn in self.graph.out_connections(node_id):
+            if not helper_ports([conn.dst_port]):
+                continue
+            reader = self.graph.nodes.get(conn.dst_node)
+            if (reader is None or card_kind(reader) != "grid"
+                    or not reader.canvas_preview_enabled):
+                continue
+            item = self.scene.node_items.get(conn.dst_node)
+            if item is not None:
+                item.refresh_table_link()
 
     def _merged_linked_sheet(self, node_id: str):
         """The linked-refresh merge of a Table node's cached input with its

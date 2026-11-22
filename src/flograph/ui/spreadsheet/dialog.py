@@ -91,6 +91,18 @@ class _DialogHost(SheetHost):
     def undo_stack(self):
         return self._dialog.undo_stack
 
+    def helper_state(self) -> tuple:
+        return self._inner.helper_state()
+
+    def can_run_helpers(self) -> bool:
+        return self._inner.can_run_helpers()
+
+    def run_helpers(self) -> bool:
+        return self._inner.run_helpers()
+
+    def helpers_busy(self) -> bool:
+        return self._inner.helpers_busy()
+
     def rules(self) -> str:
         return self._inner.rules()
 

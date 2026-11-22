@@ -323,6 +323,30 @@ Typing still works. **Fill From Column** starts the list from the values
 already there. Tick **Only allow values on the list** and anything else turns
 red, like a word in a number column.
 
+### Lists from other tables
+
+A list can come from another table instead of being typed. At the bottom of
+the Table node is an empty **helper** port: wire any table into it — a list of
+regions, of products, of people — and it becomes a port of its own (`in2`)
+with a fresh empty one below, as on Concatenate. Wire in as many helper
+tables as the sheet needs.
+
+Then in **Dropdown List…** set **Values from** to the helper and pick its
+column. The list is that column's distinct values, blanks left out, in the
+helper's own order (so a column sorted *by list* follows it), and it fills
+the moment you pick the column. A helper that hasn't run yet has no columns
+to pick from: **Run Helpers** in the dialog runs just the helpers (never the
+Table itself) and fills them in, without closing the dialog or the editor.
+Change the helper and run, and the list follows — the Table needn't run for
+its lists to catch up. **Only allow values on the list** works
+as for a typed list.
+
+Helpers feed only the lists: what the Table sends on is exactly its own
+cells. Because a helper is a wire, it runs before the Table, and a change to
+it re-runs the Table — no list ever reads a table the flow hasn't worked out
+yet. Unwire a helper and its lists keep the values they last showed (one
+Ctrl+Z puts the wire back). A list shows at most 1,000 values.
+
 ## Data validation
 
 **Data ▸ Validation…** (or right-click a cell or a column header) says what a

@@ -26,8 +26,10 @@ def env(qtbot, registry):
 
 def test_table_is_registered_with_optional_input_and_one_output(registry):
     spec = registry.get("flograph.io.table")
-    assert [p.name for p in spec.inputs] == ["table"]
+    # "helper" is the empty slot helper tables grow from (flograph issue #108)
+    assert [p.name for p in spec.inputs] == ["table", "helper"]
     assert spec.inputs[0].optional   # runs fine unconnected
+    assert spec.inputs[1].spare
     assert [p.name for p in spec.outputs] == ["table"]
     assert spec.param("data") is not None
     assert spec.param("width") is not None
@@ -43,7 +45,7 @@ def test_table_item_embeds_a_grid_widget(env, registry):
     assert item._table_widget.model().rowCount() == 2
     assert item._table_widget.model().columnCount() == 2
     assert list(item.output_ports) == ["table"]
-    assert list(item.input_ports) == ["table"]
+    assert list(item.input_ports) == ["table", "helper"]
 
 
 def test_table_runs_and_emits_dataframe(qtbot, env, registry):
@@ -485,3 +487,203 @@ def test_table_linked_run_evaluates_user_formula_columns(registry):
     assert list(out.columns) == ["qty", "double"]
     assert out["qty"].tolist() == [3, 5, 7]     # refreshed from input
     assert out["double"].tolist() == [6, 10, 14]  # formula filled down
+
+
+# ------------------------------------------- dropdown lists from helper tables
+# flograph issue #108: wire any tables into the Table's empty "helper" port
+# (it grows like Concatenate) and a column's dropdown list can read one of
+# their columns.
+
+def _helper_source(graph, registry, rows):
+    """A Table node standing in for a helper table, holding `rows`."""
+    helper = graph.add_node(registry.instantiate("flograph.io.table"))
+    graph.set_param(helper.id, "data", json.dumps({
+        "columns": ["Region", "Code"], "rows": rows}))
+    return helper
+
+
+def _run(qtbot, graph):
+    from flograph.engine import ExecutionEngine
+    engine = ExecutionEngine(graph)
+    with qtbot.waitSignal(engine.run_finished, timeout=5000) as blocker:
+        engine.run_all()
+    assert blocker.args[0]
+    return engine
+
+
+def test_helper_tables_grow_ports_like_concatenate(env, registry):
+    graph, stack, scene = env
+    table = graph.add_node(registry.instantiate("flograph.io.table"))
+    a = _helper_source(graph, registry, [["North", "1"]])
+    b = _helper_source(graph, registry, [["South", "2"]])
+    graph.connect(a.id, "table", table.id, "helper")
+    graph.connect(b.id, "table", table.id, "helper")
+    assert [p.name for p in graph.nodes[table.id].spec.inputs] == [
+        "table", "in2", "in3", "helper"]
+    assert list(scene.node_items[table.id].input_ports) == [
+        "table", "in2", "in3", "helper"]
+
+
+def test_dropdown_list_reads_a_helper_column(qtbot, env, registry):
+    graph, stack, scene = env
+    table = graph.add_node(registry.instantiate("flograph.io.table"))
+    helper = _helper_source(graph, registry, [
+        ["North", "1"], ["south", "2"], ["North", "3"], ["", "4"],
+        ["East", "5"]])
+    graph.connect(helper.id, "table", table.id, "helper")
+    graph.set_param(table.id, "data", json.dumps({
+        "columns": [{"name": "Where", "type": "text", "strict": True,
+                     "choices_from": {"input": "in2", "column": "Region"}}],
+        "rows": [["North"], ["Mars"]]}))
+    engine = _run(qtbot, graph)
+
+    from flograph.ui.spreadsheet.binding import shown_sheet
+    from flograph.ui.spreadsheet.model import SheetModel
+    model = SheetModel(shown_sheet(graph, engine.cache, table.id))
+    # distinct, blanks dropped, in the helper's own order
+    assert model.column_choices(0) == (["North", "south", "East"], True)
+    assert model.column_choice_source(0) == {"input": "in2",
+                                             "column": "Region"}
+    assert model.helper_tables() == [{
+        "input": "in2", "label": "Table", "columns": ["Region", "Code"]}]
+    assert model.cell_problem(0, 0) is None
+    assert model.cell_problem(1, 0)          # strict: Mars isn't listed
+
+    # the flow's table is untouched by helpers
+    out = engine.cache.outputs_for(table.id)["table"]
+    assert out["Where"].tolist() == ["North", "Mars"]
+
+
+def test_helper_list_follows_the_helper_and_survives_unwiring(
+        qtbot, env, registry):
+    graph, stack, scene = env
+    table = graph.add_node(registry.instantiate("flograph.io.table"))
+    helper = _helper_source(graph, registry, [["North", "1"]])
+    graph.connect(helper.id, "table", table.id, "helper")
+    item = scene.node_items[table.id]
+    item._table_model.set_column_choices(
+        0, [], strict=False, source={"input": "in2", "column": "Region"})
+    stored = json.loads(graph.nodes[table.id].params["data"])
+    assert stored["columns"][0]["choices_from"] == {"input": "in2",
+                                                    "column": "Region"}
+
+    engine = _run(qtbot, graph)
+    scene.output_cache = engine.cache
+    item.refresh_table_link()
+    assert item._table_model.column_choices(0)[0] == ["North"]
+
+    graph.set_param(helper.id, "data", json.dumps({
+        "columns": ["Region"], "rows": [["West"], ["North"]]}))
+    scene.output_cache = _run(qtbot, graph).cache
+    item.refresh_table_link()
+    assert item._table_model.column_choices(0)[0] == ["West", "North"]
+
+    # unwired: the list keeps what it last read rather than vanishing
+    scene.delete_items([], [c.id for c in graph.connections.values()
+                            if c.dst_node == table.id], [], confirm=False)
+    item.refresh_table_link()
+    assert item._table_model.column_choices(0)[0] == ["West", "North"]
+    assert item._table_model.helper_tables() == []
+    # one undo brings the wire back and the snapshot goes with it
+    stack.undo()
+    assert graph.input_connection(table.id, "in2") is not None
+
+
+def test_choice_source_round_trips_and_finds_a_moved_column():
+    from flograph.core.sheet import parse_sheet, sheet_to_dict
+    from flograph.core.sheet.choice_sources import resolve
+
+    sheet = parse_sheet({"columns": [
+        {"name": "A", "choices": ["x"], "strict": True,
+         "choices_from": {"input": "in2", "column": "Region"}}],
+        "rows": [[""]]})
+    again = parse_sheet(sheet_to_dict(sheet))
+    assert again.columns[0].choices_from == {"input": "in2",
+                                             "column": "Region"}
+    assert again.columns[0].strict and again.columns[0].choices == ["x"]
+    assert again.copy().columns[0].choices_from == {"input": "in2",
+                                                    "column": "Region"}
+
+    # rewired into another port: the column is found by name
+    frame = pd.DataFrame({"Region": ["a", None, "b", "a", 3.0]})
+    resolve(again, {"in5": frame})
+    assert again.columns[0].choices == ["a", "b", "3"]
+    assert again.helpers == [{"input": "in5", "label": "in5",
+                              "columns": ["Region"]}]
+    assert "helpers" not in sheet_to_dict(again)
+
+
+def test_dropdown_dialog_offers_helpers(qtbot, env, registry):
+    from flograph.ui.spreadsheet.dropdown import DropdownListDialog
+    from flograph.ui.spreadsheet.model import SheetModel
+    from flograph.ui.spreadsheet.view import SpreadsheetView
+
+    sheet = {"columns": [{"name": "A"}], "rows": [[""]]}
+    from flograph.core.sheet import parse_sheet
+    parsed = parse_sheet(sheet)
+    parsed.helpers = [{"input": "in2", "label": "Regions",
+                       "columns": ["Region", "Code"]}]
+    model = SheetModel(parsed)
+    view = SpreadsheetView()
+    qtbot.addWidget(view)
+    view.setModel(model)
+    dialog = DropdownListDialog(view, 0)
+    qtbot.addWidget(dialog)
+    assert dialog.source() is None
+    dialog.edit.setPlainText("typed")
+    dialog.from_box.setCurrentIndex(dialog.from_box.findData("in2"))
+    assert dialog.source() == {"input": "in2", "column": "Region"}
+    assert dialog.edit.isReadOnly()
+    dialog.column_box.setCurrentText("Code")
+    assert dialog.source() == {"input": "in2", "column": "Code"}
+    # back to typed: what was typed comes back
+    dialog.from_box.setCurrentIndex(0)
+    assert dialog.source() is None
+    assert dialog.edit.toPlainText() == "typed"
+
+
+def test_dropdown_dialog_runs_helpers_and_fills_at_once(qtbot, env, registry):
+    """A helper that hasn't run offers Run Helpers; it runs only the helper,
+    and the dialog fills its columns and values without closing — from the
+    card and from the full editor alike (flograph issue #108)."""
+    from flograph.engine import ExecutionEngine
+    from flograph.core.node import NodeStatus
+    from flograph.ui.spreadsheet.dialog import SheetEditorDialog
+    from flograph.ui.spreadsheet.dropdown import DropdownListDialog
+
+    graph, stack, scene = env
+    table = graph.add_node(registry.instantiate("flograph.io.table"))
+    helper = _helper_source(graph, registry, [["North", "1"], ["South", "2"]])
+    graph.connect(helper.id, "table", table.id, "helper")
+    engine = ExecutionEngine(graph)
+    scene.output_cache = engine.cache
+    scene.helpers_run_requested.connect(engine.run_targets)
+    item = scene.node_items[table.id]
+    item.refresh_table_link()
+
+    # the full editor, over the card's host, as the card opens it
+    editor = SheetEditorDialog(item._table_source(), host=item._table_widget.host)
+    qtbot.addWidget(editor)
+    dialog = DropdownListDialog(editor.view, 0)
+    qtbot.addWidget(dialog)
+    dialog.from_box.setCurrentIndex(dialog.from_box.findData("in2"))
+    assert dialog.column_box.count() == 0          # not run: no columns yet
+    assert dialog.run_button.isVisibleTo(dialog)
+    assert "hasn't run" in dialog.hint.text()
+
+    with qtbot.waitSignal(engine.run_finished, timeout=5000):
+        dialog.run_button.click()
+    qtbot.waitUntil(lambda: not dialog._poll.isActive(), timeout=3000)
+    assert dialog.source() == {"input": "in2", "column": "Region"}
+    assert dialog.values() == ["North", "South"]
+    # only the helper ran; the table waits for its own run
+    assert graph.nodes[helper.id].status == NodeStatus.DONE
+    assert engine.cache.get(table.id) is None
+
+    # a different column fills straight away, no OK needed
+    dialog.column_box.setCurrentText("Code")
+    assert dialog.values() == ["1", "2"]
+    dialog.accept()
+    editor.model.set_column_choices(0, dialog.values(), False,
+                                    dialog.source())
+    assert editor.model.column_choices(0)[0] == ["1", "2"]

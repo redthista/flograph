@@ -972,7 +972,9 @@ class TileItem(QGraphicsObject):
 
         return NodeSheetHost(self._graph, stack, node_id,
                              on_submitted=submitted, registry_fn=registry,
-                             tile_fn=tile_place)
+                             tile_fn=tile_place,
+                             cache_fn=lambda: self._engine.cache,
+                             run_fn=self._engine.run_targets)
 
     def _commit_sheet_data(self, data: dict) -> None:
         """One undo step per edit, then re-run so the visuals beside the

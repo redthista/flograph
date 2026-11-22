@@ -222,6 +222,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                                         # a Note's `page:` link text
     slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
     sheet_submitted = Signal(str)       # node_id — a Table's held edits went in
+    helpers_run_requested = Signal(list)  # node_ids — a Table's helper tables
     control_changed = Signal(str)       # node_id — an input control was moved
     panel_setup_requested = Signal(str)  # node_id — an Input Panel's Set Up
     view_changed = Signal(str)          # node_id — an interactive web view
@@ -2301,12 +2302,18 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
 
         from ..commands import SetParamCommand
         kept = []
+        cut, doomed = set(conn_ids), set(node_ids)
         for node_id, data in orphaned_table_sheets(
                 self.graph, self.output_cache,
                 conn_ids=conn_ids, node_ids=node_ids):
+            link = self.graph.input_connection(node_id, "table")
             self.undo_stack.push(SetParamCommand(
                 self.graph, node_id, "data", data, merge=False))
-            kept.append(node_id)
+            # only a cut link is news: a helper going only keeps the
+            # dropdown values it fed (flograph issue #108)
+            if link is not None and (link.id in cut
+                                     or link.src_node in doomed):
+                kept.append(node_id)
         if kept:
             # rewriting someone's sheet behind their back deserves saying so
             self.tables_kept.emit(kept)

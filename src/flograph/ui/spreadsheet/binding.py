@@ -46,15 +46,27 @@ def shown_sheet(graph, cache, node_id: str):
     node = graph.nodes.get(node_id)
     if node is None:
         return None
-    draft = draft_of(node)
-    if draft:
-        return draft
-    if cache is not None:
+    sheet = draft_of(node)
+    if not sheet and cache is not None:
         from flograph.engine.introspect import merged_linked_sheet
-        merged = merged_linked_sheet(graph, cache, node_id)
-        if merged is not None:
-            return merged
-    return node.params.get("data")
+        sheet = merged_linked_sheet(graph, cache, node_id)
+    if not sheet:
+        sheet = node.params.get("data")
+    return _with_helpers(graph, cache, node_id, sheet)
+
+
+def _with_helpers(graph, cache, node_id: str, sheet):
+    """`sheet` with its dropdown lists read from the helper tables wired
+    into the node, and those helpers listed for the Dropdown List dialog.
+    Untouched (as given) when the node has no helper wired and no list
+    reads from one — the common case costs nothing."""
+    from flograph.core.sheet import parse_sheet
+    from flograph.core.sheet.choice_sources import resolve
+    from flograph.engine.introspect import table_helpers
+    frames, helpers = table_helpers(graph, cache, node_id)
+    if not helpers:
+        return sheet
+    return resolve(parse_sheet(sheet).copy(), frames, helpers)
 
 
 def pending_changes(node) -> Optional[int]:
@@ -219,6 +231,29 @@ class SheetHost:
     def can_open_editor(self) -> bool:
         return False
 
+    # Helper tables (flograph issue #108). Asked fresh each time rather than
+    # read off the grid's sheet, because the full editor works on a copy of
+    # the sheet taken when it opened — a helper run meanwhile is news to it.
+
+    def helper_state(self) -> tuple:
+        """``({port: frame}, [{"input", "label", "columns"}])`` for the
+        helper tables wired into the node now: the frames in memory, and
+        every wired helper whether or not it has run."""
+        return {}, []
+
+    def can_run_helpers(self) -> bool:
+        """Can this grid run its helper tables on request?"""
+        return False
+
+    def run_helpers(self) -> bool:
+        """Run the nodes that feed the helper ports — those alone, never the
+        table itself. True when a run was asked for."""
+        return False
+
+    def helpers_busy(self) -> bool:
+        """Is a helper's node still queued or running?"""
+        return False
+
     def rules(self) -> str:
         """The conditional-formatting rules text, or "" (none)."""
         return ""
@@ -334,7 +369,11 @@ class NodeSheetHost(SheetHost):
 
     def __init__(self, graph, stack_fn, node_id: str, on_submitted=None,
                  linked_fn=None, open_editor_fn=None, registry_fn=None,
-                 tile_fn=None) -> None:
+                 tile_fn=None, cache_fn=None, run_fn=None) -> None:
+        # cache_fn: the engine's output cache (or None); run_fn(node_ids):
+        # asks the window's engine to run those nodes
+        self._cache_fn = cache_fn
+        self._run_fn = run_fn
         self._registry_fn = registry_fn
         self._tile_fn = tile_fn
         self._graph_ref = graph
@@ -390,6 +429,42 @@ class NodeSheetHost(SheetHost):
 
     def can_open_editor(self) -> bool:
         return self._open_editor_fn is not None
+
+    def helper_state(self) -> tuple:
+        if self._graph is None or self._node() is None:
+            return {}, []
+        from flograph.engine.introspect import table_helpers
+        cache = self._cache_fn() if self._cache_fn is not None else None
+        return table_helpers(self._graph, cache, self._node_id)
+
+    def _helper_nodes(self) -> list[str]:
+        graph, node = self._graph, self._node()
+        if graph is None or node is None:
+            return []
+        from flograph.core.sheet.choice_sources import helper_ports
+        ids = []
+        for port in helper_ports(p.name for p in node.spec.inputs):
+            conn = graph.input_connection(self._node_id, port)
+            if conn is not None and conn.src_node not in ids:
+                ids.append(conn.src_node)
+        return ids
+
+    def can_run_helpers(self) -> bool:
+        return self._run_fn is not None and bool(self._helper_nodes())
+
+    def run_helpers(self) -> bool:
+        ids = self._helper_nodes()
+        if self._run_fn is None or not ids:
+            return False
+        self._run_fn(ids)
+        return True
+
+    def helpers_busy(self) -> bool:
+        from flograph.core.node import NodeStatus
+        graph = self._graph
+        return any(graph.nodes[nid].status in (NodeStatus.QUEUED,
+                                               NodeStatus.RUNNING)
+                   for nid in self._helper_nodes() if nid in graph.nodes)
 
     def rules(self) -> str:
         node = self._node()

@@ -51,6 +51,14 @@ message rather than turning millions of rows into spreadsheet cells, which
 costs gigabytes of memory before anything is drawn — use Show Table to look
 at data that size, or filter it down before the grid.
 
+Dropdown lists from other tables: wire any table into the empty "helper"
+port at the bottom and another empty port appears below it, as on
+Concatenate — as many helper tables as you like. Then Dropdown List… on a
+column offers "Values from a helper table": pick the helper and its column
+and the list is that column's distinct values, kept up to date as the
+helper changes. Helpers feed only the lists; they never change the table
+that flows on.
+
 Disconnect the input and the contents stay — whatever the grid was showing
 is written into the table as your own cells, so the node carries the data
 from there on. Undo puts the wire and the old sheet back together. Right-
@@ -61,9 +69,15 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
-    "version": "1.5",
+    "version": "1.6",
     "card": "grid",
-    "inputs": [("table", "dataframe", {"optional": True})],
+    "inputs": [
+        ("table", "dataframe", {"optional": True}),
+        # the always-empty slot at the bottom: wiring a helper table in adds
+        # a permanent port (in2, in3, ...) and a fresh empty slot appears
+        # below it, as on Concatenate. Helpers feed dropdown lists only.
+        ("helper", "dataframe", {"optional": True, "spare": True}),
+    ],
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
@@ -75,7 +89,8 @@ PARAMS = [
                       "hidden_rows", "row_heights", "columns.*.width",
                       "columns.*.format",
                       "columns.*.total", "columns.*.choices",
-                      "columns.*.strict", "columns.*.validation",
+                      "columns.*.strict", "columns.*.choices_from",
+                      "columns.*.validation",
                       "columns.*.hidden"],
      "default": json.dumps({
          "version": 2,
@@ -132,7 +147,11 @@ def _coerce_auto(values):
     return numeric
 
 
-def run(ctx, table=None):
+def run(ctx, table=None, **helpers):
+    # Helper tables (in2, in3, ...) only fill dropdown lists, which the grid
+    # reads from the cache when it is shown. They are wires so that they
+    # run first and a change to one re-runs this table; nothing here uses
+    # their values.
     import pandas as pd
     from flograph.core.sheet import (cell_name, evaluate_sheet, format_value,
                                      parse_sheet, sheet_from_dataframe)

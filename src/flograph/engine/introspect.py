@@ -181,6 +181,41 @@ def linked_table_source(graph: Graph, cache: OutputCache, node_id: str):
     return value if hasattr(value, "itertuples") else None
 
 
+def table_helpers(graph: Graph, cache: "OutputCache | None",
+                  node_id: str) -> "tuple[dict, list]":
+    """The helper tables wired into a Table node, for its dropdown lists
+    (core/sheet/choice_sources.py): ``({port: frame}, [{"input", "label",
+    "columns"}])``.
+
+    The frames are only those already in memory — never read back from
+    disk, since this runs every time a grid is drawn. A spilled helper is
+    still listed (with the columns its cache entry recorded), and a list
+    reading from it keeps the values it last read."""
+    from flograph.core.sheet.choice_sources import helper_ports
+    node = graph.nodes.get(node_id)
+    if node is None:
+        return {}, []
+    frames: dict = {}
+    helpers: list = []
+    for port in helper_ports(p.name for p in node.spec.inputs):
+        conn = graph.input_connection(node_id, port)
+        if conn is None:
+            continue
+        src = graph.nodes.get(conn.src_node)
+        entry = cache.get(conn.src_node) if cache is not None else None
+        value = entry.outputs.get(conn.src_port) if entry else None
+        if hasattr(value, "columns") and hasattr(value, "itertuples"):
+            frames[port] = value
+            columns = [str(c) for c in value.columns]
+        else:
+            recorded = entry.columns(conn.src_port) if entry else None
+            columns = [str(c) for c in recorded or ()]
+        helpers.append({"input": port,
+                        "label": src.label if src is not None else port,
+                        "columns": columns})
+    return frames, helpers
+
+
 def merged_linked_sheet(graph: Graph, cache: OutputCache,
                         node_id: str) -> "dict | None":
     """A linked Table node's sheet as it should be *shown* after a run —
@@ -229,26 +264,38 @@ def orphaned_table_sheets(graph: Graph, cache: OutputCache, *,
 
     from flograph.core.sheet import parse_sheet, sheet_to_json
     doomed, cut = set(node_ids), set(conn_ids)
-    losing: list[str] = []
+    from flograph.core.sheet.choice_sources import helper_ports, resolve
+    losing: dict[str, bool] = {}     # table id -> losing its linked input
     for conn in graph.connections.values():
-        if conn.dst_port != "table" or conn.dst_node in doomed:
+        if conn.dst_node in doomed:
             continue
         if conn.id not in cut and conn.src_node not in doomed:
             continue
         node = graph.nodes.get(conn.dst_node)
-        if node is not None and node.spec.card == "grid":
-            losing.append(conn.dst_node)
+        if node is None or node.spec.card != "grid":
+            continue
+        if conn.dst_port == "table":
+            losing[conn.dst_node] = True
+        elif helper_ports([conn.dst_port]):
+            # a helper table going (flograph issue #108): the dropdown
+            # lists read from it keep the values they last showed
+            losing.setdefault(conn.dst_node, False)
 
     snapshots = []
-    for table_id in losing:
-        merged = merged_linked_sheet(graph, cache, table_id)
-        if merged is None:
-            continue
+    for table_id, link in losing.items():
         stored = graph.nodes[table_id].params.get("data")
+        merged = merged_linked_sheet(graph, cache, table_id)
+        if merged is None and link:
+            continue
+        frames, _helpers = table_helpers(graph, cache, table_id)
+        sheet = parse_sheet(merged if merged is not None else stored)
+        if frames:
+            resolve(sheet, frames)
+        new = sheet_to_json(sheet)
         # a no-op write would still land as an undo step, leaving the user
         # pressing Ctrl+Z twice to get one wire back
-        if sheet_to_json(parse_sheet(stored)) != json.dumps(merged):
-            snapshots.append((table_id, json.dumps(merged)))
+        if sheet_to_json(parse_sheet(stored)) != new:
+            snapshots.append((table_id, new))
     return snapshots
 
 

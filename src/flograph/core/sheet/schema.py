@@ -182,6 +182,12 @@ class ColumnSpec:
     # Hidden by the user (right-click ▸ Hide): still there, still sent on,
     # just out of sight in the grid.
     hidden: bool = False
+    # Where the dropdown list comes from when it is not typed in:
+    # {"input": "in2", "column": "Region"} — a column of a helper table
+    # wired into the Table node (core/sheet/choice_sources.py). `choices`
+    # then holds the values last read from it, so the list still opens
+    # before the helper has run.
+    choices_from: Optional[dict] = None
 
 
 @dataclass
@@ -217,6 +223,10 @@ class Sheet:
     # a formula can say =SUM(Sales). Unlike the look of the sheet, a name
     # changes what formulas work out.
     names: dict = field(default_factory=dict)
+    # The helper tables wired into the node, for the Dropdown List dialog:
+    # [{"input": "in2", "label": "Regions", "columns": [...]}]. Runtime
+    # only — filled in when a grid is shown, never saved.
+    helpers: list = field(default_factory=list)
 
     @property
     def n_rows(self) -> int:
@@ -516,7 +526,9 @@ class Sheet:
                                 dict(c.format) if c.format else None,
                                 c.total,
                                 dict(c.validation) if c.validation else None,
-                                c.hidden)
+                                c.hidden,
+                                dict(c.choices_from) if c.choices_from
+                                else None)
                      for c in self.columns],
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
@@ -527,6 +539,7 @@ class Sheet:
             hidden_rows=set(self.hidden_rows),
             row_heights=dict(self.row_heights),
             names=dict(self.names),
+            helpers=[dict(h) for h in self.helpers],
         )
 
 
@@ -597,14 +610,17 @@ def parse_sheet(raw) -> Sheet:
             choices = entry.get("choices")
             choices = ([str(c) for c in choices if str(c) != ""]
                        if isinstance(choices, list) else [])
+            from .choice_sources import clean_source
             from .numfmt import clean
             from .validation import clean as clean_rule
+            source = clean_source(entry.get("choices_from"))
             columns.append(ColumnSpec(
                 name, col_type if col_type in COLUMN_TYPES else "auto", width,
-                choices, bool(entry.get("strict")) and bool(choices),
+                choices,
+                bool(entry.get("strict")) and bool(choices or source),
                 clean(entry.get("format")), _total_word(entry.get("total")),
                 clean_rule(entry.get("validation")),
-                entry.get("hidden") is True))
+                entry.get("hidden") is True, source))
         else:
             columns.append(ColumnSpec(str(entry)))
 
@@ -675,8 +691,10 @@ def sheet_to_dict(sheet: Sheet) -> dict:
             entry["width"] = int(col.width)
         if col.choices:
             entry["choices"] = list(col.choices)
-            if col.strict:
-                entry["strict"] = True
+        if col.choices_from:
+            entry["choices_from"] = dict(col.choices_from)
+        if col.strict and (col.choices or col.choices_from):
+            entry["strict"] = True
         if col.format:
             entry["format"] = dict(col.format)
         if col.total:

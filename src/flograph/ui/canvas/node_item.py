@@ -1783,7 +1783,9 @@ class NodeItem(QGraphicsObject):
             on_submitted=self._table_submitted,
             linked_fn=self._table_input_connected,
             open_editor_fn=self._open_table_editor,
-            registry_fn=lambda: getattr(self.scene(), "registry", None)))
+            registry_fn=lambda: getattr(self.scene(), "registry", None),
+            cache_fn=lambda: getattr(self.scene(), "output_cache", None),
+            run_fn=self._run_table_helpers))
 
         # The ribbon, compact: a line of icon buttons per tab, each with a
         # tooltip saying what it does — the card's pixels belong to the grid.
@@ -1823,6 +1825,13 @@ class NodeItem(QGraphicsObject):
         from ..spreadsheet.binding import shown_sheet
         return shown_sheet(scene.graph, getattr(scene, "output_cache", None),
                            self.node.id)
+
+    def _run_table_helpers(self, node_ids: list) -> None:
+        """The Dropdown List dialog asked for this table's helper tables to
+        be run (flograph issue #108); the window owns the engine."""
+        signal = getattr(self.scene(), "helpers_run_requested", None)
+        if signal is not None:
+            signal.emit(list(node_ids))
 
     def _table_submitted(self) -> None:
         """New data is in the flow: run it and what follows, like an edit to
