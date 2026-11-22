@@ -42,6 +42,7 @@ from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QDockWidget, QHBoxLayout, QMainWindow, QToolButton, QVBoxLayout, QWidget,
 )
+from flograph.ui import theme as _theme  # noqa: E402
 
 _STRIP_THICKNESS = 12
 # smallest an edge can be dragged to before it is just a nuisance; below
@@ -293,7 +294,7 @@ def install(canvas: QWidget, host: QMainWindow,
     handles now, and leaving them in would put two grab targets a few
     pixels apart and spend ~5px of canvas on the redundant one.
     """
-    host.setStyleSheet(
+    _theme.set_qss(host, 
         (host.styleSheet() or "")
         + "\nQMainWindow::separator { width: 0px; height: 0px; }")
     strips = {side: EdgeStrip(side, docks, host) for side in _AREAS}

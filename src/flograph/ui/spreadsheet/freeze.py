@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView,
                                QFrame, QHeaderView, QTableView)
 
 from .delegates import SheetDelegate
+from flograph.ui import theme as _theme  # noqa: E402
 
 _EDGE = QColor("#6b7280")
 
@@ -64,7 +65,7 @@ class _Pane(QTableView):
         self.setSelectionBehavior(main.selectionBehavior())
         self.setEditTriggers(main.editTriggers())
         self.setShowGrid(main.showGrid())
-        self.setStyleSheet(main.styleSheet())
+        _theme.set_qss(self, main.styleSheet())
         self.verticalHeader().setDefaultSectionSize(
             main.verticalHeader().defaultSectionSize())
         self.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
@@ -192,7 +193,7 @@ class FrozenPanes:
         self._panes: dict[str, _Pane] = {}
         self._edges = (QFrame(main), QFrame(main))
         for edge in self._edges:
-            edge.setStyleSheet(f"background: {_EDGE.name()};")
+            _theme.set_qss(edge, f"background: {_EDGE.name()};")
             edge.hide()
         self._laying_out = False
         self._base: Optional[tuple] = None   # header sizes before freezing

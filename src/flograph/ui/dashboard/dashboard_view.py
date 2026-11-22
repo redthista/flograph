@@ -40,6 +40,7 @@ from .dashboard_scene import DashboardScene
 from .tile_item import TileItem
 from .tile_shape import add_shape_menu, apply_choice
 from .visuals_list import TILE_NODE_MIME
+from flograph.ui import theme as _theme  # noqa: E402
 
 OVERLAY_TITLE_H = 28
 
@@ -79,8 +80,8 @@ class FullscreenOverlay(QWidget):
         self.setPalette(palette)
         self.setAutoFillBackground(True)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            f"FullscreenOverlay {{ background: {theme.NODE_BODY.name()}; }}")
+        _theme.set_qss(self, 
+            f"FullscreenOverlay {{ background: {theme.dark_hex('NODE_BODY')}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
@@ -89,8 +90,8 @@ class FullscreenOverlay(QWidget):
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
         label = QLabel(title)
-        label.setStyleSheet(
-            f"color: {theme.NODE_TEXT.name()}; font-weight: 600;")
+        _theme.set_qss(label, 
+            f"color: {theme.dark_hex('NODE_TEXT')}; font-weight: 600;")
         restore = QToolButton(text="✕")
         restore.setAutoRaise(True)
         restore.setToolTip("Restore (Esc)")

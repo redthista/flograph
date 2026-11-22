@@ -36,6 +36,7 @@ from ..editor.code_editor import CodeEditor
 from ..editor.find_bar import FindBar
 from ..editor.rules_highlighter import RulesHighlighter
 from ..editor.word_completion import WordCompleter
+from flograph.ui import theme as _theme  # noqa: E402
 
 LINT_DELAY_MS = 300
 #: How long typing in the window pauses before the box behind it follows.
@@ -268,7 +269,7 @@ class TextPopOut(QDialog):
 
     def _say(self, text: str, ink: str) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet(f"color: {ink};")
+        _theme.set_qss(self.status, f"color: {ink};")
 
     # ------------------------------------------------------------- closing
 

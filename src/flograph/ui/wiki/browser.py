@@ -29,26 +29,27 @@ from flograph.core.docpages import (
 )
 
 from .. import theme
+from flograph.ui import theme as _theme  # noqa: E402
 
 HOME_SLUG = "home"
 
 # Qt rich text supports only a small CSS subset (same note as report/render.py).
 _DOCS_CSS = f"""
-body {{ color: {theme.NODE_TEXT.name()};
-       background-color: {theme.NODE_BODY.name()}; }}
-h1 {{ font-size: 20px; color: {theme.NODE_TEXT.name()}; }}
-h2 {{ font-size: 16px; color: {theme.NODE_TEXT.name()};
-      border-bottom: 1px solid {theme.NODE_BORDER.name()}; padding-bottom: 3px; }}
-h3 {{ font-size: 13px; color: {theme.FRAME_TITLE.name()}; }}
+body {{ color: {theme.dark_hex('NODE_TEXT')};
+       background-color: {theme.dark_hex('NODE_BODY')}; }}
+h1 {{ font-size: 20px; color: {theme.dark_hex('NODE_TEXT')}; }}
+h2 {{ font-size: 16px; color: {theme.dark_hex('NODE_TEXT')};
+      border-bottom: 1px solid {theme.dark_hex('NODE_BORDER')}; padding-bottom: 3px; }}
+h3 {{ font-size: 13px; color: {theme.dark_hex('FRAME_TITLE')}; }}
 a {{ color: {theme.BUTTON_ACCENT.name()}; }}
-code, pre {{ background-color: {theme.NODE_HEADER.name()};
-             color: {theme.NODE_TEXT.name()}; }}
-pre {{ padding: 8px; border: 1px solid {theme.NODE_BORDER.name()}; }}
-table {{ border: 1px solid {theme.NODE_BORDER.name()};
+code, pre {{ background-color: {theme.dark_hex('NODE_HEADER')};
+             color: {theme.dark_hex('NODE_TEXT')}; }}
+pre {{ padding: 8px; border: 1px solid {theme.dark_hex('NODE_BORDER')}; }}
+table {{ border: 1px solid {theme.dark_hex('NODE_BORDER')};
          border-collapse: collapse; }}
-th, td {{ border: 1px solid {theme.NODE_BORDER.name()}; padding: 3px 8px; }}
-blockquote {{ color: {theme.NODE_SUBTEXT.name()};
-              border-left: 2px solid {theme.NODE_BORDER.name()};
+th, td {{ border: 1px solid {theme.dark_hex('NODE_BORDER')}; padding: 3px 8px; }}
+blockquote {{ color: {theme.dark_hex('NODE_SUBTEXT')};
+              border-left: 2px solid {theme.dark_hex('NODE_BORDER')};
               padding-left: 8px; }}
 """
 
@@ -95,10 +96,10 @@ class DocsBrowser(QTextBrowser):
         super().__init__(parent)
         self.setOpenLinks(False)  # every link comes through _on_anchor
         self.anchorClicked.connect(self._on_anchor)
-        self.document().setDefaultStyleSheet(_DOCS_CSS)
-        self.setStyleSheet(
-            f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none; padding: 6px; }}")
+        self.document().setDefaultStyleSheet(_theme.skin(_DOCS_CSS))
+        _theme.set_qss(self, 
+            f"QTextBrowser {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')}; border: none; padding: 6px; }}")
 
         self._dir: Path | None = directory
         self._catalog = catalog(directory)

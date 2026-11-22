@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFrame,
 
 from .icons import sheet_icon
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 # (key, ascending, by_list) for each Order entry; the words depend on type
 _ORDERS = {
@@ -161,7 +162,7 @@ class SortDialog(QDialog):
         heads.addWidget(spacer)
         for text in ("Column", "Order"):
             label = QLabel(text)
-            label.setStyleSheet("color: #9ca3af;")
+            _theme.set_qss(label, "color: #9ca3af;")
             heads.addWidget(label, 1)
         layout.addLayout(heads)
 
@@ -178,11 +179,11 @@ class SortDialog(QDialog):
 
         self.warning = QLabel()
         self.warning.setWordWrap(True)
-        self.warning.setStyleSheet("color: #fbbf24;")
+        _theme.set_qss(self.warning, "color: #fbbf24;")
         layout.addWidget(self.warning)
         foot = QLabel(_FOOT)
         foot.setWordWrap(True)
-        foot.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(foot, "color: #9ca3af;")
         layout.addWidget(foot)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok
@@ -254,7 +255,7 @@ class SortDialog(QDialog):
     def _refresh(self, *_args) -> None:
         for i, line in enumerate(self._levels):
             line.caption.setText("Sort by" if i == 0 else "Then by")
-            line.setStyleSheet(
+            _theme.set_qss(line, 
                 "QFrame#sort_level { background: #2b3550;"
                 " border: 1px solid #60a5fa; border-radius: 3px; }"
                 if line is self._selected else

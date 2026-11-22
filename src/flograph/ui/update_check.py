@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph import packages
+from flograph.ui import theme as _theme  # noqa: E402
 
 CHECK_INTERVAL_HOURS = 24
 SETTINGS_ENABLED = "updates/notify"
@@ -114,7 +115,7 @@ class NoticeToast(QFrame):
         self.setObjectName(name)
         self.setFrameShape(QFrame.StyledPanel)
         self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet(
+        _theme.set_qss(self, 
             f"#{name} {{ background: palette(window); "
             "border: 1px solid palette(mid); border-radius: 8px; }"
             f"#{name} QLabel {{ border: none; background: transparent; }}")

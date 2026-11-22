@@ -17,13 +17,34 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QColor, QFont, QIcon, QPainter, QPainterPath, QPen,
                            QPixmap)
 
-FG = QColor("#c8cbd2")
-DIM = QColor("#8b909c")
-BLUE = QColor("#60a5fa")
-GREEN = QColor("#22c55e")
-RED = QColor("#ef4444")
-AMBER = QColor("#eab308")
-VIOLET = QColor("#a78bfa")
+import weakref
+
+from flograph.ui import theme
+
+# The glyphs are written in dark-theme colours; `theme.skin_color` deepens
+# them for the light theme. These are module state, re-derived by
+# `_apply_palette` on a theme change — read them at draw time, and never
+# bind one as a default argument.
+_BASE = {"FG": "#c8cbd2", "DIM": "#8b909c", "BLUE": "#60a5fa",
+         "GREEN": "#22c55e", "RED": "#ef4444", "AMBER": "#eab308",
+         "VIOLET": "#a78bfa"}
+# At import they are the dark originals: the GLYPHS table below captures
+# them, and `_render` skins what it reads from there. `_apply_palette`
+# then re-points the *names* for the glyph bodies that read them directly.
+FG, DIM, BLUE, GREEN, RED, AMBER, VIOLET = (
+    QColor(_BASE[k]) for k in ("FG", "DIM", "BLUE", "GREEN", "RED",
+                               "AMBER", "VIOLET"))
+
+
+def _apply_palette() -> None:
+    g = globals()
+    for name, hexcode in _BASE.items():
+        g[name] = theme.skin_color(hexcode)
+
+
+def _c(hexcode: str) -> QColor:
+    """A literal colour inside a glyph, for the current theme."""
+    return theme.skin_color(hexcode)
 
 _PT = 20.0   # the box every glyph is drawn in; shown at 16-24 px
 
@@ -42,9 +63,12 @@ def _fill(color: QColor, alpha: int) -> QColor:
 
 
 def _grid(p: QPainter, r: QRectF, rows: int = 3, cols: int = 3,
-          lit=(), lit_color: QColor = BLUE, color: QColor = FG) -> None:
+          lit=(), lit_color: QColor | None = None,
+          color: QColor | None = None) -> None:
     """A small table. `lit` holds ("row", i), ("col", i) or ("cell", r, c)
     entries to fill in `lit_color`."""
+    lit_color = lit_color or BLUE
+    color = color or FG
     cw, rh = r.width() / cols, r.height() / rows
     for entry in lit:
         if entry[0] == "row":
@@ -72,7 +96,7 @@ def _badge(p: QPainter, center: QPointF, kind: str, color: QColor,
     p.setPen(Qt.NoPen)
     p.setBrush(color)
     p.drawEllipse(center, radius, radius)
-    p.setPen(_pen(QColor("#111318"), 1.5))
+    p.setPen(_pen(_c("#111318"), 1.5))
     d = radius * 0.55
     if kind in ("+", "-"):
         p.drawLine(center + QPointF(-d, 0), center + QPointF(d, 0))
@@ -122,7 +146,7 @@ def _paste(p, r, c):
     p.drawRoundedRect(QRectF(3.5, 4, 11, 13.5), 1.5, 1.5)
     p.setBrush(c)
     p.drawRoundedRect(QRectF(6.5, 2.5, 5, 3), 1, 1)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.setPen(_pen(BLUE, 1.2))
     p.drawRoundedRect(QRectF(9, 9, 8.5, 9), 1, 1)
 
@@ -133,7 +157,7 @@ def _paste_values(p, r, c):
     p.drawRoundedRect(QRectF(3.5, 4, 11, 13.5), 1.5, 1.5)
     p.setBrush(c)
     p.drawRoundedRect(QRectF(6.5, 2.5, 5, 3), 1, 1)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.setPen(_pen(BLUE, 1.2))
     p.drawRoundedRect(QRectF(8, 9.5, 10.5, 8.5), 1, 1)
     _text(p, QRectF(8, 9.5, 10.5, 8.5), "12", BLUE, 6.5)
@@ -150,7 +174,7 @@ def _clipboard(p, c):
 def _paste_special(p, r, c):
     """The clipboard with a badge holding the four sums."""
     _clipboard(p, c)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.setPen(_pen(VIOLET, 1.2))
     p.drawRoundedRect(QRectF(8, 8.5, 10.5, 10), 1, 1)
     _text(p, QRectF(8, 8.2, 10.5, 5.6), "+\u2212", VIOLET, 5.5)
@@ -160,7 +184,7 @@ def _paste_special(p, r, c):
 def _paste_transpose(p, r, c):
     """The clipboard with a row bending round into a column."""
     _clipboard(p, c)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.setPen(_pen(BLUE, 1.2))
     p.drawRoundedRect(QRectF(8, 8.5, 10.5, 10), 1, 1)
     p.setBrush(BLUE)
@@ -186,7 +210,7 @@ def _copy(p, r, c):
     p.setPen(_pen(c))
     p.setBrush(Qt.NoBrush)
     p.drawRoundedRect(QRectF(3, 3, 9.5, 11), 1.5, 1.5)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.drawRoundedRect(QRectF(7.5, 7, 9.5, 11), 1.5, 1.5)
 
 
@@ -195,7 +219,7 @@ def _copy_headers(p, r, c):
     p.setBrush(Qt.NoBrush)
     p.drawRoundedRect(QRectF(3, 3, 9.5, 11), 1.5, 1.5)
     box = QRectF(7.5, 7, 9.5, 11)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.drawRoundedRect(box, 1.5, 1.5)
     p.fillRect(QRectF(box.left() + 0.7, box.top() + 0.7,
                       box.width() - 1.4, 3), _fill(BLUE, 200))
@@ -458,7 +482,7 @@ def _fill_color(p, r, c):
     p.setPen(Qt.NoPen)
     p.setBrush(c)
     p.drawEllipse(QPointF(16, 11), 1.4, 1.8)
-    p.setBrush(QColor("#fde68a"))
+    p.setBrush(_c("#fde68a"))
     p.drawRect(QRectF(2.5, 15.5, 15, 3))
 
 
@@ -485,7 +509,7 @@ def _outline(p, c, sign, *, lines=True, color=None):
     p.drawLine(QPointF(4.5, 3.5), QPointF(4.5, 12))
     p.drawLine(QPointF(4.5, 3.5), QPointF(6.5, 3.5))
     box = QRectF(1.5, 13, 6, 5.5)
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     p.drawRect(box)
     p.drawLine(QPointF(3, 15.75), QPointF(6, 15.75))
     if sign == "+":
@@ -540,7 +564,7 @@ def _fill_series(p, r, c):
 def _format_painter(p, r, c):
     """A paint roller: the head, the bent handle, a yellow streak."""
     p.setPen(_pen(c, 1.3))
-    p.setBrush(QColor("#fde68a"))
+    p.setBrush(_c("#fde68a"))
     p.drawRoundedRect(QRectF(3, 2.5, 12, 5), 1.5, 1.5)
     p.setBrush(Qt.NoBrush)
     path = QPainterPath()
@@ -558,7 +582,7 @@ def _format_painter(p, r, c):
 def _eye(p, centre: QPointF, color: QColor, slashed: bool) -> None:
     """A small eye, struck through when something is put out of sight."""
     p.setPen(_pen(color, 1.2))
-    p.setBrush(QColor("#2a2c33"))
+    p.setBrush(_c("#2a2c33"))
     path = QPainterPath()
     path.moveTo(centre + QPointF(-4.5, 0))
     path.quadTo(centre + QPointF(0, -4.2), centre + QPointF(4.5, 0))
@@ -1078,7 +1102,7 @@ def _cond_format(p, r, c):
 def _totals(p, r, c):
     _grid(p, QRectF(2.5, 2.5, 15, 15), lit=[("row", 2)], lit_color=BLUE,
           color=c)
-    _text(p, QRectF(2.5, 12.5, 15, 5), "Σ", QColor("#f3f4f6"), 5.5)
+    _text(p, QRectF(2.5, 12.5, 15, 5), "Σ", _c("#f3f4f6"), 5.5)
 
 
 def _axes(p, c):
@@ -1276,6 +1300,8 @@ def _render(name: str, size: int, ratio: float, disabled: bool) -> QPixmap:
     one; below 20 there is no whole multiple and the glyph is scaled down
     as well as it can be."""
     painter_fn, color = GLYPHS[name]
+    _apply_palette()
+    color = theme.skin_color(color)
     device = max(1, round(size * ratio))
     pixmap = QPixmap(device, device)
     pixmap.fill(Qt.transparent)
@@ -1313,3 +1339,26 @@ def sheet_icon(name: str) -> QIcon:
             for ratio in _RATIOS:
                 icon.addPixmap(_render(name, size, ratio, disabled), mode)
     return icon
+
+
+# actions wearing a sheet icon, so a theme switch can swap the picture
+_worn: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def wear(action, name: str) -> None:
+    """`action.setIcon(sheet_icon(name))`, remembered for a theme switch."""
+    action.setIcon(sheet_icon(name))
+    _worn[action] = name
+
+
+def _on_theme() -> None:
+    _apply_palette()
+    sheet_icon.cache_clear()
+    for action, name in list(_worn.items()):
+        try:
+            action.setIcon(sheet_icon(name))
+        except RuntimeError:
+            pass
+
+
+theme.on_change(_on_theme)

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core import ai_disclosure as disc
+from flograph.ui import theme as _theme  # noqa: E402
 
 _TIPS = {
     disc.HIDDEN: "Flo never learns this column exists",
@@ -64,7 +65,7 @@ class ColumnsDialog(QDialog):
         note = QLabel("Saved in this flow, so whoever you send it to gets the "
                       "same rules. Rows are never sent.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: palette(placeholder-text);")
+        _theme.set_qss(note, "color: palette(placeholder-text);")
         layout.addWidget(note)
 
         columns = known_columns(graph, cache)

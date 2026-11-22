@@ -19,6 +19,7 @@ from flograph.core import Graph
 
 from ..canvas.shape_item import KIND_LABELS, LINE_KINDS
 from .colour_row import DEFAULT_PICK, ColourRow
+from flograph.ui import theme as _theme  # noqa: E402
 
 _DEFAULT_STROKE = DEFAULT_PICK
 
@@ -35,13 +36,13 @@ class ShapePropertiesPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
 
         self._placeholder = QLabel("No shape selected")
-        self._placeholder.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._placeholder, "color: palette(mid);")
         layout.addWidget(self._placeholder)
 
         self._hint = QLabel("Right-click for stacking order and delete. "
                             "Drag a handle to resize.")
         self._hint.setWordWrap(True)
-        self._hint.setStyleSheet("color: palette(mid); font-size: 8pt;")
+        _theme.set_qss(self._hint, "color: palette(mid); font-size: 8pt;")
         self._hint.hide()
         layout.addWidget(self._hint)
 

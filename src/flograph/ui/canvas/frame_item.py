@@ -382,7 +382,7 @@ class FrameItem(QGraphicsObject):
         body = QRectF(0, 0, w, h)
         color = QColor(self.frame.color)
         fill = QColor(color)
-        fill.setAlphaF(0.18)
+        fill.setAlphaF(theme.FRAME_FILL)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setBrush(QBrush(fill))
         painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
@@ -390,7 +390,7 @@ class FrameItem(QGraphicsObject):
         painter.drawRoundedRect(body, 6, 6)
 
         title_bg = QColor(color)
-        title_bg.setAlphaF(0.45)
+        title_bg.setAlphaF(theme.FRAME_TITLE_BAR)
         painter.setBrush(QBrush(title_bg))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(QRectF(0, 0, w, TITLE_H), 6, 6)
@@ -414,7 +414,8 @@ class FrameItem(QGraphicsObject):
 
         btn = self._run_button_rect()
         chip = QColor(color)
-        chip.setAlphaF(0.65 if self._hover_run else 0.4)
+        chip.setAlphaF(theme.FRAME_CHIP_HOVER if self._hover_run
+                       else theme.FRAME_CHIP)
         painter.setBrush(QBrush(chip))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(btn, 4, 4)
@@ -468,7 +469,7 @@ class FrameItem(QGraphicsObject):
         color = QColor(self.frame.color)
         painter.setRenderHint(QPainter.Antialiasing)
         fill = QColor(color)
-        fill.setAlphaF(0.45)
+        fill.setAlphaF(theme.FRAME_FOLDED)
         painter.setBrush(QBrush(fill))
         painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
                             else color, 1.5))

@@ -105,6 +105,16 @@ with Freeze or *Run only when asked* (both exist to serve a kept value):
 turning one on clears the other. The saving is in what's held *after* a run; while
 the next node is reading it the table still has to exist.
 
+## Light and dark
+
+**Settings ▸ General ▸ Appearance ▸ Theme** switches the whole window between
+**Dark** (the default), **Light** and **Follow the system**, live. The canvas
+changes with it: in light mode it is a soft grey with white nodes, each with a
+clear edge and a slightly darker header, so a node stands out from the page
+instead of blending into it. Wire colours, status lights, frames and the
+minimap are all re-tuned for the lighter ground. A colour you pick for a node,
+frame or page is yours and stays as you set it.
+
 ## Frames
 
 **Ctrl+G** wraps the selection in a comment frame. Drag a frame by its

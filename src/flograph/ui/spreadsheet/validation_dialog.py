@@ -24,6 +24,7 @@ from flograph.core.sheet import validation as rules
 from flograph.core.sheet.schema import validate_cell
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 _PLACEHOLDERS = {
     "whole": ("1", "100"), "number": ("0", "9.99"),
@@ -82,7 +83,7 @@ class ValidationDialog(QDialog):
         form.addRow(self.b_label, self.b)
         self.kind_help = QLabel()
         self.kind_help.setWordWrap(True)
-        self.kind_help.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.kind_help, "color: #9ca3af;")
         crit.addWidget(self.kind_help)
         self.required = QCheckBox("Required — can't be left blank")
         self.required.setToolTip(
@@ -122,7 +123,7 @@ class ValidationDialog(QDialog):
         rrow = QVBoxLayout(rule_box)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
-        self.summary.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.summary, "font-weight: 600;")
         rrow.addWidget(self.summary)
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -205,15 +206,15 @@ class ValidationDialog(QDialog):
         problem = rules.bound_problem(rule) if rule else None
         if problem:
             self.summary.setText(problem)
-            self.summary.setStyleSheet("font-weight: 600; color: #f87171;")
+            _theme.set_qss(self.summary, "font-weight: 600; color: #f87171;")
             self.status.setText("")
             ok.setEnabled(False)
             return
         ok.setEnabled(True)
-        self.summary.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.summary, "font-weight: 600;")
         self.summary.setText(rules.describe(rule, self._name))
         broken = self._broken(rule)
-        self.status.setStyleSheet("color: #fbbf24;" if broken else
+        _theme.set_qss(self.status, "color: #fbbf24;" if broken else
                                   "color: #9ca3af;")
         self.status.setText(
             f"{broken} cell{'s' if broken != 1 else ''} already break"

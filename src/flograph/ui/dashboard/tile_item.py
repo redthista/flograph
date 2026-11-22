@@ -34,6 +34,7 @@ from ..canvas.node_item import (
 from ..canvas.popup_lift import stacked_z
 from ..canvas.stacking import FULLSCREEN_TILE_Z, z_for
 from ..slicer_list import SlicerPanel
+from flograph.ui import theme as _theme  # noqa: E402
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
@@ -256,7 +257,7 @@ class TileItem(QGraphicsObject):
         # either (see look / restyle), and what the content host was last
         # filled with, so a restyle that changes nothing restyles nothing
         self._look_cache = None
-        self._host_bg = theme.NODE_BODY.name()
+        self._host_bg = theme.dark_hex('NODE_BODY')
         self._hovered = False
         self._built = False   # itemChange can arrive before __init__ is done
 
@@ -406,9 +407,9 @@ class TileItem(QGraphicsObject):
         card it always was (see core.tile_style)."""
         if self._look_cache is None:
             if not self.styleable():
-                self._look_cache = CARD_LOOK
+                self._look_cache = _theme.card_look()
             else:
-                base = NOTE_LOOK if self._kind() == "note" else CARD_LOOK
+                base = _theme.card_look(note=self._kind() == "note")
                 self._look_cache = resolve(self._page_style(),
                                            self.tile.style, base)
         return self._look_cache
@@ -431,7 +432,7 @@ class TileItem(QGraphicsObject):
         css = "transparent" if fill in (None, TRANSPARENT) else fill
         if css != self._host_bg:
             self._host_bg = css
-            self._proxy.widget().setStyleSheet(f"background: {css};")
+            _theme.set_qss(self._proxy.widget(), f"background: {css};")
 
     def _casts_shadow(self) -> bool:
         """A shadow needs something to cast it: a transparent tile is text
@@ -579,9 +580,9 @@ class TileItem(QGraphicsObject):
         if kind == "report" and self._report_view is not None:
             view = MaximizedReport()
             view.setOpenExternalLinks(True)
-            view.setStyleSheet(
-                f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
-                f" color: {theme.NODE_TEXT.name()}; border: none;"
+            _theme.set_qss(view, 
+                f"QTextBrowser {{ background: {theme.dark_hex('NODE_BODY')};"
+                f" color: {theme.dark_hex('NODE_TEXT')}; border: none;"
                 f" padding: 12px; }}")
             clone = self._report_view.document().clone(view)
             view.setDocument(clone)
@@ -642,7 +643,7 @@ class TileItem(QGraphicsObject):
 
     def _build_host(self) -> None:
         host = QWidget()
-        host.setStyleSheet(f"background: {theme.NODE_BODY.name()};")
+        _theme.set_qss(host, f"background: {theme.dark_hex('NODE_BODY')};")
         layout = QVBoxLayout(host)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(0)
@@ -650,7 +651,7 @@ class TileItem(QGraphicsObject):
         placeholder = QLabel(RUN_PROMPT)
         placeholder.setAlignment(Qt.AlignCenter)
         placeholder.setWordWrap(True)
-        placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(placeholder, "color: #6b7280;")
         layout.addWidget(placeholder, 1)
         self._placeholder = placeholder
         self._host_layout = layout
@@ -704,9 +705,9 @@ class TileItem(QGraphicsObject):
             from PySide6.QtWidgets import QTextBrowser
             widget = QTextBrowser()
             widget.setOpenExternalLinks(True)
-            widget.setStyleSheet(
-                f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
-                f" color: {theme.NODE_TEXT.name()}; border: none;"
+            _theme.set_qss(widget, 
+                f"QTextBrowser {{ background: {theme.dark_hex('NODE_BODY')};"
+                f" color: {theme.dark_hex('NODE_TEXT')}; border: none;"
                 f" padding: 6px; }}")
             self._report_view = widget
         elif kind == "wiki":
@@ -836,11 +837,11 @@ class TileItem(QGraphicsObject):
             rendered = render_card(str(node.params.get("text", "") or ""),
                                    self._graph, self._engine.cache, node.id,
                                    width=int(self._size[0]) - 48,
-                                   header_fill=theme.NODE_HEADER.name())
+                                   header_fill=theme.dark_hex('NODE_HEADER'))
         document = rendered.document
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
-            + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
+            + f"\nbody {{ color: {theme.dark_hex('NODE_TEXT')}; }}")
         # before the old document goes: a QMovie still writing frames into a
         # deleted document is a crash, not a stale picture
         self._stop_report_animations()
@@ -1740,7 +1741,12 @@ class TileItem(QGraphicsObject):
         steps = 6
         for i in range(steps, 0, -1):
             grow = i * 1.4
-            painter.setBrush(QColor(0, 0, 0, 9 + (steps - i) * 5))
+            if _theme.APP_MODE == "light":
+                # black rings read as a bruise on a pale page: a faint,
+                # cool shadow lifts the card without outlining it
+                painter.setBrush(QColor(30, 41, 70, 3 + (steps - i) * 2))
+            else:
+                painter.setBrush(QColor(0, 0, 0, 9 + (steps - i) * 5))
             painter.drawRoundedRect(rect.adjusted(-grow, -grow + 3.0,
                                                   grow, grow + 3.0),
                                     radius + grow, radius + grow)

@@ -2,6 +2,7 @@
 highlight, auto-indent, comment toggling, and an error-line marker."""
 from __future__ import annotations
 
+import weakref
 from typing import Optional
 
 from PySide6.QtCore import QMimeData, QRect, QSize, Qt
@@ -10,20 +11,54 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
-from .highlighter import PythonHighlighter
-from .multi_cursor import EXTRA_SELECTION_BG, MultiCaret
+from flograph.ui import theme
 
-GUTTER_BG = QColor("#202226")
-GUTTER_FG = QColor("#5c6370")
-GUTTER_FG_CURRENT = QColor("#9ca3af")
-CURRENT_LINE_BG = QColor("#24262d")
-EDITOR_BG = QColor("#1b1c20")
-EDITOR_FG = QColor("#d7dae0")
-SELECTION_BG = QColor("#264f78")
-ERROR_LINE_BG = QColor("#4b1d24")
-MATCH_BG = QColor("#3b4a2a")          # every hit while the find bar is open
-CURRENT_MATCH_BG = QColor("#6b5a1a")  # the one Enter/F3 just landed on
-ERROR_DOT = QColor("#ef4444")
+from .highlighter import PythonHighlighter
+from .multi_cursor import MultiCaret, extra_selection_bg
+
+# name: (dark, light). Module state, rewritten by `apply_mode` — read as a
+# module global at paint time, never copied.
+_EDITOR_COLOURS = {
+    "GUTTER_BG": ("#202226", "#eceef2"),
+    "GUTTER_FG": ("#5c6370", "#9aa0aa"),
+    "GUTTER_FG_CURRENT": ("#9ca3af", "#4b5563"),
+    "CURRENT_LINE_BG": ("#24262d", "#eef2fb"),
+    "EDITOR_BG": ("#1b1c20", "#ffffff"),
+    "EDITOR_FG": ("#d7dae0", "#1f2430"),
+    "SELECTION_BG": ("#264f78", "#bcd7fb"),
+    "ERROR_LINE_BG": ("#4b1d24", "#fde4e4"),
+    # every hit while the find bar is open
+    "MATCH_BG": ("#3b4a2a", "#dbeed0"),
+    # the one Enter/F3 just landed on
+    "CURRENT_MATCH_BG": ("#6b5a1a", "#fbe7a1"),
+    "ERROR_DOT": ("#ef4444", "#dc2626"),
+}
+GUTTER_BG = GUTTER_FG = GUTTER_FG_CURRENT = CURRENT_LINE_BG = QColor()
+EDITOR_BG = EDITOR_FG = SELECTION_BG = ERROR_LINE_BG = QColor()
+MATCH_BG = CURRENT_MATCH_BG = ERROR_DOT = QColor()
+
+_editors: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def apply_mode() -> None:
+    """Point the editor colours at the current theme and restyle every
+    editor that is open."""
+    light = theme.APP_MODE == "light"
+    g = globals()
+    for name, (dark, bright) in _EDITOR_COLOURS.items():
+        g[name] = QColor(bright if light else dark)
+    for editor in list(_editors):
+        try:
+            editor._pin_dark_palette()
+            editor.highlighter.rehighlight()
+            editor.viewport().update()
+            editor._gutter.update()
+        except (RuntimeError, AttributeError):
+            pass
+
+
+apply_mode()
+theme.on_change(apply_mode)
 INDENT = "    "
 
 
@@ -42,6 +77,7 @@ class _Gutter(QWidget):
 class CodeEditor(QPlainTextEdit):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        _editors.add(self)
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSizeF(10.0)
         self.setFont(font)
@@ -169,11 +205,11 @@ class CodeEditor(QPlainTextEdit):
         return 14 + self.fontMetrics().horizontalAdvance("9") * digits
 
     def _pin_dark_palette(self) -> None:
-        """Dark text area whatever the chrome theme is. The gutter, the
+        """The text area in the editor's own palette (not the OS's). The gutter, the
         current-line band, the find highlights, the extra carets and both
-        highlighters are all drawn in fixed One Dark colours; on a light
-        palette the current line was a black bar over dark text and a
-        column name pale yellow on white. Every role the text area reads is
+        highlighters are drawn in colours of their own (One Dark, or its
+        light counterpart); borrowing the app palette gave a black current
+        line over dark text and a pale-yellow column name on white. Every role the text area reads is
         set, in every group, so nothing of the OS palette shows through."""
         from PySide6.QtGui import QPalette
 
@@ -272,7 +308,7 @@ class CodeEditor(QPlainTextEdit):
         for cursor in self.carets.extras:
             if cursor.hasSelection():
                 extra = QTextEdit.ExtraSelection()
-                extra.format.setBackground(EXTRA_SELECTION_BG)
+                extra.format.setBackground(extra_selection_bg())
                 extra.cursor = cursor
                 selections.append(extra)
 

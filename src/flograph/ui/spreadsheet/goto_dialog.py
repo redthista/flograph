@@ -17,6 +17,7 @@ from flograph.core.sheet import select as pick
 from flograph.core.sheet.formula import cell_name
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 _KIND_HELP = {
     "formulas": "Cells worked out by a formula.",
@@ -96,12 +97,12 @@ class GoToDialog(QDialog):
         ok = self.buttons.button(QDialogButtonBox.Ok)
         if isinstance(found, str):
             ok.setEnabled(False)
-            self.status.setStyleSheet("color: #f87171;" if self.ref.text()
+            _theme.set_qss(self.status, "color: #f87171;" if self.ref.text()
                                       .strip() else "color: #9ca3af;")
             self.status.setText(found)
             return
         ok.setEnabled(True)
-        self.status.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.status, "color: #9ca3af;")
         r0, c0, r1, c1 = found
         if (r0, c0) == (r1, c1):
             name = self._model.sheet.columns[c0].name
@@ -160,7 +161,7 @@ class GoToSpecialDialog(QDialog):
 
         self.help = QLabel()
         self.help.setWordWrap(True)
-        self.help.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.help, "color: #9ca3af;")
         self.help.setMinimumHeight(self.help.fontMetrics().height() * 2 + 4)
         layout.addWidget(self.help)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok

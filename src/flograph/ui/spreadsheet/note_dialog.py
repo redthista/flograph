@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel,
                                QPlainTextEdit, QVBoxLayout)
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 class NoteDialog(QDialog):
@@ -29,7 +30,7 @@ class NoteDialog(QDialog):
                        "read the note. It never changes the value or what "
                        "flows on.")
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(intro, "color: #9ca3af;")
         layout.addWidget(intro)
         self.text = QPlainTextEdit()
         self.text.setPlainText(model.note(row, col))

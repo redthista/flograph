@@ -38,6 +38,7 @@ from flograph.engine.runstats import (NodePair, NodeRun, RunComparison,
 
 from . import theme
 from .resource_monitor import format_bytes, format_seconds
+from flograph.ui import theme as _theme  # noqa: E402
 
 REFRESH_MS = 1000
 ROW_H = 20
@@ -367,7 +368,7 @@ class RunTab(QWidget):
         layout.addLayout(picker_row)
 
         self.summary = QLabel()
-        self.summary.setStyleSheet(_BODY)
+        _theme.set_qss(self.summary, _BODY)
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
 
@@ -409,7 +410,7 @@ class RunTab(QWidget):
         table_layout.addWidget(self.table, 1)
 
         self.hint = QLabel()
-        self.hint.setStyleSheet(_DIM)
+        _theme.set_qss(self.hint, _DIM)
         self.hint.setWordWrap(True)
         table_layout.addWidget(self.hint)
         self.sub_tabs.addTab(table_page, "Table")
@@ -709,12 +710,12 @@ class GraphTab(QWidget):
         layout.setSpacing(4)
 
         self.counts = QLabel()
-        self.counts.setStyleSheet(_BODY)
+        _theme.set_qss(self.counts, _BODY)
         self.counts.setWordWrap(True)
         layout.addWidget(self.counts)
 
         heading = QLabel("Heaviest nodes")
-        heading.setStyleSheet(_HEADING)
+        _theme.set_qss(heading, _HEADING)
         layout.addWidget(heading)
 
         self.table = QTableWidget(0, len(self.COLUMNS))
@@ -734,7 +735,7 @@ class GraphTab(QWidget):
                       "size is real but it is not a second copy, and it is "
                       "counted once in the total. Click a node's name to "
                       "jump to it on the canvas.")
-        hint.setStyleSheet(_DIM)
+        _theme.set_qss(hint, _DIM)
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -877,17 +878,17 @@ class CanvasTab(QWidget):
         self.cards = QLabel()
         self.advice = QLabel()
         for label in (self.paint, self.items, self.cards):
-            label.setStyleSheet(_BODY)
+            _theme.set_qss(label, _BODY)
             label.setWordWrap(True)
             layout.addWidget(label)
 
         heading = QLabel("Recent frames")
-        heading.setStyleSheet(_HEADING)
+        _theme.set_qss(heading, _HEADING)
         layout.addWidget(heading)
         self.strip = FrameStrip()
         layout.addWidget(self.strip)
 
-        self.advice.setStyleSheet(_DIM)
+        _theme.set_qss(self.advice, _DIM)
         self.advice.setWordWrap(True)
         layout.addWidget(self.advice)
         layout.addStretch(1)
@@ -896,7 +897,7 @@ class CanvasTab(QWidget):
             "Frames are only drawn when something asks for a repaint, so a "
             "still canvas records nothing and these numbers describe the last "
             "burst of drawing. Pan or zoom for a live reading.")
-        note.setStyleSheet(_DIM)
+        _theme.set_qss(note, _DIM)
         note.setWordWrap(True)
         layout.addWidget(note)
 

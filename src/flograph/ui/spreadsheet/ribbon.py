@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel,
                                QToolTip, QVBoxLayout, QWidget)
 
 from .icons import AMBER, sheet_icon
+from flograph.ui import theme as _theme  # noqa: E402
 
 _ORG = "flograph"
 _APP = "flograph"
@@ -273,7 +274,7 @@ class SheetRibbon(QWidget):
         compact = size == "compact"
         self._compact = compact
         self._size_key = "compact" if compact else "full"
-        self.setStyleSheet(_stylesheet(compact))
+        _theme.set_qss(self, _stylesheet(compact))
         actions = view.actions
         self._actions = actions
 
@@ -355,7 +356,7 @@ class SheetRibbon(QWidget):
         row.setContentsMargins(8, 1, 4, 1)
         row.setSpacing(6)
         dot = QLabel("●")
-        dot.setStyleSheet(f"color: {AMBER.name()};")
+        _theme.set_qss(dot, f"color: {AMBER.name()};")
         self._pending_text = QLabel()
         self._pending_text.setObjectName("ribbon_pending_text")
         self._pending_text.setWordWrap(not compact)

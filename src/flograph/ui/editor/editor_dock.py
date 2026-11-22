@@ -23,6 +23,7 @@ from .ai_worker import AiAssistantController
 from .code_editor import CodeEditor
 from .completion import CompletionController
 from .find_bar import FindBar
+from flograph.ui import theme as _theme  # noqa: E402
 
 _SYNTAX_LINE = re.compile(r"syntax error on line (\d+)")
 
@@ -71,9 +72,9 @@ class EditorPanel(QWidget):
 
         self._full_title = "No node selected"
         self._title = QLabel(self._full_title)
-        self._title.setStyleSheet("font-weight: bold;")
+        _theme.set_qss(self._title, "font-weight: bold;")
         self._badge = QLabel("modified from library")
-        self._badge.setStyleSheet("color: #eab308;")
+        _theme.set_qss(self._badge, "color: #eab308;")
         self._badge.hide()
         self._reset_btn = QPushButton("Reset to library")
         self._reset_btn.hide()
@@ -132,7 +133,7 @@ class EditorPanel(QWidget):
 
         # Unsaved indicator — amber dot shown when temp edits differ from graph.
         self._unsaved_indicator = QLabel("●")
-        self._unsaved_indicator.setStyleSheet(
+        _theme.set_qss(self._unsaved_indicator, 
             "color: #eab308; font-size: 14px; font-weight: bold;")
         self._unsaved_indicator.hide()
 
@@ -542,7 +543,7 @@ class EditorPanel(QWidget):
                                  if self._copy_text else "")
         self._message.setCursor(Qt.PointingHandCursor if self._copy_text
                                 else Qt.ArrowCursor)
-        self._message.setStyleSheet(
+        _theme.set_qss(self._message, 
             "color: #ef4444;" if error else "color: #9ca3af;")
 
     def _copy_message(self) -> None:

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from .code_editor import CodeEditor
+from flograph.ui import theme as _theme  # noqa: E402
 
 # a runaway regex-free scan is cheap, but a pathological document with tens of
 # thousands of hits would spend real time building extra selections
@@ -64,7 +65,7 @@ class FindBar(QWidget):
         next_btn.clicked.connect(lambda: self.find_next())
 
         self._count = QLabel("")
-        self._count.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._count, "color: palette(mid);")
         self._count.setToolTip("Current match of the total in this file")
 
         close_btn = QToolButton()
@@ -212,7 +213,7 @@ class FindBar(QWidget):
             self._count.setText(f"{len(hits)} matches")
         else:
             self._count.setText(f"{index + 1} of {len(hits)}")
-        self._find_edit.setStyleSheet(
+        _theme.set_qss(self._find_edit, 
             "" if hits or not self._find_edit.text() else "color: #ef4444;")
 
     # --------------------------------------------------------------- replace

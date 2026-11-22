@@ -34,6 +34,7 @@ from flograph.engine.pressure import (COMFORT_FREE, DISK_RELIEF, FREE_RELIEF,
 from flograph.engine.runstats import ProcessSampler
 
 from . import theme
+from flograph.ui import theme as _theme  # noqa: E402
 
 REFRESH_MS = 2000
 BAR_W, BAR_H = 108, 9
@@ -213,7 +214,7 @@ class ResourceMonitorWidget(QWidget):
         self._run_label = QLabel()
         self._node_label = QLabel()
         for label in (self._mem_label, self._run_label, self._node_label):
-            label.setStyleSheet(_LABEL_STYLE)
+            _theme.set_qss(label, _LABEL_STYLE)
         layout.addWidget(self.bar)
         layout.addWidget(self._mem_label)
         layout.addWidget(self._run_label)
@@ -286,7 +287,7 @@ class ResourceMonitorWidget(QWidget):
         self.bar.set_warning(under_pressure)
         self._mem_label.setText(
             f"{format_bytes(vm.used)} / {format_bytes(vm.total)}")
-        self._mem_label.setStyleSheet(
+        _theme.set_qss(self._mem_label, 
             _WARN_LABEL_STYLE if under_pressure else _LABEL_STYLE)
 
         cached_nodes = sum(

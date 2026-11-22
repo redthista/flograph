@@ -63,6 +63,7 @@ from ...llm import wire
 from ...llm.profiles import ProfileSet, save as save_profiles
 from .bridge import TurnBridge
 from .sent_view import SentDialog, format_requests
+from flograph.ui import theme as _theme  # noqa: E402
 
 LEVEL_NAMES = disc.LEVEL_NAMES
 LEVEL_TIPS = {
@@ -370,7 +371,7 @@ class FloPanel(QWidget):
         self._live_timer.setSingleShot(True)
         self._live_timer.setInterval(50)
         self._live_timer.timeout.connect(self._paint_live)
-        self.setStyleSheet(_STYLE)
+        _theme.set_qss(self, _STYLE)
         self._build()
         self.reload_profiles()
         # a bound slot, so the connection dies with the panel

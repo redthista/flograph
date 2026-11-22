@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core import chart_rules
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: "leave this out of the line"
 _NONE = "—"
@@ -147,7 +148,7 @@ class _RuleForm(QDialog):
 
         self._preview = QLabel()
         self._preview.setWordWrap(True)
-        self._preview.setStyleSheet("color: palette(mid);")
+        _theme.set_qss(self._preview, "color: palette(mid);")
         outer.addWidget(self._preview)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
 from flograph.core.sheet.paste import describe, special_block
 
 from .menus import real_window
+from flograph.ui import theme as _theme  # noqa: E402
 
 _OPS = (("none", "None", "Paste over what is there."),
         ("add", "Add", "Add each copied number to the number in the cell — "
@@ -73,7 +74,7 @@ class PasteSpecialDialog(QDialog):
         self.from_outside = QLabel("Copied from outside the app, so there "
                                    "are only values.")
         self.from_outside.setWordWrap(True)
-        self.from_outside.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.from_outside, "color: #9ca3af;")
         what.addWidget(self.from_outside)
         what.addStretch(1)
         if self._sources is None:
@@ -101,7 +102,7 @@ class PasteSpecialDialog(QDialog):
 
         self.op_help = QLabel()
         self.op_help.setWordWrap(True)
-        self.op_help.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.op_help, "color: #9ca3af;")
         layout.addWidget(self.op_help)
 
         ticks = QHBoxLayout()
@@ -121,7 +122,7 @@ class PasteSpecialDialog(QDialog):
         rlay = QVBoxLayout(result)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
-        self.summary.setStyleSheet("font-weight: 600;")
+        _theme.set_qss(self.summary, "font-weight: 600;")
         rlay.addWidget(self.summary)
         self.preview = QTableWidget()
         self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -135,7 +136,7 @@ class PasteSpecialDialog(QDialog):
         rlay.addWidget(self.preview)
         self.preview_note = QLabel()
         self.preview_note.setWordWrap(True)
-        self.preview_note.setStyleSheet("color: #9ca3af;")
+        _theme.set_qss(self.preview_note, "color: #9ca3af;")
         rlay.addWidget(self.preview_note)
         layout.addWidget(result)
 

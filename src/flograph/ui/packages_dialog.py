@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph import packages
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Settings ▸ Packages — the index an install uses, over pip's own settings
 SETTINGS_INDEX_URL = "packages/index_url"
@@ -85,7 +86,7 @@ class SignInDialog(QDialog):
         self.risk_label.setTextFormat(Qt.PlainText)
         self.risk_label.setWordWrap(True)
         self.risk_label.setVisible(bool(risk))
-        self.risk_label.setStyleSheet("color: #e0a030;")
+        _theme.set_qss(self.risk_label, "color: #e0a030;")
         intro = QLabel(
             (f"{host} didn't accept that user name and token or password. "
              f"Try again — a token may have expired or been revoked."

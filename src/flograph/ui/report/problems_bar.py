@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (QListView, QListWidget, QListWidgetItem,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ..editor.diagnostics import DIAGNOSTIC_COLORS, dot_icon
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ class ProblemsBar(QWidget):
         self._list.setResizeMode(QListView.Adjust)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._list.setFrameShape(QListWidget.NoFrame)
-        self._list.setStyleSheet(
+        _theme.set_qss(self._list, 
             "QListWidget { border-top: 1px solid palette(mid); }"
             "QListWidget::item { padding: 3px 4px; }")
         self._list.itemClicked.connect(self._clicked)
@@ -75,7 +76,7 @@ class ProblemsBar(QWidget):
         self._row.setAutoRaise(True)
         self._row.setCursor(Qt.PointingHandCursor)
         self._row.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self._row.setStyleSheet(
+        _theme.set_qss(self._row, 
             "QToolButton { text-align: left; padding: 3px 8px;"
             " border-top: 1px solid palette(mid); border-radius: 0; }")
         self._row.clicked.connect(self.toggle)

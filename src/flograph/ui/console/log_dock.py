@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from flograph.core import Graph
 from flograph.engine import ExecutionEngine, NodeError
+from flograph.ui import theme
 
 MAX_BLOCKS = 5000
 
@@ -62,10 +63,10 @@ class LogConsole(QWidget):
     def _on_log(self, node_id: str, line: str, stream: str) -> None:
         color = _STREAM_COLORS.get(stream, "#d1d5db")
         stamp = time.strftime("%H:%M:%S")
-        self._text.appendHtml(
+        self._text.appendHtml(theme.skin(
             f'<span style="color:#4b5563">[{stamp}]</span> '
             f'<span style="color:#9ca3af">[{html.escape(self._node_label(node_id))}]</span> '
-            f'<span style="color:{color}">{html.escape(line)}</span>')
+            f'<span style="color:{color}">{html.escape(line)}</span>'))
 
     def _on_failed(self, node_id: str, error: NodeError) -> None:
         self._on_log(node_id, error.message, "error")
@@ -75,6 +76,6 @@ class LogConsole(QWidget):
 
     def _append_raw(self, text: str, color: str) -> None:
         stamp = time.strftime("%H:%M:%S")
-        self._text.appendHtml(
+        self._text.appendHtml(theme.skin(
             f'<span style="color:#4b5563">[{stamp}]</span> '
-            f'<span style="color:{color}">— {html.escape(text)} —</span>')
+            f'<span style="color:{color}">— {html.escape(text)} —</span>'))

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from flograph.core import control_apply as ca
 from flograph.core import input_panel as ip
+from flograph.ui import theme as _theme  # noqa: E402
 
 # shape -> what the dropdown says, in the order it lists them
 SHAPE_LABELS = [
@@ -186,7 +187,7 @@ class PanelWizard(QDialog):
         self.preview.setMaximumHeight(96)
         layout.addWidget(self.preview)
         self._problems = QLabel()
-        self._problems.setStyleSheet("color: #ef4444;")
+        _theme.set_qss(self._problems, "color: #ef4444;")
         self._problems.setWordWrap(True)
         layout.addWidget(self._problems)
 

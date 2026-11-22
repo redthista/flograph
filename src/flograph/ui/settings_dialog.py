@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .canvas import grid
+from flograph.ui import theme as _theme  # noqa: E402
 
 
 def _flograph_version() -> str:
@@ -496,12 +497,12 @@ class SettingsDialog(QDialog):
         theme_combo.currentIndexChanged.connect(
             lambda index: window.set_theme_pref(theme_prefs[index]))
         rows.add("Theme", theme_combo,
-                 "Light or dark chrome — the window frame, panels, dialogs, "
-                 "menus and tables. \"Follow the system\" tracks your "
-                 "desktop's light/dark setting and switches with it. The "
-                 "node canvas itself stays dark either way, the way a "
-                 "Blueprints-style workspace does. Takes effect straight "
-                 "away.")
+                 "Light or dark — the whole window: title bar, panels, "
+                 "dialogs, menus, tables and the node canvas. Light is a "
+                 "soft grey canvas with white nodes and a visible edge on "
+                 "each. \"Follow the system\" tracks your desktop's "
+                 "light/dark setting and switches with it. Takes effect "
+                 "straight away.")
 
         text_size_spin = QDoubleSpinBox()
         text_size_spin.setObjectName("table_text_size_spinbox")
@@ -1152,7 +1153,7 @@ class SettingsDialog(QDialog):
         note = QLabel()
         note.setObjectName("shortcut_conflict_note")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #c0392b;")
+        _theme.set_qss(note, "color: #c0392b;")
         note.hide()
         layout.addWidget(note)
 

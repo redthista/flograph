@@ -34,6 +34,7 @@ from . import marks
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .popup_lift import stacked_z
 from .stacking import NODE_Z, z_for
+from flograph.ui import theme as _theme  # noqa: E402
 
 NODE_WIDTH = 170.0
 HEADER_H = 26.0
@@ -981,6 +982,40 @@ class PortItem(QGraphicsItem):
         self.scene().finish_wire_drag(event.scenePos())
 
 
+class NodeShadow(QGraphicsItem):
+    """The soft shadow under a card — how a light canvas lifts a node off
+    the page, where a dark one gets there from contrast alone. A child
+    stacked behind its node, drawn only in light mode, taking no input."""
+
+    SPREAD = 5
+
+    def __init__(self, parent: "NodeItem") -> None:
+        super().__init__(parent)
+        self.setFlag(QGraphicsItem.ItemStacksBehindParent, True)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setAcceptHoverEvents(False)
+        self.setVisible(theme.APP_MODE == "light")
+
+    def boundingRect(self) -> QRectF:
+        item = self.parentItem()
+        pad = self.SPREAD + 3
+        return QRectF(-pad, -pad, item.width + 2 * pad,
+                      item.body_height + 2 * pad + 3)
+
+    def shape(self) -> QPainterPath:
+        return QPainterPath()
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        item = self.parentItem()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        for i in range(self.SPREAD, 0, -1):
+            painter.setBrush(QColor(30, 41, 70, 5 + (self.SPREAD - i) * 3))
+            painter.drawRoundedRect(
+                QRectF(-i, -i + 2, item.width + 2 * i, item.body_height + 2 * i),
+                7 + i, 7 + i)
+
+
 class DropHintOutline(QGraphicsItem):
     """The dashed ring drawn around a node while it is under a dragged one:
     letting go here will replace it. A child item rather than a pen choice
@@ -1195,6 +1230,7 @@ class NodeItem(QGraphicsObject):
         self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         self.setAcceptHoverEvents(True)  # drives the move/resize cursors
         self.setPos(*node.pos)
+        self._shadow = NodeShadow(self)
 
         # A child item rather than something paint() draws: paint() forks nine
         # ways by card kind, and a padlock has to appear on all nine. A child
@@ -1565,11 +1601,11 @@ class NodeItem(QGraphicsObject):
         if not (self.note or self.report_card) or self._note_editor is not None:
             return
         editor = CardTextEditor(str(self.node.params.get("text", "")), self)
-        editor.setStyleSheet(
+        _theme.set_qss(editor, 
             f"QPlainTextEdit {{"
-            f" background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
-            f" border: 1.4px solid {theme.SELECTION_OUTLINE.name()};"
+            f" background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')};"
+            f" border: 1.4px solid {theme.dark_hex('SELECTION_OUTLINE')};"
             f" border-radius: 8px; padding: 4px; font-size: 9.5pt; }}")
         cursor = editor.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -1794,7 +1830,7 @@ class NodeItem(QGraphicsObject):
         # editable — the way to read a formula without opening the cell
         from ..spreadsheet import FormulaBar
         formula_bar = FormulaBar(grid)
-        formula_bar.setStyleSheet(formula_bar.styleSheet()
+        _theme.set_qss(formula_bar, formula_bar.styleSheet()
                                   + " QLabel, QLineEdit { font-size: 8pt; }")
         layout.addWidget(formula_bar)
         layout.addWidget(grid, 1)
@@ -2028,7 +2064,7 @@ class NodeItem(QGraphicsObject):
 
         placeholder = QLabel("Run the graph to see a figure here.")
         placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(placeholder, "color: #6b7280;")
         layout.addWidget(placeholder, 1)
         self._figure_placeholder = placeholder
 
@@ -2158,9 +2194,9 @@ class NodeItem(QGraphicsObject):
         from PySide6.QtWidgets import QTextBrowser
         view = QTextBrowser()
         view.setOpenExternalLinks(True)
-        view.setStyleSheet(
-            f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
+        _theme.set_qss(view, 
+            f"QTextBrowser {{ background: {theme.dark_hex('NODE_BODY')};"
+            f" color: {theme.dark_hex('NODE_TEXT')}; border: none;"
             f" padding: 4px; }}")
         self._report_view = view
         view.installEventFilter(self)
@@ -2190,7 +2226,7 @@ class NodeItem(QGraphicsObject):
         with deferred(self._report_pictures_ready):
             rendered = render_card(body, scene.graph, cache, self.node.id,
                                    width=int(self.width) - 44,
-                                   header_fill=theme.NODE_HEADER.name()) \
+                                   header_fill=theme.dark_hex('NODE_HEADER')) \
                 if scene is not None else None
         # before the old document goes: a QMovie still writing frames into a
         # deleted document is a crash, not a stale picture
@@ -2206,7 +2242,7 @@ class NodeItem(QGraphicsObject):
         document = rendered.document
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
-            + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
+            + f"\nbody {{ color: {theme.dark_hex('NODE_TEXT')}; }}")
         from ..report.render import show_in
         show_in(self._report_view, document)
         if rendered.animations:
@@ -2348,7 +2384,7 @@ class NodeItem(QGraphicsObject):
 
         placeholder = QLabel("Run the graph to see a table here.")
         placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: #6b7280;")
+        _theme.set_qss(placeholder, "color: #6b7280;")
         layout.addWidget(placeholder, 1)
         self._table_viewer_placeholder = placeholder
 
@@ -3761,7 +3797,18 @@ class NodeItem(QGraphicsObject):
         if self.node.color:
             return theme.tint(theme.NODE_HEADER, self.node.color,
                               theme.TINT_STRONG)
+        if theme.APP_MODE == "light":
+            return theme.NODE_BODY       # one tone: the card is one surface
         return theme.NODE_HEADER
+
+    def _edge_color(self) -> QColor:
+        """The card's outline: its category's colour in the light theme,
+        the plain border otherwise."""
+        if not self.broken and not self.node.color:
+            edge = theme.category_edge(self.node.spec.category)
+            if edge is not None:
+                return edge
+        return theme.NODE_BORDER
 
     def _body_color(self) -> QColor:
         """Effective card-body colour: the user's custom colour tinted over
@@ -3770,16 +3817,28 @@ class NodeItem(QGraphicsObject):
         if self.node.color:
             return theme.tint(theme.NODE_BODY, self.node.color,
                               theme.TINT_SOFT)
+        if (self.compact or self._square) and not self.broken:
+            # a header-less square has nowhere else to carry its category
+            tinted = theme.category_tint(self.node.spec.category, 0.34)
+            if tinted is not None:
+                return tinted
         return theme.NODE_BODY
 
     def _paint_flat(self, painter: QPainter) -> None:
         """Cheap stand-in for the simplified state: one fill, no path/gradient/text —
         the per-node cost that dominates when many nodes are visible at once."""
         rect = QRectF(0, 0, self.width, self.body_height)
+        # on the light canvas a bare white card melts into the page at this
+        # zoom, so it keeps a hairline edge; the dark one never needed it
         painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.5) if self.isSelected()
-                       else Qt.NoPen)
+                       else QPen(self._edge_color(), 1.0)
+                       if theme.APP_MODE == "light" else Qt.NoPen)
         fill = (theme.NODE_HEADER_BROKEN if self.broken
                 else self._body_color())
+        if theme.APP_MODE == "light" and not self.broken \
+                and not self.node.color:
+            # zoomed out there is no title to read: the colour is the label
+            fill = theme.category_tint(self.node.spec.category, 0.30) or fill
         painter.setBrush(QBrush(fill))
         painter.drawRect(rect)
 
@@ -3795,7 +3854,7 @@ class NodeItem(QGraphicsObject):
         if self.compact:
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                                else theme.NODE_BORDER, 1.5))
+                                else self._edge_color(), 1.5))
             painter.setBrush(QBrush(self._header_color()))
             painter.drawRoundedRect(
                 QRectF(0, 0, self.width, self.body_height), 10, 10)
@@ -3853,7 +3912,7 @@ class NodeItem(QGraphicsObject):
         elif self.broken:
             outline = QPen(theme.NODE_BORDER_BROKEN, 1.4)
         else:
-            outline = QPen(theme.NODE_BORDER, 1.2)
+            outline = QPen(self._edge_color(), 1.3)
         painter.setPen(outline)
         painter.drawPath(body)
 
@@ -3980,7 +4039,6 @@ class NodeItem(QGraphicsObject):
         header.addRoundedRect(QRectF(0, 0, width, HEADER_H), 7, 7)
         header.addRect(QRectF(0, HEADER_H / 2, width, HEADER_H / 2))
         painter.fillPath(header.simplified(), self._header_color())
-
         painter.setPen(QPen(theme.NODE_TEXT))
         font = painter.font()
         font.setPointSizeF(9.0)
@@ -4052,7 +4110,7 @@ class NodeItem(QGraphicsObject):
         elif self.broken:
             outline = QPen(theme.NODE_BORDER_BROKEN, 1.4)
         else:
-            outline = QPen(theme.NODE_BORDER, 1.2)
+            outline = QPen(self._edge_color(), 1.3)
         painter.setPen(outline)
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(body)
@@ -4125,8 +4183,8 @@ class NodeItem(QGraphicsObject):
         body.addRoundedRect(rect, 7, 7)
         painter.fillPath(body, self._body_color())
         outline = QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                       else theme.NODE_BORDER,
-                       2.0 if self.isSelected() else 1.2)
+                       else self._edge_color(),
+                       2.0 if self.isSelected() else 1.3)
         painter.setPen(outline)
         painter.drawPath(body)
 

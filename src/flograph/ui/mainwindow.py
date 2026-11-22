@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QDockWidget, QFileDialog,
+    QApplication, QColorDialog, QDockWidget, QFileDialog, QGraphicsItem,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QProgressBar, QProgressDialog,
     QSizePolicy, QStackedWidget, QTextEdit,
@@ -205,6 +205,9 @@ class MainWindow(QMainWindow):
         if app is not None:
             app.styleHints().colorSchemeChanged.connect(
                 self._on_system_color_scheme_changed)
+        _themed = self._on_app_theme_changed
+        theme.on_change(_themed)
+        self.destroyed.connect(lambda *_: theme.off_change(_themed))
         # Our own title bar instead of the OS one. Read here, applied in
         # _build_actions (menus fold into a hamburger, run actions and the
         # window buttons go on the bar); a change needs a restart. The flag
@@ -1253,6 +1256,37 @@ class MainWindow(QMainWindow):
         label = {"system": "following the system",
                  "light": "light", "dark": "dark"}[pref]
         self.show_status(f"Theme: {label}.", 3000)
+
+    def _on_app_theme_changed(self) -> None:
+        """The palette and the canvas colours have just been swapped. What
+        paints from them at paint time needs only a repaint; what was drawn
+        once into a pixmap (the toolbar glyphs) has to be drawn again."""
+        for action, kind in (
+                (self.action_run, "run_all"),
+                (self.action_run_selected, "run_selected"),
+                (self.action_cancel, "cancel"),
+                (self.action_reset_caches, "reset_caches"),
+                (self.action_reset_selected_caches, "reset_caches")):
+            action.setIcon(toolbar_style.toolbar_icon(kind))
+        toolbar = self.findChild(QToolBar, "toolbar_main")
+        if toolbar is not None:
+            toolbar.setStyleSheet(toolbar_style._stylesheet())
+        self._repaint_tinted()
+        for view in [self.view] + [p.view for p in self._canvas_pages()]:
+            for item in view.scene().items():
+                restyle = getattr(item, "restyle", None)
+                if callable(restyle):
+                    restyle()           # a tile re-resolves its look
+                shadow = getattr(item, "_shadow", None)
+                if shadow is not None:
+                    shadow.setVisible(theme.APP_MODE == "light")
+                mode = item.cacheMode()
+                if mode != QGraphicsItem.NoCache:
+                    # a cached item is a picture of the old colours:
+                    # update() alone repaints from it
+                    item.setCacheMode(QGraphicsItem.NoCache)
+                    item.setCacheMode(mode)
+            view.scene().update()
 
     def _on_system_color_scheme_changed(self, _scheme=None) -> None:
         """The OS flipped light/dark. Only act if we are meant to follow it."""

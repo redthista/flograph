@@ -24,7 +24,10 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QPlainTextEdit
 
 CARET_COLOR = QColor("#d7dae0")
-EXTRA_SELECTION_BG = QColor("#264f78")
+def extra_selection_bg() -> QColor:
+    """The second-and-later carets' selection, in the theme's selection blue."""
+    from . import code_editor
+    return QColor(code_editor.SELECTION_BG)
 INDENT = "    "
 _PARAGRAPH = "\u2029"   # what QTextCursor.selectedText() uses for a newline
 

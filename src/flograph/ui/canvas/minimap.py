@@ -59,6 +59,10 @@ def _node_brush(item) -> QColor:
     something is happening.
     """
     colour = QColor(_state_color(item))
+    if (theme.APP_MODE == "light" and item.node.status == NodeStatus.DONE
+            and colour == theme.status_color(NodeStatus.DONE)):
+        # a whole map of saturated green is a wall; "done" is the quiet state
+        colour = theme.tint(QColor("#ffffff"), colour, 0.45)
     if not item.node.active:
         colour.setAlphaF(DEACTIVATED_OPACITY)
     return colour

@@ -28,12 +28,13 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit,
 
 from . import theme
 from .window_frame import _RecentRow, frame_icon, project_display_name
+from flograph.ui import theme as _theme  # noqa: E402
 
 #: Wider than this and the eye has too far to travel between a name and
 #: its star; the screen centres a column of this width on a wide window.
 CONTENT_WIDTH = 980
 
-_BG = theme.CANVAS_BG.name()   # the canvas is always dark, and this is it
+_BG = "#1b1c20"   # the dark canvas colour; theme.skin turns it light
 _QSS = f"""
 QWidget#start_screen {{ background: {_BG}; }}
 QLabel#start_title {{ color: #f3f4f6; }}
@@ -64,6 +65,14 @@ QListWidget {{
 QListWidget::item {{ padding: 4px 6px; border-radius: 4px; }}
 QListWidget::item:hover {{ background: #34363f; color: #f3f4f6; }}
 QScrollArea, QWidget#start_rows {{ background: transparent; border: none; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
+QScrollBar::handle:vertical {{
+    background: #4b4e58; border-radius: 4px; min-height: 28px;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: transparent;
+}}
 """
 
 
@@ -172,7 +181,7 @@ class StartScreen(QWidget):
         self._window = window
         self.setObjectName("start_screen")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(_QSS)
+        _theme.set_qss(self, _QSS)
         # (row, what a search matches against), in the order shown
         self._rows: list = []
         self._headings: list = []   # (heading label, [rows under it])
