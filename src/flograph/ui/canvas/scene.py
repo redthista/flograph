@@ -11,7 +11,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QUndoStack
-from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene
 
 from flograph.core import (
     Connection, Frame, Graph, NodeInstance, NodeRegistry, PortSpec, Shape,
@@ -331,6 +331,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # nesting depth of node/frame group drags (begin_group_drag /
         # commit_group_move), so the view can edge-scroll for them too
         self._group_drags = 0
+        # {frame_id: [(node_item, offset)]} — the fixed nodes (action
+        # buttons) an open frame in a group drag carries by hand, since Qt
+        # moves only movable items (flograph issue #113)
+        self._group_riders: dict = {}
         # what a node dragged from the library is currently hovering over,
         # as graphics items — see drop_target_at / set_drop_hint
         self._drop_hint_conn: Optional[ConnectionItem] = None
@@ -1301,7 +1305,14 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
 
         `None` means every collapsed frame, for the drags that move several
         at once and cannot say which.
+
+        Also where a group drag's riders follow their frame — see
+        begin_group_drag.
         """
+        if frame_id in self._group_riders:
+            origin = self.frame_items[frame_id].pos()
+            for item, offset in self._group_riders[frame_id]:
+                item.setPos(origin + offset)
         for pin in self._frame_pins.values():
             if frame_id is not None and pin.frame_item.frame.id != frame_id:
                 continue
@@ -1992,6 +2003,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if self._group_drags:
             self._group_drags = 0
             self.canvas_drag_changed.emit(False)
+        self._group_riders = {}
         for item in self.node_items.values():
             item._dragging = False
             item._group_starts = None
@@ -2055,7 +2067,36 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                     item.pos().x(), item.pos().y())
             else:
                 starts["nodes"][item.node.id] = (item.pos().x(), item.pos().y())
+        self._arm_group_riders(starts)
         return starts
+
+    def _arm_group_riders(self, starts: dict) -> None:
+        """flograph issue #113: an action button is not movable (so a click
+        fires it rather than nudging it, and a button merely caught in a
+        selection stays put), so Qt leaves it behind when its frame moves in
+        a multi-selection. A frame carries what is in it, so each open,
+        selected frame takes the fixed nodes it holds along by hand.
+        Collapsed frames are not included — their hidden contents already
+        ride along through starts["carried"]."""
+        self._group_riders = {}
+        claimed: set = set()
+        for frame_id in starts["frames"]:
+            frame = self.frame_items.get(frame_id)
+            if frame is None or frame.collapsed:
+                continue
+            riders = []
+            node_ids, _frames = self.frame_contents(frame)
+            for node_id in node_ids:
+                item = self.node_items.get(node_id)
+                if (item is None or node_id in claimed
+                        or node_id in starts["carried"]
+                        or item.flags() & QGraphicsItem.ItemIsMovable):
+                    continue
+                claimed.add(node_id)
+                starts["carried"][node_id] = (item.pos().x(), item.pos().y())
+                riders.append((item, item.pos() - frame.pos()))
+            if riders:
+                self._group_riders[frame_id] = riders
 
     def commit_group_move(self, starts: dict) -> None:
         """Clear the drag flags and push one undo macro for whatever actually
@@ -2084,6 +2125,17 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             if new[:2] != old[:2]:
                 frame_moves[frame_id] = new
                 deltas[frame_id] = (new[0] - old[0], new[1] - old[1])
+        # the riders are already where their frame took them; record it
+        riders, self._group_riders = self._group_riders, {}
+        for frame_id, carried in riders.items():
+            if frame_id not in deltas:
+                continue
+            for item, _offset in carried:
+                node_id = item.node.id
+                old = starts["carried"][node_id]
+                new = (item.pos().x(), item.pos().y())
+                if new != old and node_id not in node_moves:
+                    node_moves[node_id] = (old, new)
         # Qt moved the selection for us, but a collapsed frame's hidden
         # contents were never in it — shift them by their own frame's delta.
         for frame_id, (dx, dy) in deltas.items():

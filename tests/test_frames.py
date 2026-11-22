@@ -2808,3 +2808,33 @@ class TestFoldingDoesNotAffectExecution:
         assert upstream["a1"] == set()          # nor the first
         assert upstream["a2"] == {"a1"}
         assert upstream["b2"] == {"b1"}
+
+
+class TestGroupDragCarriesButtons:
+    """flograph issue #113: an action button is not movable, so a frame
+    moved as part of a selection used to leave its buttons behind."""
+
+    def test_a_selected_frame_takes_its_button_along(self, env, registry):
+        graph, stack, scene = env
+        add_node(graph, registry, "btn", pos=(40.0, 60.0),
+                 type_id="flograph.util.action_button")
+        add_node(graph, registry, "n", pos=(200.0, 60.0))
+        graph.add_frame(Frame(id="f", title="F",
+                              rect=(0.0, 0.0, 600.0, 400.0)))
+        frame = scene.frame_items["f"]
+        button = scene.node_items["btn"]
+        assert not button.flags() & button.GraphicsItemFlag.ItemIsMovable
+        for item in (frame, button, scene.node_items["n"]):
+            item.setSelected(True)
+        starts = scene.begin_group_drag()
+        # what Qt does for a group drag: move the movable selection only
+        frame.setPos(frame.pos() + QPointF(100, 50))
+        scene.node_items["n"].setPos(
+            scene.node_items["n"].pos() + QPointF(100, 50))
+        assert frame.pos() != QPointF(0.0, 0.0)
+        assert button.pos() == frame.pos() + QPointF(40.0, 60.0)
+        moved = button.pos()
+        scene.commit_group_move(starts)
+        assert graph.nodes["btn"].pos == (moved.x(), moved.y())
+        stack.undo()
+        assert graph.nodes["btn"].pos == (40.0, 60.0)
