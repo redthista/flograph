@@ -121,6 +121,18 @@ class TestMemory:
         assert budget == 16 * script.GIB
         assert workers == 5
 
+    def test_full_mode_sizes_at_the_measured_peak(self, script):
+        workers, budget = script.memory_plan(
+            32 * script.GIB, 30 * script.GIB, 12, full=True)
+        assert budget == int(30 * script.GIB * 0.8)
+        assert workers == 11     # (24 GiB - controller) // 2 GiB
+
+    def test_full_mode_keeps_a_ceiling(self, script):
+        workers, budget = script.memory_plan(
+            32 * script.GIB, 4 * script.GIB, 12, full=True)
+        assert budget < 4 * script.GIB
+        assert workers == 1
+
     def test_serial_request_stays_serial(self, script):
         assert script.memory_plan(32 * script.GIB, 30 * script.GIB, 0)[0] == 0
 

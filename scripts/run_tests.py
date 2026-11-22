@@ -26,6 +26,12 @@ anything else does want them.
     scripts/run_tests.py tests/test_x.py -q  # extra args go to pytest
     scripts/run_tests.py --workers 12        # override the decision
     scripts/run_tests.py --explain           # decide and print, run nothing
+    scripts/run_tests.py --full              # all the cores and RAM it can safely have
+
+`--full` is for when the machine is yours and you are waiting: no load or
+temperature back-off, no `nice`, and memory sized at a worker's measured
+peak rather than with headroom. The whole-run memory ceiling stays — the
+worst a full run can do is fail, never take the desktop down with it.
 """
 from __future__ import annotations
 
@@ -45,6 +51,10 @@ GIB = 1024 ** 3
 # flograph issue #95: leave room for the desktop and pytest controller.
 WORKER_BYTES = 3 * GIB
 CONTROLLER_BYTES = GIB // 2
+#: --full: a worker's measured peak (~2 GB) instead of the headroom above,
+#: and a larger share of what is available. Still under a hard ceiling.
+FULL_WORKER_BYTES = 2 * GIB
+FULL_AVAILABLE_SHARE = 0.8
 
 #: Fraction of the *spare* cores to take. Deliberately under 1: load average
 #: is a trailing number, and whatever produced it is usually about to ask
@@ -108,10 +118,16 @@ def decide(cores: int, load: float, temp: "float | None",
     return workers, why + f"; CPU {temp:.0f}°C"
 
 
-def memory_plan(total: int, available: int, requested: int) -> tuple[int, int]:
+def memory_plan(total: int, available: int, requested: int,
+                full: bool = False) -> tuple[int, int]:
     """Budget the whole run, including the controller and worker children."""
-    budget = max(1, min(total // 2, int(available * 0.6)))
-    capacity = max(1, (budget - CONTROLLER_BYTES) // WORKER_BYTES)
+    if full:
+        budget = max(1, int(available * FULL_AVAILABLE_SHARE))
+        per_worker = FULL_WORKER_BYTES
+    else:
+        budget = max(1, min(total // 2, int(available * 0.6)))
+        per_worker = WORKER_BYTES
+    capacity = max(1, (budget - CONTROLLER_BYTES) // per_worker)
     return min(requested, capacity), budget
 
 
@@ -157,6 +173,10 @@ def main(argv: "list[str] | None" = None) -> int:
                         metavar="N", help=f"ceiling (default {MAX_WORKERS})")
     parser.add_argument("--no-nice", action="store_true",
                         help="do not lower the run's priority")
+    parser.add_argument("--full", action="store_true",
+                        help="use every core it can (no load/temperature "
+                             "back-off, no nice) and size RAM at a worker's "
+                             "measured peak; the memory ceiling stays")
     parser.add_argument("--explain", action="store_true",
                         help="print the decision and exit")
     known, extra = parser.parse_known_args(argv)
@@ -165,7 +185,10 @@ def main(argv: "list[str] | None" = None) -> int:
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
     temp = cpu_temperature()
 
-    if known.workers is None:
+    if known.workers is None and known.full:
+        workers = max(1, min(known.max_workers, cores))
+        why = f"full mode: {cores} cores, ceiling {known.max_workers}"
+    elif known.workers is None:
         workers, why = decide(cores, load, temp, max(1, known.max_workers))
     else:
         workers = max(0, known.workers)
@@ -177,8 +200,9 @@ def main(argv: "list[str] | None" = None) -> int:
         [interpreter(), "-c", "import psutil; m=psutil.virtual_memory(); "
          "print(m.total, m.available)"], text=True)
     total, available = map(int, snapshot.split())
-    workers, budget = memory_plan(total, available, workers)
-    why += f"; RAM budget {budget / GIB:.1f} GiB (3 GiB per worker)"
+    workers, budget = memory_plan(total, available, workers, known.full)
+    per = (FULL_WORKER_BYTES if known.full else WORKER_BYTES) // GIB
+    why += f"; RAM budget {budget / GIB:.1f} GiB ({per} GiB per worker)"
     scope = memory_scope(budget)
     print("[run_tests] " + ("whole-run memory limit enforced; swap disabled"
           if scope else "WARNING: no OS memory limit available; worker limit only"),
@@ -190,7 +214,7 @@ def main(argv: "list[str] | None" = None) -> int:
         return 0
 
     command: list[str] = list(scope)
-    if not known.no_nice and shutil.which("nice"):
+    if not (known.no_nice or known.full) and shutil.which("nice"):
         # The whole point on a busy machine: the tests take the cores
         # nobody else wants, and give them back the instant anyone does.
         command += ["nice", "-n", "19"]
