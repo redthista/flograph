@@ -44,6 +44,16 @@ follow, then shrink back as you return.
 Hold **Q** over the canvas to float every port's name for as long as you
 hold it.
 
+Select a node and its own wires come forward — full strength and a little
+thicker — while every other wire steps back, so what feeds it and what it
+feeds can be read at a glance. With nothing selected, wires are drawn
+quietly, so the nodes read first.
+
+Zoom far out and nodes are drawn as plain blocks to keep a big flow fast;
+cards large enough to read still show their name in a header strip, and
+frames show their titles at a readable size, so the whole flow still says
+what each part is.
+
 ## Nodes
 
 A node that is only a step in the pipeline draws as a fixed **60×60 square** —
@@ -108,11 +118,13 @@ the next node is reading it the table still has to exist.
 ## Light and dark
 
 **Settings ▸ General ▸ Appearance ▸ Theme** switches the whole window between
-**Dark** (the default), **Light** and **Follow the system**, live. The canvas
-changes with it: in light mode it is a soft neutral grey with white nodes, each
-with a clear grey edge and a soft shadow, so a node stands out from the page
-instead of blending into it, and each panel is its own white card under a dark
-grey title bar. Wire colours, status lights, frames and the minimap are all
+**Dark** (the default), **Light**, **Dark Slate**, **Light Steel** and
+**Follow the system**, live, without re-running anything. The canvas changes
+with it: in Light it is a cool slate grey with white nodes, each with a clear
+edge and a soft shadow, so a node stands out from the page instead of blending
+into it, and each panel is its own white card under a light title bar. Dark
+Slate is the same design in navy. A chart still on Plotly's own default look
+is drawn dark on a dark theme's cards; a chart you styled keeps its look. Wire colours, status lights, frames and the minimap are all
 re-tuned for the lighter ground. A colour you pick for a node, frame or page is
 yours and stays as you set it.
 
@@ -146,9 +158,14 @@ on the right, the Inspector along the bottom) are separated from it by a thin
 line. Drag that line to resize a side. Drag it nearly to the edge of the
 window and let go, and that whole side folds away; a thin bar is left at the
 window's edge in its place. Drag the bar back out, or double-click it, to
-bring the side back. Double-clicking the line folds a side away too, and
+bring the side back (it lights up under the mouse). Double-clicking the line
+folds a side away too, and
 **Ctrl+Shift+H** folds away every side at once. A panel's own **×** still
-closes just that panel.
+closes just that panel; for panels sharing a spot as tabs, right-click a tab
+to float or close that panel.
+
+With nothing selected the Inspector says how the last run went; click a
+node's name in the Log to jump to that node.
 
 ## Frames
 
