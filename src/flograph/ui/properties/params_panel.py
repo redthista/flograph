@@ -454,6 +454,13 @@ class ParamsPanel(QWidget):
         # anything half-typed belongs to the node being left, so it has to
         # land before _node_id moves
         self.flush_pending()
+        # flograph issue #112: a search belongs to the node it was typed
+        # for. Clear it on picking another node, without letting its
+        # textChanged filter the old node's rows on the way out.
+        if node_id != self._node_id and self.search.text():
+            self.search.blockSignals(True)
+            self.search.clear()
+            self.search.blockSignals(False)
         self._node_id = node_id
         self._rebuild()
 

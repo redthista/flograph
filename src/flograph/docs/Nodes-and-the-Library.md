@@ -24,8 +24,8 @@ version.
   it there folds the section.
 - **Search.** Type in **Search properties** (**Ctrl+F** in the panel) to
   show only the settings that match — by label, by the setting's own name,
-  by its hint, its choices or its section. The search stays as you select
-  other nodes, so one setting can be compared across several.
+  by its hint, its choices or its section. Picking another node clears
+  the search, so its settings all show.
 - **Changed.** A setting you've changed from its default has a **bold**
   label, and a section's heading counts them. The **Changed** button shows
   only those — "what did I set on this chart?"

@@ -289,12 +289,23 @@ class TestSearch:
         again, *_ = _panel(qtbot)
         assert not again._sections["Legend"].isExpanded()
 
-    def test_the_search_survives_selecting_another_node(self, qtbot):
+    def test_picking_another_node_clears_the_search(self, qtbot):
+        # flograph issue #112 — it used to carry over, which hid rows on
+        # the next node for a search typed on the last one
         panel, graph, node, _ = _panel(qtbot)
         other = make_node(SOURCE, "test.sectioned")
         graph.add_node(other)
         panel.search.setText("bins")
         panel.set_node(other.id)
+        assert panel.search.text() == ""
+        assert "Bins" in self._visible(panel)
+        assert len(self._visible(panel)) > 1
+
+    def test_re_showing_the_same_node_keeps_the_search(self, qtbot):
+        panel, graph, node, _ = _panel(qtbot)
+        panel.search.setText("bins")
+        panel.set_node(node.id)
+        assert panel.search.text() == "bins"
         assert self._visible(panel) == ["Bins"]
 
     def test_ctrl_f_focuses_the_search(self, qtbot):
