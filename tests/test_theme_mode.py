@@ -355,3 +355,44 @@ class TestViewThemeMenu:
         window._fill_theme_menu()
         assert [a.text() for a in window._theme_menu.actions()
                 if a.isCheckable() and a.isChecked()] == ["Light Steel"]
+
+
+class TestThemeIsCosmetic:
+    """Switching theme is purely cosmetic: it never marks a node out of
+    date, never starts a run, never touches a node's settings or its cached
+    output, and leaves nothing on the undo stack (UI redesign #109)."""
+
+    def test_switching_themes_changes_no_project_data(
+            self, window, qtbot, tmp_path):
+        import json
+        import shutil
+        from pathlib import Path
+
+        import flograph
+        src = (Path(flograph.__file__).parent / "templates"
+               / "04_join_groupby_compare.flograph")
+        copy = tmp_path / src.name
+        shutil.copy(src, copy)
+        assert window.open_path(str(copy), confirm=False)
+        with qtbot.waitSignal(window.engine.run_finished, timeout=20000):
+            window.engine.run_all()
+
+        graph = window.graph
+
+        def snapshot():
+            return {nid: (node.dirty, json.dumps(node.params, sort_keys=True,
+                                                 default=str),
+                          window.engine.cache.get(nid) is not None)
+                    for nid, node in graph.nodes.items()}
+
+        before = snapshot()
+        undo_index = window.undo_stack.index()
+        runs = []
+        window.engine.run_started.connect(lambda: runs.append(1))
+        for pref in ("light", "dark_slate", "light_steel", "dark",
+                     "system", "light", "dark"):
+            window.set_theme_pref(pref)
+            qtbot.wait(5)
+        assert snapshot() == before
+        assert window.undo_stack.index() == undo_index
+        assert runs == []

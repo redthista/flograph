@@ -47,6 +47,14 @@ def is_tile_able(node) -> bool:
     """Whether a node can be placed on a dashboard page as a tile."""
     return card_kind(node) in TILE_ABLE_KINDS
 
+
+def _stale_colour(updating: bool) -> QColor:
+    """UPDATING in the theme's "running" blue, STALE in its "inputs moved"
+    amber -- read at paint time, so a theme switch reaches them and a light
+    theme gets an amber dark enough to read on a white tile."""
+    return (theme.color("status", "running") if updating
+            else theme.color("canvas", "PIN_STALE"))
+
 class MaximizedReport(QTextBrowser):
     """A report tile blown up to fill the page.
 
@@ -1648,8 +1656,7 @@ class TileItem(QGraphicsObject):
             # amber for "you changed something and nothing is coming", the
             # calmer blue for "it is being recomputed" — one is a prompt to
             # act, the other a reason not to
-            painter.setPen(QPen(QColor("#60a5fa") if updating
-                                else QColor("#eab308")))
+            painter.setPen(QPen(_stale_colour(updating)))
             small = painter.font()
             small.setBold(True)
             small.setPointSizeF(7.5)
@@ -1681,8 +1688,7 @@ class TileItem(QGraphicsObject):
         painter.setPen(Qt.NoPen)
         painter.setBrush(ground)
         painter.drawRoundedRect(rect, 7.0, 7.0)
-        painter.setPen(QPen(QColor("#60a5fa") if updating
-                            else QColor("#eab308")))
+        painter.setPen(QPen(_stale_colour(updating)))
         painter.drawText(rect, Qt.AlignCenter, word)
         painter.restore()
 

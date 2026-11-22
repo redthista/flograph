@@ -16,6 +16,7 @@ once first, because one lost to a momentary squeeze comes back."""
 from __future__ import annotations
 
 import uuid
+import weakref
 
 from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
@@ -34,6 +35,76 @@ LOAD_FAILED = ("This view's page did not load. The HTML is written to a temp "
 RENDERER_GONE = ("Qt WebEngine gave up on this view: {why}. It was reloaded "
                  "once and went again. A very large chart or a machine short "
                  "of memory are the usual causes.")
+
+#: Plotly's own default look: white paper, a pale blue-grey plot area. A
+#: figure still wearing it was never styled by its node -- no template
+#: chosen, no chart rules, no Plotly Style -- so it is the one kind a card
+#: may re-dress for a dark theme (see `themed_for_display`).
+_PLOTLY_DEFAULT_PAPER = "white"
+_PLOTLY_DEFAULT_PLOT = "#E5ECF6"
+
+
+def _wears_default_look(fig) -> bool:
+    layout = getattr(fig, "layout", None)
+    if layout is None or not hasattr(fig, "update_layout"):
+        return False
+    try:
+        if (layout.paper_bgcolor is not None
+                or layout.plot_bgcolor is not None
+                or layout.font.color is not None):
+            return False                 # the node chose its own colours
+        base = layout.template.layout
+        return (str(base.paper_bgcolor) == _PLOTLY_DEFAULT_PAPER
+                and str(base.plot_bgcolor).upper() == _PLOTLY_DEFAULT_PLOT)
+    except Exception:                    # not a plotly figure after all
+        return False
+
+
+def themed_for_display(content):
+    """`content` as a card should draw it under the current theme.
+
+    Display only, never the node's output: in a dark theme, a Plotly figure
+    on Plotly's default look is drawn from a *copy* re-dressed in
+    ``plotly_dark`` on the card's own colour, so it is not a white sheet in a
+    dark window. Everything else -- an explicit template, chart rules, a
+    Plotly Style, raw HTML, a light theme -- is handed back untouched. The
+    cached figure, Open in Browser, reports and exports keep the node's own
+    look, and nothing here can make a node run again.
+    """
+    if not _theme.is_dark():
+        return content
+    if isinstance(content, (list, tuple)):
+        themed = [themed_for_display(item) for item in content]
+        return content if all(a is b for a, b in zip(themed, content)) \
+            else type(content)(themed)
+    if not _wears_default_look(content):
+        return content
+    import plotly.graph_objects as go
+    import plotly.io as pio
+    card = _theme.color("canvas", "NODE_BODY").name()
+    copy = go.Figure(content)
+    for name in ("_flograph_config", "_flograph_post_script"):
+        if hasattr(content, name):
+            setattr(copy, name, getattr(content, name))
+    copy.update_layout(template=pio.templates["plotly_dark"],
+                       paper_bgcolor=card, plot_bgcolor=card)
+    return copy
+
+
+#: every live view, so a theme switch can re-dress what they show
+_VIEWS: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def _on_theme_changed() -> None:
+    for view in list(_VIEWS):
+        try:
+            view.restyle()
+        except RuntimeError:             # its C++ side is already gone
+            pass
+
+
+_theme.on_change(_on_theme_changed)
+
 
 #: Chromium's word for why a page's process went away, keyed by
 #: QWebEnginePage.RenderProcessTerminationStatus. Plain ints, so the message
@@ -104,6 +175,10 @@ class PlotlyView(QWidget):
         # core.chart_grid. The host sets it from the node's own params.
         self._grid = (0, 0, DEFAULT_DIRECTION)
         self._content = None   # last content, so set_grid can re-render
+        # whether what is shown was re-dressed for the theme, so a switch
+        # re-renders only views whose look depends on it
+        self._themed = False
+        _VIEWS.add(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -189,7 +264,9 @@ class PlotlyView(QWidget):
         — a raw HTML string, or any object with to_html()/_repr_html_(). Call
         from the GUI thread only."""
         self._content = content
-        html = to_html(content, *self._grid)
+        shown = themed_for_display(content)
+        self._themed = shown is not content
+        html = to_html(shown, *self._grid)
         if html is None:
             if self.view is not None:
                 # Drop the renderer, not just the page. A renderer's heap
@@ -216,6 +293,16 @@ class PlotlyView(QWidget):
         view.load(QUrl.fromLocalFile(str(path)))
         self.placeholder.hide()
         view.show()
+
+    def restyle(self) -> None:
+        """The theme changed: re-render, but only a figure whose look comes
+        from the theme (one on Plotly's default) -- reloading every web view
+        on a switch would be slow for nothing."""
+        if self._content is None:
+            return
+        if self._themed or themed_for_display(self._content) \
+                is not self._content:
+            self.set_content(self._content)
 
     def _drop_view(self) -> None:
         """Take the webview out and let it go."""

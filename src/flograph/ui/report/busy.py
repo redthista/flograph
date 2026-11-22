@@ -12,7 +12,7 @@ from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
-from ..theme import BUTTON_ACCENT
+from .. import theme
 
 STRIPE_PX = 3
 #: how far along the stripe the moving segment gets per frame, as a
@@ -72,12 +72,12 @@ class BusyOverlay(QWidget):
         width = self.width()
 
         # the stripe: a faint track, and a segment sliding along it
-        track = QColor(BUTTON_ACCENT)
+        track = QColor(theme.BUTTON_ACCENT)
         track.setAlpha(60)
         painter.fillRect(QRectF(0, 0, width, STRIPE_PX), track)
         segment = width * 0.3
         left = -segment + (width + segment) * self._phase
-        painter.fillRect(QRectF(left, 0, segment, STRIPE_PX), BUTTON_ACCENT)
+        painter.fillRect(QRectF(left, 0, segment, STRIPE_PX), theme.BUTTON_ACCENT)
 
         # the words, on a pill so they read over paper or desk alike
         metrics = self.fontMetrics()
