@@ -168,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"flow output {output_name!r} {reason}", file=sys.stderr)
             return 1
         output_node_id = matches[0]
-        if not always_run:
+        # A saved value is only as current as what fed it: a NODE
+        # ["always_run"] node upstream (a Watch Folder) reads the outside
+        # world, so the saved copy may already be out of date.
+        reads_outside = any(graph.nodes[nid].spec.always_run
+                            for nid in graph.upstream(output_node_id))
+        if not always_run and not reads_outside:
             from .cache_persistence import load_cached_outputs
             cached = load_cached_outputs(graph, project, output_node_id)
             if cached is not None and "value" in cached:

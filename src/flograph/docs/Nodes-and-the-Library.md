@@ -50,7 +50,8 @@ through one node: pick the **Format** (or leave it *auto*) and the **Engine**
 run at once). The single-format Read nodes are still there, as are Write
 CSV/Excel/Parquet/JSON/SQLite and **Write Text**, and **Save Report** writes
 a report page to HTML or PDF whenever the flow runs. **Read … (Folder)** reads a
-directory as one stacked table; **Read PDF** turns documents into a table,
+directory as one stacked table; **Watch Folder** hands on only the files
+that arrived since its last run, and can wait for one to turn up; **Read PDF** turns documents into a table,
 one row per page. **Table** is a real spreadsheet you edit on the canvas,
 with formulas, an Excel-style ribbon, dropdown lists, freeze panes and edits
 held until you Submit — see [[The Table Spreadsheet]].

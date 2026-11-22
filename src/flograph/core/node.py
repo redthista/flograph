@@ -53,6 +53,12 @@ class NodeSpec:
     # reaching a resource that tolerates one user at a time. Like `card`, it
     # lives in `source`, so forking or saving the node keeps it.
     exclusive: bool = False
+    # declared by NODE["always_run"]: what this node reads is outside the
+    # flow (a folder on disk), so nothing in the graph says when it changed.
+    # Every run dirties it first -- and with it everything downstream -- the
+    # way an edit would. A pin (Freeze) still wins. See
+    # engine.scheduler.touch_always_run.
+    always_run: bool = False
     # declared by NODE["reads_report"]: the name of this node's `page_ref`
     # param, whose report page the node renders. Every node that page embeds
     # becomes a derived dependency of this one (see core.reportlinks), so it

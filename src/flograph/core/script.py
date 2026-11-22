@@ -8,6 +8,7 @@ A node is a Python module-shaped text that declares:
         "inputs":  [("table", "dataframe")],            # (name, type[, opts])
         "outputs": [("filtered", "dataframe")],
         # "exclusive": True,        # run with nothing else in flight
+        # "always_run": True,       # re-run every run: reads the outside world
         # "version": "2.0",         # bump when params or behaviour change
     }
     PARAMS = [  # optional
@@ -338,6 +339,10 @@ def _spec_from(namespace: dict, source: str, type_id: str,
     if not isinstance(exclusive, bool):
         raise NodeScriptError("NODE['exclusive'] must be True or False")
 
+    always_run = node_decl.get("always_run", False)
+    if not isinstance(always_run, bool):
+        raise NodeScriptError("NODE['always_run'] must be True or False")
+
     interactive = node_decl.get("interactive", False)
     if not isinstance(interactive, bool):
         raise NodeScriptError("NODE['interactive'] must be True or False")
@@ -433,6 +438,7 @@ def _spec_from(namespace: dict, source: str, type_id: str,
         card=card,
         control=control,
         exclusive=exclusive,
+        always_run=always_run,
         interactive=interactive,
         reads_report=reads_report,
         version=version,

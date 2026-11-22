@@ -20,6 +20,13 @@ python -m flograph run project.flograph             # equivalent
   node declares, so one flow runs per region or per date with nothing edited
   in between. A name the flow does not declare is **refused**, not ignored.
 
+**Watching a folder.** Nothing in the app starts a run on its own, so to
+pick up new files unattended, schedule `flograph run` (cron, Task Scheduler)
+on a flow that starts with a **Watch Folder** node. Each run hands on only
+the files that arrived since the last one. Its seen list lives in flograph's
+user folder, so the scheduled runs and the app agree on what has been seen —
+or name a **Seen list** file to share one explicitly.
+
 `flograph` with no `run` subcommand — or with a path, `--version`, or nothing
 — opens the GUI exactly as before.
 

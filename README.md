@@ -355,7 +355,9 @@ tables into one workbook, a sheet each, with an optional summary tab. **Save Rep
 HTML or PDF each time the flow runs, after everything the page shows;
 drag a file onto the canvas to get the right reader already configured. **Read
 CSV/Excel/Parquet (Folder)** reads a whole directory as one stacked table, and
-**Read CSV (Folder → Dict)** hands back one table per file. **Read PDF** and
+**Read CSV (Folder → Dict)** hands back one table per file. **Watch Folder**
+hands on only the files that turned up since it last ran — checked afresh
+every run — and can hold the run until one arrives. **Read PDF** and
 **Read PDF (Folder)** turn documents into a table — one row per page, with the
 text, so Filter Rows and Group By work on a stack of invoices the way they
 work on a CSV, plus a second output listing each document's metadata and

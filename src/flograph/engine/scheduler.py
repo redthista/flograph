@@ -366,6 +366,43 @@ class RunFlags:
         return bool(node and node.manual) or node_id in self.held
 
 
+def touch_always_run(graph: Graph, targets: Iterable[str],
+                     cache: "Optional[OutputCache]" = None,
+                     asked: "Optional[Iterable[str]]" = None,
+                     flags: "Optional[RunFlags]" = None) -> list[str]:
+    """Dirty each `NODE["always_run"]` node this run would reach, so it and
+    everything below it run again. Returns the ids it dirtied.
+
+    Such a node reads something outside the flow -- a folder on disk -- so
+    nothing in the graph can say it changed, and a clean one would otherwise
+    hand back the cached list from its last run forever. It is dirtied the
+    way an edit dirties a node, before the plan is built, because build_plan
+    is a pure question about the graph and the readers below it have to be
+    dirty too. The nodes a run leaves out stay left out: a deactivated or
+    bypassed one, a manual one nobody aimed at, and a frozen one with a value
+    to serve -- a pin that a run could knock loose would not be a pin.
+    """
+    flags = flags if flags is not None else RunFlags(graph)
+    aimed = _aimed_at(targets, asked)
+    wanted = set(targets)
+    for target in list(wanted):
+        wanted |= graph.upstream(target)
+    touched = []
+    for node_id in graph.topo_order():
+        node = graph.nodes[node_id]
+        if node_id not in wanted or not node.spec.always_run or node.dirty:
+            continue
+        if not flags.active(node_id) or node.bypassed:
+            continue
+        if flags.manual(node_id) and node_id not in aimed:
+            continue
+        if node.frozen and cache is not None and cache.has(node_id):
+            continue
+        graph.mark_dirty(node_id)
+        touched.append(node_id)
+    return touched
+
+
 def build_plan(graph: Graph, targets: Iterable[str],
                cache: "Optional[OutputCache]" = None,
                asked: "Optional[Iterable[str]]" = None,
@@ -704,6 +741,7 @@ class ExecutionEngine(QObject):
             return
         self._token = CancellationToken()
         flags = self.run_flags()
+        touch_always_run(self.graph, targets, self.cache, asked, flags)
         plan = build_plan(self.graph, targets, self.cache, asked, flags)
         self._run_aimed = _aimed_at(targets, asked)
         self._plan_total = len(plan)

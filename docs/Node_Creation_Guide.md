@@ -131,6 +131,7 @@ NODE = {
     "outputs": [("filtered", "dataframe"), ("rejected", "dataframe")],
     # optional:
     "exclusive": False,            # bool — run with nothing else in flight
+    "always_run": False,           # bool — re-run every run (reads the outside world)
     "card": None,                  # rich canvas card, see §8
     "control": None,               # only when card == "control", see §9
 }
@@ -144,6 +145,7 @@ NODE = {
 | `inputs` | list of tuples | no (default `[]`) | see §4 |
 | `outputs` | list of tuples | no (default `[]`) | see §4 |
 | `exclusive` | `bool` | no (default `False`) | see §6 |
+| `always_run` | `bool` | no (default `False`) | every run re-runs the node, and so everything below it, even when nothing in the flow changed. For a node whose result depends on the world outside the flow — `io/watch_folder.py` reads a folder. A frozen node stays frozen. Costs every downstream cache, so leave it off when the user can re-run by hand |
 | `bypass` | `False` or `dict` | no | what the node passes on while bypassed — `{"output": "input" or None}`; unnamed outputs match an input by name, then by type. `False` = cannot be bypassed |
 | `card` | `str` from `CARD_KINDS` | no | see §8 |
 | `control` | `str` from `CONTROL_KINDS` | no | **required** iff `card == "control"` |
