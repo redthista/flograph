@@ -5,6 +5,7 @@
 | Category | Change | Details |
 | --- | --- | --- |
 | Feature | **Missing Values can count blank text** | A new **Blank text is missing** tickbox treats empty and spaces-only text cells as missing, so they are dropped or filled along with NaN by whichever strategy is chosen. Off by default, so saved flows are unchanged. Missing Values 1.1 (#130). |
+| Fix | **`flograph run` no longer crashes on the way out** | About one headless run in two thousand under load segfaulted after the flow had finished, exiting -11 for a run that worked — from the command line, `flograph.run()` and Run Flow's child process alike. The runner now shuts Qt down itself before Python exits (#129). |
 
 ## 0.1.31
 

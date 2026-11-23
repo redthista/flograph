@@ -132,6 +132,41 @@ def apply_overrides(graph, overrides: dict[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Only an app this call made is ours to tear down: flograph.run() inside
+    # a program that already has a QCoreApplication must leave it alone.
+    owns_app = QCoreApplication.instance() is None
+    try:
+        return _run(argv)
+    finally:
+        if owns_app:
+            _shut_down_qt()
+
+
+def _shut_down_qt() -> None:
+    """Destroy the QCoreApplication now, while Python is still whole.
+
+    Left to itself, PySide destroys the app from an atexit hook during
+    interpreter shutdown, walking every live Qt wrapper on the way. Now and
+    then (about 1 run in 2000 under load) one of those wrappers points at a
+    C++ object that has already gone, and the process segfaults after the
+    flow has finished: exit code -11 for a run that worked (flograph issue
+    #129). Waiting for the pool, collecting, and deleting the app here
+    leaves that hook nothing to walk.
+    """
+    import gc
+
+    import shiboken6
+    from PySide6.QtCore import QThreadPool
+
+    app = QCoreApplication.instance()
+    if app is None:
+        return
+    QThreadPool.globalInstance().waitForDone()
+    gc.collect()
+    shiboken6.delete(app)
+
+
+def _run(argv: list[str] | None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if any(a in ("-h", "--help") for a in argv):
         print(__doc__.strip())
