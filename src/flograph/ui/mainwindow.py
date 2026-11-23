@@ -11,7 +11,8 @@ from PySide6.QtCore import (
     QEventLoop, QPoint, QPointF, QRectF, QSettings, Qt, QThreadPool, QTimer, QUrl,
 )
 from PySide6.QtGui import (
-    QAction, QActionGroup, QColor, QDesktopServices, QKeySequence, QUndoStack,
+    QAction, QActionGroup, QColor, QCursor, QDesktopServices, QKeySequence,
+    QUndoStack,
 )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
@@ -891,7 +892,9 @@ class MainWindow(QMainWindow):
         self.action_copy = act("Copy", QKeySequence.Copy,
                                lambda: self._smart_edit("copy", self._copy_selection))
         self.action_paste = act("Paste", QKeySequence.Paste,
-                                lambda: self._smart_edit("paste", self._paste))
+                                lambda: self._smart_edit(
+                                    "paste", lambda: self._paste(
+                                        self._cursor_scene_pos())))
         self.action_duplicate = act("Duplicate", QKeySequence("Ctrl+D"),
                                     self._duplicate)
         self.action_rename = act("Rename Node", Qt.Key_F2, self._rename_selected)
@@ -6281,10 +6284,43 @@ class MainWindow(QMainWindow):
         paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
         return [p for p in paths if resolve_dropped_path(p)]
 
+    def _cursor_scene_pos(self) -> Optional[QPointF]:
+        """Where the mouse is on the canvas, or None when it is elsewhere —
+        over a dock, a menu, another window — and a paste should fall back
+        to landing beside what was copied."""
+        viewport = self.view.viewport()
+        if not self.view.isVisible():
+            return None
+        local = viewport.mapFromGlobal(QCursor.pos())
+        if not viewport.rect().contains(local):
+            return None
+        return self.view.mapToScene(local)
+
+    @staticmethod
+    def _payload_corner(payload: dict) -> Optional[tuple[float, float]]:
+        """Top-left of everything a clipboard payload holds."""
+        corners = [tuple(n.get("pos", (0.0, 0.0))[:2])
+                   for n in payload.get("nodes", [])]
+        corners += [tuple(e.get("rect", (0.0, 0.0))[:2])
+                    for kind in ("frames", "shapes")
+                    for e in payload.get(kind, [])]
+        if not corners:
+            return None
+        return (min(c[0] for c in corners), min(c[1] for c in corners))
+
     def _paste(self, scene_pos: Optional[QPointF] = None) -> None:
         payload = self._clipboard_payload()
         if payload is not None:
-            self._insert_payload(payload)
+            # given a place (the mouse, or where the palette was opened) the
+            # copy's top-left corner lands there; without one it is nudged
+            # clear of what it was copied from
+            offset = None
+            corner = (self._payload_corner(payload)
+                      if scene_pos is not None else None)
+            if corner is not None:
+                offset = (scene_pos.x() - corner[0],
+                          scene_pos.y() - corner[1])
+            self._insert_payload(payload, offset=offset)
             return
         # Only once nothing of ours is on the clipboard, so copying nodes and
         # then pasting never turns into an unexpected picture.

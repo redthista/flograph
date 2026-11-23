@@ -491,3 +491,39 @@ class TestCopyPaste:
         window._palette_extra_chosen("paste")
 
         assert len(window.graph.nodes) == 3
+        pasted = next(n for n in window.graph.nodes.values()
+                      if n.id not in (const.id, _script.id))
+        assert pasted.pos == (400.0, 300.0)
+
+    def test_ctrl_v_pastes_at_the_mouse(self, window, monkeypatch):
+        """The copy's top-left corner lands under the cursor, keeping the
+        group's own layout."""
+        from PySide6.QtCore import QPointF
+        const, script = build_small_project(window)
+        for item in window.scene.node_items.values():
+            item.setSelected(True)
+        window._copy_selection()
+        corner = (min(const.pos[0], script.pos[0]),
+                  min(const.pos[1], script.pos[1]))
+        monkeypatch.setattr(window, "_cursor_scene_pos",
+                            lambda: QPointF(1000, 800))
+
+        window.action_paste.trigger()
+
+        pasted = [n for n in window.graph.nodes.values()
+                  if n.id not in (const.id, script.id)]
+        assert sorted(n.pos for n in pasted) == sorted(
+            (p[0] - corner[0] + 1000, p[1] - corner[1] + 800)
+            for p in (const.pos, script.pos))
+
+    def test_ctrl_v_off_the_canvas_nudges(self, window, monkeypatch):
+        const, script = build_small_project(window)
+        window.scene.node_items[const.id].setSelected(True)
+        window._copy_selection()
+        monkeypatch.setattr(window, "_cursor_scene_pos", lambda: None)
+
+        window.action_paste.trigger()
+
+        pasted = next(n for n in window.graph.nodes.values()
+                      if n.id not in (const.id, script.id))
+        assert pasted.pos == (const.pos[0] + 30, const.pos[1] + 30)
