@@ -516,6 +516,41 @@ class TestCopyPaste:
             (p[0] - corner[0] + 1000, p[1] - corner[1] + 800)
             for p in (const.pos, script.pos))
 
+    @pytest.mark.parametrize("cursor", [None, (1000.0, 800.0)])
+    def test_repeated_pastes_fan_out(self, window, monkeypatch, cursor):
+        """Ctrl+V three times without moving: each copy steps down and right
+        of the one before rather than stacking on it."""
+        from PySide6.QtCore import QPointF
+        const, script = build_small_project(window)
+        window.scene.node_items[const.id].setSelected(True)
+        window._copy_selection()
+        monkeypatch.setattr(window, "_cursor_scene_pos",
+                            lambda: cursor and QPointF(*cursor))
+        before = set(window.graph.nodes)
+        positions = []
+        for _ in range(3):
+            window.action_paste.trigger()
+            (new,) = set(window.graph.nodes) - before
+            before.add(new)
+            positions.append(window.graph.nodes[new].pos)
+        x0, y0 = cursor or (const.pos[0] + 30, const.pos[1] + 30)
+        assert positions == [(x0, y0), (x0 + 30, y0 + 30),
+                             (x0 + 60, y0 + 60)]
+
+    def test_moving_the_mouse_starts_a_fresh_run(self, window, monkeypatch):
+        from PySide6.QtCore import QPointF
+        const, script = build_small_project(window)
+        window.scene.node_items[const.id].setSelected(True)
+        window._copy_selection()
+        spot = [QPointF(1000, 800)]
+        monkeypatch.setattr(window, "_cursor_scene_pos", lambda: spot[0])
+        window.action_paste.trigger()
+        spot[0] = QPointF(200, 100)
+        before = set(window.graph.nodes)
+        window.action_paste.trigger()
+        (new,) = set(window.graph.nodes) - before
+        assert window.graph.nodes[new].pos == (200.0, 100.0)
+
     def test_ctrl_v_off_the_canvas_nudges(self, window, monkeypatch):
         const, script = build_small_project(window)
         window.scene.node_items[const.id].setSelected(True)

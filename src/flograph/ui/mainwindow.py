@@ -6314,13 +6314,22 @@ class MainWindow(QMainWindow):
             # given a place (the mouse, or where the palette was opened) the
             # copy's top-left corner lands there; without one it is nudged
             # clear of what it was copied from
-            offset = None
-            corner = (self._payload_corner(payload)
-                      if scene_pos is not None else None)
-            if corner is not None:
-                offset = (scene_pos.x() - corner[0],
-                          scene_pos.y() - corner[1])
-            self._insert_payload(payload, offset=offset)
+            corner = self._payload_corner(payload) or (0.0, 0.0)
+            if scene_pos is None:
+                base = (PASTE_OFFSET, PASTE_OFFSET)
+                anchor = None
+            else:
+                base = (scene_pos.x() - corner[0], scene_pos.y() - corner[1])
+                anchor = (round(scene_pos.x() / 4), round(scene_pos.y() / 4))
+            # pasting the same thing to the same spot again steps each copy
+            # down and right, so a run of pastes fans out instead of stacking
+            key = (QApplication.clipboard().text(), anchor)
+            last = getattr(self, "_last_paste", None)
+            repeat = last[1] + 1 if last is not None and last[0] == key else 0
+            self._last_paste = (key, repeat)
+            step = repeat * PASTE_OFFSET
+            self._insert_payload(payload,
+                                 offset=(base[0] + step, base[1] + step))
             return
         # Only once nothing of ours is on the clipboard, so copying nodes and
         # then pasting never turns into an unexpected picture.
