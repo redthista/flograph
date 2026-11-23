@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | **Missing Values can count blank text** | A new **Blank text is missing** tickbox treats empty and spaces-only text cells as missing, so they are dropped or filled along with NaN by whichever strategy is chosen. Off by default, so saved flows are unchanged. Missing Values 1.1 (#130). |
 
 ## 0.1.31
 

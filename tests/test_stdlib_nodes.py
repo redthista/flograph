@@ -211,6 +211,20 @@ class TestEtlNodes:
         assert out["a"].iloc[1] == 2.0
         assert out["b"].isna().iloc[0]  # untouched
 
+    def test_missing_values_blank_text_counts_when_ticked(self, registry):
+        t = pd.DataFrame({"a": ["x", "", "  ", None, "y"], "n": [1, 2, 3, 4, 5]})
+        off = run_node(registry, "flograph.transform.missing_values",
+                       {"strategy": "fill value", "fill_value": "?"}, table=t)
+        assert list(off["a"]) == ["x", "", "  ", "?", "y"]
+        on = run_node(registry, "flograph.transform.missing_values",
+                      {"strategy": "fill value", "fill_value": "?",
+                       "blank_as_missing": True}, table=t)
+        assert list(on["a"]) == ["x", "?", "?", "?", "y"]
+        dropped = run_node(registry, "flograph.transform.missing_values",
+                           {"blank_as_missing": True}, table=t)
+        assert list(dropped["n"]) == [1, 5]
+        assert list(t["a"].fillna("NA")) == ["x", "", "  ", "NA", "y"]  # input untouched
+
     def test_missing_values_mean_needs_numeric(self, registry):
         with pytest.raises(ValueError, match="numeric"):
             run_node(registry, "flograph.transform.missing_values",
