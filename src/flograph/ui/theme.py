@@ -457,6 +457,13 @@ def _app_stylesheet(c: dict) -> str:
         QTabBar::tab {{ background: {c['tab']}; padding: 5px 12px; border: none; }}
         QTabBar::tab:selected {{ background: {c['tab_selected']}; }}
         QStatusBar {{ background: {c['statusbar']}; }}
+        /* a panel's tab row on a strip of its own colour, so the tabs read
+           apart from the panel beneath them: docks grouped as tabs, and tab
+           widgets inside a dock */
+        QMainWindow > QTabBar, QDockWidget QTabBar {{
+            background: {c['tab_bar']}; }}
+        QMainWindow > QTabBar::tab:!selected,
+        QDockWidget QTabBar::tab:!selected {{ background: transparent; }}
     """
 
 

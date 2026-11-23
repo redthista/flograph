@@ -37,6 +37,7 @@ disabled_button = "#24262b"
 dock_title = "#2a2c33"
 tab = "#24262b"
 tab_selected = "#33363e"
+tab_bar = "#2a2c33"            # the strip a dock's tabs sit on
 statusbar = "#202226"
 line = "#24262b"              # hairlines between areas
 accent_line = "#60a5fa"       # the selected tab's underline

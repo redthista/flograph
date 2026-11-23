@@ -146,6 +146,7 @@ The window palette, handed to Qt. Everything that does not write its own colours
 | `dock_title` | `#2a2c33` | Dock title strip (Properties, Log, Library …). With panel_borders on, panel_title wins instead. |
 | `tab` | `#24262b` | Unselected tab background (page tabs, dock tab groups). |
 | `tab_selected` | `#33363e` | Selected tab background. |
+| `tab_bar` | `#2a2c33` | The strip a panel's tabs sit on (Properties \| Code \| Log, the Inspector's port tabs), so the tab row reads apart from the panel beneath it. |
 | `statusbar` | `#202226` | Status bar at the bottom of the window. |
 | `line` | `#24262b` | Hairline rules — dock title underline, status bar top rule, menu separators, dock gaps. Only drawn when style.flat_controls is on. |
 | `accent_line` | `#60a5fa` | Underline under the selected tab. Only when style.flat_controls is on. |

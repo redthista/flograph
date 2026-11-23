@@ -36,6 +36,7 @@ ui.disabled_button: Fill of disabled buttons, and the selection colour of disabl
 ui.dock_title: Dock title strip (Properties, Log, Library …). With panel_borders on, panel_title wins instead.
 ui.tab: Unselected tab background (page tabs, dock tab groups).
 ui.tab_selected: Selected tab background.
+ui.tab_bar: The strip a panel's tabs sit on (Properties | Code | Log, the Inspector's port tabs), so the tab row reads apart from the panel beneath it.
 ui.statusbar: Status bar at the bottom of the window.
 ui.line: Hairline rules — dock title underline, status bar top rule, menu separators, dock gaps. Only drawn when style.flat_controls is on.
 ui.accent_line: Underline under the selected tab. Only when style.flat_controls is on.
