@@ -1858,7 +1858,7 @@ class NodeItem(QGraphicsObject):
         # editable — the way to read a formula without opening the cell
         from ..spreadsheet import FormulaBar
         formula_bar = FormulaBar(grid)
-        _theme.set_qss(formula_bar, formula_bar.styleSheet()
+        _theme.set_qss(formula_bar, _theme.qss_source(formula_bar)
                                   + " QLabel, QLineEdit { font-size: 8pt; }")
         layout.addWidget(formula_bar)
         layout.addWidget(grid, 1)

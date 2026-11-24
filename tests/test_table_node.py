@@ -687,3 +687,24 @@ def test_dropdown_dialog_runs_helpers_and_fills_at_once(qtbot, env, registry):
     editor.model.set_column_choices(0, dialog.values(), False,
                                     dialog.source())
     assert editor.model.column_choices(0)[0] == ["1", "2"]
+
+
+def test_a_card_built_in_light_mode_goes_dark_with_the_theme(env, registry):
+    """The card's formula bar and frozen panes add to a stylesheet that is
+    already themed; built from the *themed* text, a card made in light mode
+    kept a white formula bar after a switch to dark."""
+    from PySide6.QtWidgets import QApplication
+    from flograph.ui import theme
+    app = QApplication.instance()
+    graph, stack, scene = env
+    try:
+        theme.apply_theme(app, "light")
+        node = graph.add_node(registry.instantiate("flograph.io.table"))
+        bar = scene.node_items[node.id]._table_formula_bar
+        light = bar.styleSheet()
+        theme.apply_theme(app, "dark")
+        assert "#25272e" in bar.styleSheet()
+        assert bar.styleSheet() != light
+        assert "font-size: 8pt" in bar.styleSheet()
+    finally:
+        theme.apply_theme(app, "dark")

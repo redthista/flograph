@@ -275,6 +275,21 @@ def set_qss(widget, qss) -> None:
     widget.setStyleSheet(skin(qss() if callable(qss) else qss))
 
 
+def qss_source(widget) -> str:
+    """The dark-theme stylesheet `widget` was given through `set_qss` — what
+    to build on when adding to or copying it. Never `widget.styleSheet()`:
+    that is already translated for the theme of the moment, and handing it
+    back to `set_qss` freezes those colours (a card built in light mode kept
+    a white formula bar in dark mode)."""
+    try:
+        qss = _skinned.get(widget)
+    except TypeError:
+        qss = None
+    if qss is None:
+        return widget.styleSheet()
+    return qss() if callable(qss) else qss
+
+
 def _restyle_skinned() -> None:
     for widget, qss in list(_skinned.items()):
         try:

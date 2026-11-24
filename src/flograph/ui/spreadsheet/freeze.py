@@ -65,7 +65,7 @@ class _Pane(QTableView):
         self.setSelectionBehavior(main.selectionBehavior())
         self.setEditTriggers(main.editTriggers())
         self.setShowGrid(main.showGrid())
-        _theme.set_qss(self, main.styleSheet())
+        _theme.set_qss(self, _theme.qss_source(main))
         self.verticalHeader().setDefaultSectionSize(
             main.verticalHeader().defaultSectionSize())
         self.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
